@@ -22,6 +22,7 @@
 #include <windows.h>
 #include <unknwn.h>
 #include <objbase.h>
+#include <winreg.h>
 #include <mmreg.h>
 #include <audioenginebaseapo.h>
 
@@ -50,7 +51,16 @@ static void DataPath(wchar_t* out, size_t n, const wchar_t* file) {
 }
 
 static bool Log(const char* fmt, ...) {
-    wchar_t path[MAX_PATH];
+    // Ensure the ProgramData folder and log file exist. OPEN_ALWAYS creates a missing file.
+    wchar_t dir[MAX_PATH], path[MAX_PATH];
+    DataPath(dir, MAX_PATH, L"");
+    // DataPath with an empty filename leaves a trailing separator; remove it for CreateDirectory.
+    size_t dirLen = wcslen(dir);
+    while (dirLen && (dir[dirLen - 1] == L'\\' || dir[dirLen - 1] == L'/')) dir[--dirLen] = L'\\0';
+    if (!CreateDirectoryW(dir, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        OutputDebugStringW(L"[MicBridge] unable to create ProgramData\\MicBridgeAPO directory\\n");
+        return false;
+    }
     DataPath(path, MAX_PATH, L"MicBridge.log");
     HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -72,6 +82,104 @@ static bool Log(const char* fmt, ...) {
     CloseHandle(h);
     OutputDebugStringA(line);
     return true;
+}
+
+// ---------------------------------------------------------------- فحص تشخيصي مبكر (قراءة فقط)
+static bool ReadRegString(HKEY root, const wchar_t* subKey, const wchar_t* valueName,
+                          wchar_t* out, DWORD chars) {
+    DWORD bytes = chars * sizeof(wchar_t), type = 0;
+    if (RegGetValueW(root, subKey, valueName, RRF_RT_REG_SZ, &type, out, &bytes) != ERROR_SUCCESS) {
+        if (chars) out[0] = L'\\0';
+        return false;
+    }
+    return true;
+}
+static bool ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* valueName, DWORD* value) {
+    DWORD bytes = sizeof(DWORD), type = 0;
+    return RegGetValueW(root, subKey, valueName, RRF_RT_REG_DWORD, &type, value, &bytes) == ERROR_SUCCESS;
+}
+static void RunStartupDiagnostics() {
+    wchar_t process[MAX_PATH] = L"<unknown>";
+    GetModuleFileNameW(nullptr, process, MAX_PATH);
+    Log("=== MicBridge diagnostic session start ===");
+    Log("Process image: %ls | PID=%lu", process, GetCurrentProcessId());
+
+    wchar_t dllPath[MAX_PATH] = L"<module unavailable>";
+    if (g_module) GetModuleFileNameW(g_module, dllPath, MAX_PATH);
+    const DWORD attrs = GetFileAttributesW(dllPath);
+    Log("Loaded module: %ls | fileExists=%d", dllPath, attrs != INVALID_FILE_ATTRIBUTES);
+
+    wchar_t clsidKey[160], inprocKey[192], apoKey[192], registeredDll[MAX_PATH] = {};
+    swprintf_s(clsidKey, L"SOFTWARE\\Classes\\CLSID\\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}");
+    swprintf_s(inprocKey, L"%s\\InprocServer32", clsidKey);
+    swprintf_s(apoKey, L"SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}");
+    const bool comOk = ReadRegString(HKEY_LOCAL_MACHINE, inprocKey, nullptr, registeredDll, MAX_PATH);
+    Log("COM InprocServer32: present=%d path=%ls", comOk, comOk ? registeredDll : L"<missing>");
+    wchar_t friendly[256] = {};
+    DWORD flags = 0;
+    const bool friendlyOk = ReadRegString(HKEY_LOCAL_MACHINE, apoKey, L"FriendlyName", friendly, 256);
+    const bool flagsOk = ReadRegDword(HKEY_LOCAL_MACHINE, apoKey, L"Flags", &flags);
+    wchar_t iid[128] = {};
+    const bool iidOk = ReadRegString(HKEY_LOCAL_MACHINE, apoKey, L"APOInterface0", iid, 128);
+    Log("AudioEngine registration: FriendlyName=%ls(%d) Flags=%lu(%d) APOInterface0=%ls(%d)",
+        friendly, friendlyOk, flags, flagsOk, iid, iidOk);
+    if (comOk && _wcsicmp(registeredDll, dllPath) != 0)
+        Log("WARNING: registered COM DLL path differs from loaded module path");
+
+    DWORD protectedDg = 0;
+    const bool protectedOk = ReadRegDword(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Audio",
+        L"DisableProtectedAudioDG", &protectedDg);
+    Log("DisableProtectedAudioDG: present=%d value=%lu", protectedOk, protectedDg);
+
+    wchar_t ini[MAX_PATH] = {};
+    DataPath(ini, MAX_PATH, L"MicBridge.ini");
+    const DWORD iniAttrs = GetFileAttributesW(ini);
+    Log("Config file: %ls | exists=%d", ini, iniAttrs != INVALID_FILE_ATTRIBUTES);
+    if (iniAttrs != INVALID_FILE_ATTRIBUTES) {
+        wchar_t enabled[16] = {}, port[16] = {}, sendId[64] = {}, recvId[64] = {};
+        GetPrivateProfileStringW(L"Bridge", L"Enabled", L"<default:1>", enabled, 16, ini);
+        GetPrivateProfileStringW(L"Bridge", L"Port", L"<default:58710>", port, 16, ini);
+        GetPrivateProfileStringW(L"Bridge", L"SendId", L"<default>", sendId, 64, ini);
+        GetPrivateProfileStringW(L"Bridge", L"ReceiveId", L"<default>", recvId, 64, ini);
+        Log("Config values: Enabled=%ls Port=%ls SendId=%ls ReceiveId=%ls", enabled, port, sendId, recvId);
+    }
+
+    // Scan active/inactive capture endpoint FxProperties without changing the registry.
+    HKEY capture = nullptr;
+    LONG openRc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture",
+        0, KEY_READ, &capture);
+    unsigned matched = 0;
+    if (openRc == ERROR_SUCCESS) {
+        for (DWORD index = 0;; ++index) {
+            wchar_t endpoint[256]; DWORD cch = 256;
+            LONG enumRc = RegEnumKeyExW(capture, index, endpoint, &cch, nullptr, nullptr, nullptr, nullptr);
+            if (enumRc == ERROR_NO_MORE_ITEMS) break;
+            if (enumRc != ERROR_SUCCESS) continue;
+            wchar_t fxKey[512], effect[128] = {}, association[128] = {};
+            swprintf_s(fxKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s\\FxProperties", endpoint);
+            const bool effectOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
+                L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},7", effect, 128);
+            if (effectOk && _wcsicmp(effect, L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}") == 0) {
+                DWORD state = 0;
+                wchar_t stateKey[512];
+                swprintf_s(stateKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s", endpoint);
+                const bool stateOk = ReadRegDword(HKEY_LOCAL_MACHINE, stateKey, L"DeviceState", &state);
+                const bool assocOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
+                    L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},0", association, 128);
+                ++matched;
+                Log("APO endpoint match #%u: id=%ls DeviceState=%lu(present=%d) Association=%ls(present=%d)",
+                    matched, endpoint, state, stateOk, assocOk ? association : L"<missing>", assocOk);
+            }
+        }
+        RegCloseKey(capture);
+    } else {
+        Log("WARNING: cannot enumerate Capture endpoints, registry error=%ld", openRc);
+    }
+    Log("Capture endpoints registered to this APO: %u", matched);
+    if (!matched) Log("WARNING: no Capture endpoint currently references this APO CLSID");
+    Log("=== Startup diagnostic checks completed ===");
 }
 
 // ---------------------------------------------------------------- الإعدادات
@@ -424,8 +532,9 @@ private:
             return;
         }
         WSADATA wsa;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-            Log("WSAStartup failed");
+        int wsaRc = WSAStartup(MAKEWORD(2, 2), &wsa);
+        if (wsaRc != 0) {
+            Log("WSAStartup failed: rc=%d", wsaRc);
             return;
         }
         m_wsa = true;
@@ -445,8 +554,16 @@ private:
         m_sendEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         m_thSend = CreateThread(nullptr, 0, SendThunk, this, 0, nullptr);
         m_thRecv = CreateThread(nullptr, 0, RecvThunk, this, 0, nullptr);
-        if (m_thSend) SetThreadPriority(m_thSend, THREAD_PRIORITY_HIGHEST);
-        if (m_thRecv) SetThreadPriority(m_thRecv, THREAD_PRIORITY_HIGHEST);
+        if (!m_sendEvt || !m_thSend || !m_thRecv) {
+            Log("Bridge startup failed: event=%d sendThread=%d recvThread=%d winerr=%lu",
+                m_sendEvt != nullptr, m_thSend != nullptr, m_thRecv != nullptr, GetLastError());
+            StopBridge();
+            return;
+        }
+        if (!SetThreadPriority(m_thSend, THREAD_PRIORITY_HIGHEST))
+            Log("WARNING: SetThreadPriority(send) failed: %lu", GetLastError());
+        if (!SetThreadPriority(m_thRecv, THREAD_PRIORITY_HIGHEST))
+            Log("WARNING: SetThreadPriority(recv) failed: %lu", GetLastError());
         m_active = true;
         Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples",
             m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter);
@@ -620,6 +737,10 @@ extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, voi
     *ppv = nullptr;
     if (!IsEqualCLSID(rclsid, CLSID_MicBridgeAPO)) return CLASS_E_CLASSNOTAVAILABLE;
     Log("DllGetClassObject requested");
+    static INIT_ONCE diagnosticOnce = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce(&diagnosticOnce,
+        [](PINIT_ONCE, PVOID, PVOID*) -> BOOL { RunStartupDiagnostics(); return TRUE; },
+        nullptr, nullptr);
     static Factory f;
     HRESULT hr = f.QueryInterface(riid, ppv);
     Log("DllGetClassObject hr=0x%08X", (unsigned)hr);
