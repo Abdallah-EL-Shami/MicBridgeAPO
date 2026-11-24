@@ -67,7 +67,7 @@ Write-Host '=== APO COM / AudioEngine registration ==='
 $clsidSub = "SOFTWARE\Classes\CLSID\$clsid"
 $inprocSub = "$clsidSub\InprocServer32"
 $apoSub = "SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
-$dllPath = Read-LmValue $inprocSub '(Default)'
+$dllPath = Read-LmValue $inprocSub ''
 Write-Host ("InprocServer32: {0}" -f $dllPath)
 Write-Host ("ThreadingModel: {0}" -f (Read-LmValue $inprocSub 'ThreadingModel'))
 Write-Host ("AudioEngine FriendlyName: {0}" -f (Read-LmValue $apoSub 'FriendlyName'))
