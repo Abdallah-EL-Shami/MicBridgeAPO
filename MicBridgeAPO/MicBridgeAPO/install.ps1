@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`""
+    $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
     Start-Process powershell -Verb RunAs -ArgumentList $a
     exit
 }
@@ -80,6 +80,15 @@ foreach ($k in Get-ChildItem $capRoot) {
 if ($found.Count -eq 0) { throw "لم أجد مايكًا نشطًا يحتوي الاسم '$DeviceName'. تأكد أنه موصول ومفعّل في Recording." }
 if ($found.Count -gt 1) { $found | Format-Table | Out-String | Write-Host; throw "أكثر من جهاز يطابق الاسم. اكتب اسمًا أدق عبر -DeviceName" }
 $dev = $found[0]
+
+# Refuse to reuse a backup created for a different capture endpoint.
+# This check happens before checkpoints, file copies, ACL changes, or registry writes.
+if (Test-Path -LiteralPath $backupFile) {
+    $existingBackup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
+    if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
+        throw "ملف النسخة الاحتياطية يخص جهازًا آخر ($($existingBackup.DeviceId)) وليس المايك الحالي ($($dev.Id)). لم يتم إجراء أي تغييرات. لا تحذف backup.json؛ أرسل هذه الرسالة للمراجعة."
+    }
+}
 Write-Host "تم العثور على: $($dev.Names)  ($($dev.Id))"
 $devSub = "$capSub\$($dev.Id)"
 $fxSub  = "$devSub\FxProperties"
@@ -189,5 +198,5 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
 } catch {
     Write-Host ""
     Write-Host "فشل التثبيت: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "إن كنت قد وصلت لخطوة التسجيل، شغّل uninstall.bat للتراجع."
+    Write-Warning "قد تكون بعض خطوات التثبيت قد نُفذت قبل حدوث الخطأ. لا تشغّل uninstall.bat ولا تحذف backup.json الآن؛ أوقف الاستخدام وأرسل نص الخطأ كاملًا لمراجعة الحالة والتراجع بأمان."
 }
