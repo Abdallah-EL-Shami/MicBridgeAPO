@@ -259,10 +259,31 @@ public:
         return S_OK;
     }
     STDMETHOD(Initialize)(UINT32 cbDataSize, BYTE* pbyData) override {
-        if (cbDataSize != 0 && !pbyData) { Log("Initialize rejected: null payload with size=%u", cbDataSize); return E_POINTER; }
-        if (m_initialized) { Log("Initialize rejected: already initialized"); return E_UNEXPECTED; }
+        if (cbDataSize != 0 && !pbyData) {
+            Log("Initialize rejected: null payload with size=%u", cbDataSize);
+            return E_POINTER;
+        }
+        if (m_initialized) {
+            Log("Initialize rejected: already initialized");
+            return APOERR_ALREADY_INITIALIZED;
+        }
+        // A zero-length payload is explicitly valid. If data is supplied, require
+        // the documented APOInitBaseStruct prefix and verify its size and CLSID.
+        if (cbDataSize != 0) {
+            if (cbDataSize < sizeof(APOInitBaseStruct)) {
+                Log("Initialize rejected: payload too small (%u)", cbDataSize);
+                return E_INVALIDARG;
+            }
+            const auto* base = reinterpret_cast<const APOInitBaseStruct*>(pbyData);
+            if (base->cbSize < sizeof(APOInitBaseStruct) || base->cbSize > cbDataSize ||
+                !IsEqualCLSID(base->clsid, CLSID_MicBridgeAPO)) {
+                Log("Initialize rejected: invalid base header cbSize=%u payload=%u clsidMatch=%d",
+                    base->cbSize, cbDataSize, IsEqualCLSID(base->clsid, CLSID_MicBridgeAPO));
+                return E_INVALIDARG;
+            }
+        }
         m_initialized = true;
-        Log("Initialize succeeded: cbDataSize=%u data=%s", cbDataSize, pbyData ? "present" : "null");
+        Log("Initialize succeeded: cbDataSize=%u", cbDataSize);
         return S_OK;
     }
     STDMETHOD(IsInputFormatSupported)(IAudioMediaType* pOut, IAudioMediaType* pReq,
