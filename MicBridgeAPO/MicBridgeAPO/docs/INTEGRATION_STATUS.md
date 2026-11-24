@@ -24,6 +24,14 @@ The existing `src/MicBridgeAPO.cpp` has received a first activation-hardening pa
 
 These are source-level corrections and diagnostic instrumentation. They do **not** prove that Windows has activated the APO, and they do not yet establish the exact cause of the original activation failure.
 
+## Automated validation completed
+
+- Windows x64 DLL build: passed on the GitHub Actions Windows Server 2025 runner.
+- Windows APO COM smoke test: passed. It loads the built DLL, obtains the class factory, creates the APO, checks registration properties, queries the required interfaces, tests empty initialization, verifies duplicate initialization is rejected, rejects a malformed initialization header, and accepts a valid base header.
+- Portable core test suite: passed on the Linux runner.
+
+The COM smoke test is a standalone DLL/COM test. It does not load the APO into the Windows Audio Engine, does not inspect the user's AT2040USB endpoint, and does not prove that `audiodg.exe` activates the APO on Windows 10.
+
 ## Still unverified / separate work
 
 - A fresh Windows x64 build after the latest source edits must pass.
