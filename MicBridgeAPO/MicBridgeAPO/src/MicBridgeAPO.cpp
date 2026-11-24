@@ -113,7 +113,7 @@ static bool ReadRegString(HKEY root, const wchar_t* subKey, const wchar_t* value
                           wchar_t* out, DWORD chars) {
     DWORD bytes = chars * sizeof(wchar_t), type = 0;
     if (RegGetValueW(root, subKey, valueName, RRF_RT_REG_SZ, &type, out, &bytes) != ERROR_SUCCESS) {
-        if (chars) out[0] = L'\\0';
+        if (chars) out[0] = L'\0';
         return false;
     }
     return true;
