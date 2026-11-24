@@ -1,0 +1,21 @@
+name: Portable core tests
+
+on:
+  push:
+    branches:
+      - integration/sonnet-core-review
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable tests
+        run: cmake -S MicBridgeAPO/MicBridgeAPO -B build -DMICBRIDGE_BUILD_APO=OFF -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
