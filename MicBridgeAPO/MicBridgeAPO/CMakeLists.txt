@@ -37,4 +37,12 @@ if(BUILD_TESTING)
         target_compile_options(micbridge_core_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME micbridge_core_tests COMMAND micbridge_core_tests)
+
+    if(WIN32 AND MICBRIDGE_BUILD_APO)
+        add_executable(micbridge_apo_com_smoke tests/apo_com_smoke.cpp)
+        target_compile_options(micbridge_apo_com_smoke PRIVATE /W4 /permissive- /EHsc)
+        target_link_libraries(micbridge_apo_com_smoke PRIVATE ole32)
+        add_test(NAME micbridge_apo_com_smoke
+            COMMAND micbridge_apo_com_smoke $<TARGET_FILE:MicBridgeAPO>)
+    endif()
 endif()
