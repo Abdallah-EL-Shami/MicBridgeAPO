@@ -12,7 +12,7 @@ Branch: `integration/sonnet-core-review`, based on the original `main`.
 - Validate pointers, channel count, sample rate, and payload size before multiplication.
 - Normalize SPSC ring capacity to a power of two, as required by its mask-based indexing.
 - Guard invalid inputs in parsing, channel extraction, resampling, and blending.
-- During underrun/fallback fade, missing wet samples now fade toward zero instead of freezing the last wet sample.
+- Preserve the core's bounded last-wet sample during the short fallback crossfade: the dry gain rises as wet gain falls, avoiding an abrupt discontinuity. This is intentional, not a persistent freeze.
 - The test suite no longer claims its fabricated silent second channel proves the real ReaStream channel layout.
 
 ## Not yet integrated or verified
