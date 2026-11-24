@@ -470,21 +470,28 @@ public:
     }
     STDMETHOD(UnlockForProcess)(void) override {
         if (!m_locked) { Log("UnlockForProcess while not locked"); return S_OK; }
-        StopBridge(); m_locked=false; Log("UnlockForProcess succeeded"); return S_OK;
+        StopBridge();
+        Log("APOProcess summary: calls=%llu frames=%llu silentCalls=%llu invalidCalls=%llu underruns=%u",
+            (unsigned long long)m_processCalls.load(), (unsigned long long)m_processFrames.load(),
+            (unsigned long long)m_silentCalls.load(), (unsigned long long)m_invalidCalls.load(), m_underruns.load());
+        m_locked=false; Log("UnlockForProcess succeeded"); return S_OK;
     }
 
     // IAudioProcessingObjectRT
     STDMETHOD_(void, APOProcess)(UINT32 nIn, APO_CONNECTION_PROPERTY** ppIn, UINT32 nOut,
                                  APO_CONNECTION_PROPERTY** ppOut) override {
-        if (nIn < 1 || nOut < 1 || !ppIn || !ppOut || !ppIn[0] || !ppOut[0]) return;
+        ++m_processCalls;
+        if (nIn < 1 || nOut < 1 || !ppIn || !ppOut || !ppIn[0] || !ppOut[0]) { ++m_invalidCalls; return; }
         APO_CONNECTION_PROPERTY* in = ppIn[0];
         APO_CONNECTION_PROPERTY* out = ppOut[0];
-        if (!in || !out || !in->pBuffer || !out->pBuffer) return;
+        if (!in || !out || !in->pBuffer || !out->pBuffer) { ++m_invalidCalls; return; }
         const UINT32 frames = in->u32ValidFrameCount;
+        m_processFrames += frames;
         const uint32_t ch = m_ch;
         float* inb = reinterpret_cast<float*>(in->pBuffer);
         float* outb = reinterpret_cast<float*>(out->pBuffer);
         const bool silent = (in->u32BufferFlags == BUFFER_SILENT);
+        if (silent) ++m_silentCalls;
 
         out->u32ValidFrameCount = frames;
         out->u32BufferFlags = in->u32BufferFlags;
@@ -602,7 +609,7 @@ private:
         if (m_thRecv) { WaitForSingleObject(m_thRecv, 2000); CloseHandle(m_thRecv); m_thRecv = nullptr; }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load());
+        Log("Stopped: tx=%u rx=%u underruns=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load(), m_badPackets.load(), m_idMismatches.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -675,12 +682,12 @@ private:
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
                 continue;
             }
-            if (n < (int)sizeof(ReaHdr) || memcmp(pkt, "MRSR", 4) != 0) continue;
+            if (n < (int)sizeof(ReaHdr) || memcmp(pkt, "MRSR", 4) != 0) { ++m_badPackets; continue; }
             const ReaHdr* h = reinterpret_cast<const ReaHdr*>(pkt);
-            if (strncmp(h->id, m_cfg.recvId, 32) != 0) continue;  // معرّف مختلف: نتجاهل
+            if (strncmp(h->id, m_cfg.recvId, 32) != 0) { ++m_idMismatches; continue; }  // معرّف مختلف: نتجاهل
             uint32_t chs = h->ch, sr = h->sr, bytes = h->bytes;
-            if (chs == 0 || sr < 8000 || sr > 384000) continue;
-            if (bytes > sizeof in || sizeof(ReaHdr) + bytes > (size_t)n) continue;
+            if (chs == 0 || chs > 8 || sr < 8000 || sr > 384000 || bytes == 0 || (bytes % (sizeof(float) * chs)) != 0) { ++m_badPackets; continue; }
+            if (bytes > sizeof in || sizeof(ReaHdr) + bytes != (size_t)n || h->size != (uint32_t)n || h->bytes != bytes) { ++m_badPackets; continue; }
             memcpy(in, pkt + sizeof(ReaHdr), bytes);
             uint32_t frames = bytes / 4 / chs;  // نأخذ القناة الأولى (افتراض: القنوات منفصلة بالتتابع)
             if (frames == 0) continue;
@@ -723,7 +730,8 @@ private:
     double m_rsPos = 0;
     float m_rsLast = 0;
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
-    std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0};
+    std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0};
+    std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
 };
 
 // ---------------------------------------------------------------- Class factory
