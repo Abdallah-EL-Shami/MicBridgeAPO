@@ -40,6 +40,18 @@ References:
 - Microsoft, PKEY_FX_EndpointEffectClsid: https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/pkey-fx-endpointeffectclsid
 - Microsoft, Implementing Audio Processing Objects (APO registration, association, and failure monitoring): https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/implementing-audio-processing-objects
 
+## Installer registration correction (source change; not yet machine-tested)
+
+The installer now writes `PKEY_FX_Association` (property `{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},0`) alongside `PKEY_FX_EndpointEffectClsid`, using `KSNODETYPE_ANY` (`{00000000-0000-0000-0000-000000000000}`). This follows Microsoft's documented generic-APO registration example. The USB endpoint's actual KS pin category has not yet been independently enumerated, so the wildcard is a deliberate generic compatibility declaration, not proof that Windows will activate this APO on this endpoint.
+
+Backup/rollback behavior was updated:
+- New backups preserve the endpoint's pre-existing association value.
+- Existing legacy `backup.json` files are migrated before the installer overwrites the association, preserving the value currently present.
+- The uninstaller restores a prior association or removes only the value introduced by this installer.
+- A created `FxProperties` key is removed only when empty; it is no longer recursively deleted with unrelated properties.
+
+A static PowerShell check (`tools/Test-ApoInstallerRegistration.ps1`) is now part of the Windows build workflow. These checks validate installer/uninstaller source invariants only; they do not execute registry changes or prove Audio Engine activation.
+
 ## Next engineering step
 
 1. Add non-real-time, stage-specific diagnostics to class factory creation, `Initialize`, format negotiation, `LockForProcess`, and `UnlockForProcess`. Record HRESULTs, format tag/subformat, sample rate, channel count, bit depth, frame count, and whether the log open succeeded. Add `OutputDebugStringW/A` fallback so a file ACL/path problem cannot erase all evidence.
