@@ -605,11 +605,19 @@ private:
         m_active = false;
         m_stop = true;
         if (m_sendEvt) SetEvent(m_sendEvt);
-        if (m_thSend) { WaitForSingleObject(m_thSend, 2000); CloseHandle(m_thSend); m_thSend = nullptr; }
-        if (m_thRecv) { WaitForSingleObject(m_thRecv, 2000); CloseHandle(m_thRecv); m_thRecv = nullptr; }
+        if (m_thSend) {
+            DWORD wait = WaitForSingleObject(m_thSend, 2000);
+            if (wait != WAIT_OBJECT_0) Log("WARNING: send thread did not stop cleanly: wait=%lu error=%lu", wait, GetLastError());
+            CloseHandle(m_thSend); m_thSend = nullptr;
+        }
+        if (m_thRecv) {
+            DWORD wait = WaitForSingleObject(m_thRecv, 2000);
+            if (wait != WAIT_OBJECT_0) Log("WARNING: receive thread did not stop cleanly: wait=%lu error=%lu", wait, GetLastError());
+            CloseHandle(m_thRecv); m_thRecv = nullptr;
+        }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load(), m_badPackets.load(), m_idMismatches.load());
+        Log("Stopped: tx=%u rx=%u underruns=%u sendErrors=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -619,6 +627,7 @@ private:
     void SendLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (s == INVALID_SOCKET) { Log("send: socket failed %d", WSAGetLastError()); return; }
+        Log("send: UDP socket created");
         BOOL on = TRUE;
         setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on);
         sockaddr_in dst{};
@@ -647,7 +656,9 @@ private:
                 h->bytes = (uint16_t)(n * sizeof(float));
                 h->size = (uint32_t)(sizeof(ReaHdr) + h->bytes);
                 memcpy(pkt + sizeof(ReaHdr), samples, h->bytes);
-                if (sendto(s, (const char*)pkt, (int)h->size, 0, (sockaddr*)&dst, sizeof dst) > 0) ++m_pktTx;
+                int sent = sendto(s, (const char*)pkt, (int)h->size, 0, (sockaddr*)&dst, sizeof dst);
+                if (sent == (int)h->size) ++m_pktTx;
+                else { ++m_sendErrors; Log("send: sendto failed/short: sent=%d expected=%u error=%d", sent, h->size, sent == SOCKET_ERROR ? WSAGetLastError() : 0); }
             }
         }
         closesocket(s);
@@ -657,6 +668,7 @@ private:
     void RecvLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (s == INVALID_SOCKET) { Log("recv: socket failed %d", WSAGetLastError()); return; }
+        Log("recv: UDP socket created");
         BOOL on = TRUE;
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof on);
         int rb = 1 << 20;
@@ -730,7 +742,7 @@ private:
     double m_rsPos = 0;
     float m_rsLast = 0;
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
-    std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0};
+    std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0}, m_sendErrors{0};
     std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
 };
 
