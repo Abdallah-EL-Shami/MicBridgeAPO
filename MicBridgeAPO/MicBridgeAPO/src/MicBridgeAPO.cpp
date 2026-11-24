@@ -162,26 +162,24 @@ static_assert(sizeof(ReaHdr) == 47, "ReaStream header must be 47 bytes");
 
 // ---------------------------------------------------------------- تسجيل الـ APO
 static const APO_REG_PROPERTIES* RegProps() {
-    static APO_REG_PROPERTIES p;
-    static bool init = false;
-    if (!init) {
-        memset(&p, 0, sizeof p);
-        p.clsid = CLSID_MicBridgeAPO;
-        p.Flags = (APO_FLAG)(APO_FLAG_SAMPLESPERFRAME_MUST_MATCH | APO_FLAG_FRAMESPERSECOND_MUST_MATCH |
+    static const APO_REG_PROPERTIES p = [] {
+        APO_REG_PROPERTIES value{};
+        value.clsid = CLSID_MicBridgeAPO;
+        value.Flags = (APO_FLAG)(APO_FLAG_SAMPLESPERFRAME_MUST_MATCH | APO_FLAG_FRAMESPERSECOND_MUST_MATCH |
                              APO_FLAG_BITSPERSAMPLE_MUST_MATCH | APO_FLAG_INPLACE);
-        wcscpy_s(p.szFriendlyName, L"MicBridge APO");
-        wcscpy_s(p.szCopyrightInfo, L"MicBridge APO");
-        p.u32MajorVersion = 1;
-        p.u32MinorVersion = 0;
-        p.u32MinInputConnections = 1;
-        p.u32MaxInputConnections = 1;
-        p.u32MinOutputConnections = 1;
-        p.u32MaxOutputConnections = 1;
-        p.u32MaxInstances = 0xFFFFFFFF;
-        p.u32NumAPOInterfaces = 1;
-        p.iidAPOInterfaceList[0] = __uuidof(IAudioProcessingObject);
-        init = true;
-    }
+        wcscpy_s(value.szFriendlyName, L"MicBridge APO");
+        wcscpy_s(value.szCopyrightInfo, L"MicBridge APO");
+        value.u32MajorVersion = 1;
+        value.u32MinorVersion = 0;
+        value.u32MinInputConnections = 1;
+        value.u32MaxInputConnections = 1;
+        value.u32MinOutputConnections = 1;
+        value.u32MaxOutputConnections = 1;
+        value.u32MaxInstances = 0xFFFFFFFF;
+        value.u32NumAPOInterfaces = 1;
+        value.iidAPOInterfaceList[0] = __uuidof(IAudioProcessingObject);
+        return value;
+    }();
     return &p;
 }
 
@@ -199,9 +197,18 @@ static bool IsFloat32(IAudioMediaType* t) {
     return false;
 }
 static bool SameLayout(IAudioMediaType* a, IAudioMediaType* b) {
+    if (!a || !b) return false;
     const WAVEFORMATEX* x = a->GetAudioFormat();
     const WAVEFORMATEX* y = b->GetAudioFormat();
-    return x && y && x->nSamplesPerSec == y->nSamplesPerSec && x->nChannels == y->nChannels;
+    return x && y && x->nSamplesPerSec == y->nSamplesPerSec && x->nChannels == y->nChannels &&
+           x->wBitsPerSample == y->wBitsPerSample;
+}
+static void LogMediaType(const char* stage, IAudioMediaType* type, HRESULT hr) {
+    const WAVEFORMATEX* wf = type ? type->GetAudioFormat() : nullptr;
+    if (!wf) { Log("%s hr=0x%08X format=null", stage, (unsigned)hr); return; }
+    Log("%s hr=0x%08X tag=%u rate=%u ch=%u bits=%u block=%u cb=%u",
+        stage, (unsigned)hr, wf->wFormatTag, wf->nSamplesPerSec, wf->nChannels,
+        wf->wBitsPerSample, wf->nBlockAlign, wf->cbSize);
 }
 
 // ---------------------------------------------------------------- الـ APO
@@ -262,21 +269,25 @@ public:
                                       IAudioMediaType** ppSupported) override {
         if (!pReq || !ppSupported) return E_POINTER;
         *ppSupported = nullptr;
-        if (!IsFloat32(pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
-        if (pOut && !SameLayout(pOut, pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
-        *ppSupported = pReq;
-        pReq->AddRef();
-        return S_OK;
+        if (!IsFloat32(pReq) || (pOut && (!IsFloat32(pOut) || !SameLayout(pOut, pReq)))) {
+            LogMediaType("IsInputFormatSupported rejected", pReq, APOERR_FORMAT_NOT_SUPPORTED);
+            if (pOut) LogMediaType("IsInputFormatSupported output", pOut, APOERR_FORMAT_NOT_SUPPORTED);
+            return APOERR_FORMAT_NOT_SUPPORTED;
+        }
+        *ppSupported = pReq; pReq->AddRef();
+        LogMediaType("IsInputFormatSupported accepted", pReq, S_OK); return S_OK;
     }
     STDMETHOD(IsOutputFormatSupported)(IAudioMediaType* pIn, IAudioMediaType* pReq,
                                        IAudioMediaType** ppSupported) override {
         if (!pReq || !ppSupported) return E_POINTER;
         *ppSupported = nullptr;
-        if (!IsFloat32(pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
-        if (pIn && !SameLayout(pIn, pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
-        *ppSupported = pReq;
-        pReq->AddRef();
-        return S_OK;
+        if (!IsFloat32(pReq) || (pIn && (!IsFloat32(pIn) || !SameLayout(pIn, pReq)))) {
+            LogMediaType("IsOutputFormatSupported rejected", pReq, APOERR_FORMAT_NOT_SUPPORTED);
+            if (pIn) LogMediaType("IsOutputFormatSupported input", pIn, APOERR_FORMAT_NOT_SUPPORTED);
+            return APOERR_FORMAT_NOT_SUPPORTED;
+        }
+        *ppSupported = pReq; pReq->AddRef();
+        LogMediaType("IsOutputFormatSupported accepted", pReq, S_OK); return S_OK;
     }
     STDMETHOD(GetInputChannelCount)(UINT32* pCount) override {
         if (!pCount) return E_POINTER;
@@ -290,34 +301,32 @@ public:
     // IAudioProcessingObjectConfiguration
     STDMETHOD(LockForProcess)(UINT32 nIn, APO_CONNECTION_DESCRIPTOR** ppIn, UINT32 nOut,
                               APO_CONNECTION_DESCRIPTOR** ppOut) override {
-        if (nIn != 1 || nOut != 1 || !ppIn || !ppOut) return E_INVALIDARG;
-        // الصيغة تأتي من محرك الصوت: هي نفس ما ضُبط في Advanced (معدل العينة وعدد القنوات).
-        // عمق البت (24-bit مثلًا) لا يهم لأن المحرك يسلّم float32 دائمًا.
-        const WAVEFORMATEX* wf = nullptr;
-        UINT32 maxFrames = 0;
-        if (nIn > 0 && ppIn[0] && ppIn[0]->pFormat) {
-            wf = ppIn[0]->pFormat->GetAudioFormat();
-            maxFrames = ppIn[0]->u32MaxFrameCount;
+        if (nIn != 1 || nOut != 1) { Log("LockForProcess rejected: connections in=%u out=%u",nIn,nOut); return APOERR_NUM_CONNECTIONS_INVALID; }
+        if (!ppIn || !ppOut || !ppIn[0] || !ppOut[0] || !ppIn[0]->pFormat || !ppOut[0]->pFormat) { Log("LockForProcess rejected: null descriptor/format"); return E_POINTER; }
+        if (!m_initialized || m_locked) { Log("LockForProcess rejected: initialized=%d locked=%d",m_initialized,m_locked); return E_UNEXPECTED; }
+        const WAVEFORMATEX* iw=ppIn[0]->pFormat->GetAudioFormat(); const WAVEFORMATEX* ow=ppOut[0]->pFormat->GetAudioFormat();
+        UINT32 fi=ppIn[0]->u32MaxFrameCount, fo=ppOut[0]->u32MaxFrameCount;
+        if (!iw || !ow || !IsFloat32(ppIn[0]->pFormat) || !IsFloat32(ppOut[0]->pFormat) ||
+            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fo==0 || fi!=fo) {
+            Log("LockForProcess rejected: format/frame mismatch in=%u/%u/%u out=%u/%u/%u",iw?iw->nSamplesPerSec:0,iw?iw->nChannels:0,fi,ow?ow->nSamplesPerSec:0,ow?ow->nChannels:0,fo);
+            return APOERR_FORMAT_NOT_SUPPORTED;
         }
-        if (wf) {
-            m_rate = wf->nSamplesPerSec;
-            m_ch = wf->nChannels ? wf->nChannels : 1;
-        }
-        m_maxFrames = maxFrames;
-        StartBridge();
-        return S_OK;
+        m_rate=iw->nSamplesPerSec; m_ch=iw->nChannels; m_maxFrames=fi; m_locked=true;
+        Log("LockForProcess entered rate=%u ch=%u bits=%u frames=%u",m_rate,m_ch,iw->wBitsPerSample,m_maxFrames);
+        StartBridge(); Log("LockForProcess succeeded"); return S_OK;
     }
     STDMETHOD(UnlockForProcess)(void) override {
-        StopBridge();
-        return S_OK;
+        if (!m_locked) { Log("UnlockForProcess while not locked"); return S_OK; }
+        StopBridge(); m_locked=false; Log("UnlockForProcess succeeded"); return S_OK;
     }
 
     // IAudioProcessingObjectRT
     STDMETHOD_(void, APOProcess)(UINT32 nIn, APO_CONNECTION_PROPERTY** ppIn, UINT32 nOut,
                                  APO_CONNECTION_PROPERTY** ppOut) override {
-        if (nIn < 1 || nOut < 1) return;
+        if (nIn < 1 || nOut < 1 || !ppIn || !ppOut || !ppIn[0] || !ppOut[0]) return;
         APO_CONNECTION_PROPERTY* in = ppIn[0];
         APO_CONNECTION_PROPERTY* out = ppOut[0];
+        if (!in || !out || !in->pBuffer || !out->pBuffer) return;
         const UINT32 frames = in->u32ValidFrameCount;
         const uint32_t ch = m_ch;
         float* inb = reinterpret_cast<float*>(in->pBuffer);
