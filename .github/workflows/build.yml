@@ -13,6 +13,9 @@ jobs:
         run: cmake --build build --config Release
       - name: Run Windows APO COM smoke test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Check installer registration and rollback safety
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-ApoInstallerRegistration.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: MicBridgeAPO-dll
