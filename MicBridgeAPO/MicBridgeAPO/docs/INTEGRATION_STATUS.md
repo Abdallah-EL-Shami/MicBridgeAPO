@@ -7,6 +7,7 @@ Branch: `integration/sonnet-core-review`, based on the original `main`.
 - `src/mb_core.h`: imported the Sonnet portable DSP/protocol core with defensive validation.
 - `tests/core_tests.cpp`: corrected include path, portable PI constant, and claims about the synthetic channel-layout test.
 - `design/mb_win.h`: retained as an architectural proposal only; it has declarations, not implementations, and is not linked into the APO.
+- `tools/Inspect-ApoEndpoint.ps1`: read-only Windows diagnostic for OS build, endpoint effect/association properties, COM registration, SysFx-disable state, DLL hash, and audiodg module presence.
 - CMake separates the Windows APO DLL build from portable core tests.
 - CI workflows build the Windows DLL and run portable core tests.
 
@@ -41,6 +42,7 @@ The COM smoke test is a standalone DLL/COM test. It does not load the APO into t
 - UI/config mismatch (`control.ini` vs `MicBridge.ini`), `status.txt` reporting, and installer/uninstaller backup/rollback remain unchanged.
 - The installer still sets `DisableProtectedAudioDG=1`; its necessity and security implications have not been resolved.
 - The endpoint registration model must be checked against the user's exact Windows 10 build and audio driver. Microsoft documents componentized APO registration for Windows 10 1809 and later; this may affect packaging/registration strategy.
+- The installer currently writes `PKEY_FX_EndpointEffectClsid` but not `PKEY_FX_Association`. Microsoft's APO guidance says the association declares the compatible KS pin category; the read-only inspector now checks whether it is absent. Do not assume `KSNODETYPE_ANY` is the right value for this endpoint until its registration is reviewed.
 
 ## Install safety
 
