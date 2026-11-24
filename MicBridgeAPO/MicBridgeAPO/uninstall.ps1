@@ -10,6 +10,7 @@ if (-not $isAdmin) {
 
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
+$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
@@ -62,9 +63,28 @@ if (Test-Path $backupFile) {
 
     # 1) القيم (والمفاتيح ما زالت بصلاحيات كاملة للمسؤولين)
     if (Test-Path $fxPath) {
-        if ($b.CreatedFx) { Remove-Item -LiteralPath $fxPath -Recurse -Force -ErrorAction SilentlyContinue }
-        elseif ($b.PrevEndpointEffect) { Set-ItemProperty -LiteralPath $fxPath -Name $fxValue -Value $b.PrevEndpointEffect -Type String }
+        # Restore only the property owned by this installer.
+        if ($b.PrevEndpointEffect) { Set-ItemProperty -LiteralPath $fxPath -Name $fxValue -Value $b.PrevEndpointEffect -Type String }
         else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue }
+
+        # Older backup.json files do not contain this field because the old installer
+        # never wrote PKEY_FX_Association. In that case, leave the value untouched.
+        if ($b.PSObject.Properties.Name -contains 'PrevFxAssociation') {
+            if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
+            else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
+        }
+
+        # The old installer may have created FxProperties. Delete it only if it is empty;
+        # never recursively delete driver/vendor properties added later.
+        if ($b.CreatedFx) {
+            $relativeFx = "$capSub\$($b.DeviceId)\FxProperties"
+            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relativeFx)
+            if ($key) {
+                $empty = ($key.GetValueNames().Count -eq 0 -and $key.GetSubKeyNames().Count -eq 0)
+                $key.Close()
+                if ($empty) { Remove-Item -LiteralPath $fxPath -Force -ErrorAction SilentlyContinue }
+            }
+        }
     }
     if ($null -ne $b.PrevDisableProtectedAudioDG) { Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord }
     else { Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue }
