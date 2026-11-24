@@ -16,6 +16,8 @@ if (-not $isAdmin) {
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
+$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Association
+$ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
@@ -99,10 +101,24 @@ if (-not (Test-Path $backupFile)) {
     if (-not $devSddl) { throw 'تعذر قراءة صلاحيات مفتاح المايك، ألغيت التثبيت قبل أي تغيير.' }
     $backup = [pscustomobject]@{
         DeviceId = $dev.Id; PrevDisableProtectedAudioDG = $prevDis; PrevEndpointEffect = $prevFx
+        PrevFxAssociation = if ($fxExists) { (Get-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue } else { $null }
         DevKeySddl = $devSddl; FxKeySddl = $fxSddl; CreatedFx = (-not $fxExists)
     }
-    $backup | ConvertTo-Json | Set-Content $backupFile -Encoding UTF8
+    $backup | ConvertTo-Json -Depth 5 | Set-Content $backupFile -Encoding UTF8
     Write-Host "حُفظت القيم والصلاحيات الأصلية في $backupFile"
+} else {
+    # The previous installer never wrote PKEY_FX_Association. Preserve its current value before adding ours.
+    $backup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
+    if ($backup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
+        $existingAssociation = $null
+        $existingFxPath = "$capRoot\$($backup.DeviceId)\FxProperties"
+        if (Test-Path -LiteralPath $existingFxPath) {
+            $existingAssociation = (Get-ItemProperty -LiteralPath $existingFxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue
+        }
+        $backup | Add-Member -NotePropertyName PrevFxAssociation -NotePropertyValue $existingAssociation
+        $backup | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backupFile -Encoding UTF8
+        Write-Host 'تم تحديث النسخة الاحتياطية القديمة بحفظ قيمة FX Association السابقة.'
+    }
 }
 
 # ---- 4) الملفات
@@ -151,6 +167,7 @@ function Grant-Key([string]$sub) {
 Grant-Key $devSub
 if (-not (Test-Path "$capRoot\$($dev.Id)\FxProperties")) { New-Item "$capRoot\$($dev.Id)\FxProperties" | Out-Null }
 Grant-Key $fxSub
+Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $ksNodeTypeAny -Type String
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -Value $clsid -Type String
 
 # ---- 8) اختصار الواجهة على سطح المكتب
