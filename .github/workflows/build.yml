@@ -11,6 +11,8 @@ jobs:
         run: cmake -S MicBridgeAPO/MicBridgeAPO -B build -A x64
       - name: Build
         run: cmake --build build --config Release
+      - name: Run Windows APO COM smoke test
+        run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: MicBridgeAPO-dll
