@@ -27,6 +27,19 @@ References:
 - Microsoft, APO_REG_PROPERTIES: https://learn.microsoft.com/en-us/windows/win32/api/audioenginebaseapo/ns-audioenginebaseapo-apo_reg_properties
 - Microsoft, IAudioProcessingObjectRT::APOProcess: https://learn.microsoft.com/en-us/windows/win32/api/audioenginebaseapo/nf-audioenginebaseapo-iaudioprocessingobjectrt-apoprocess
 
+
+## Additional endpoint-registration finding
+
+The current installer writes `PKEY_FX_EndpointEffectClsid` (property `{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},7`) but does not write `PKEY_FX_Association` (the same property-set GUID, key `,0`).
+
+Microsoft's APO registration guidance says the association is compared with the KS pin-category GUID and that a custom APO must explicitly declare its compatible KS node type. The documented wildcard value `KSNODETYPE_ANY` is the null GUID `{00000000-0000-0000-0000-000000000000}`. The installer omission is therefore a concrete registration gap to investigate; it is not yet proven to be the cause on this specific USB endpoint.
+
+The new read-only script `tools/Inspect-ApoEndpoint.ps1` reports the endpoint's effect CLSID, association, SysFx-disable value, COM registration, OS build, and whether `MicBridgeAPO.dll` appears in any running `audiodg.exe` module list. It does not change the machine.
+
+References:
+- Microsoft, PKEY_FX_EndpointEffectClsid: https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/pkey-fx-endpointeffectclsid
+- Microsoft, Implementing Audio Processing Objects (APO registration, association, and failure monitoring): https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/implementing-audio-processing-objects
+
 ## Next engineering step
 
 1. Add non-real-time, stage-specific diagnostics to class factory creation, `Initialize`, format negotiation, `LockForProcess`, and `UnlockForProcess`. Record HRESULTs, format tag/subformat, sample rate, channel count, bit depth, frame count, and whether the log open succeeded. Add `OutputDebugStringW/A` fallback so a file ACL/path problem cannot erase all evidence.
