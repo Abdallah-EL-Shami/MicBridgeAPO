@@ -58,9 +58,9 @@ static bool Log(const char* fmt, ...) {
     wchar_t dir[MAX_PATH], path[MAX_PATH], oldPath[MAX_PATH];
     DataPath(dir, MAX_PATH, L"");
     size_t dirLen = wcslen(dir);
-    while (dirLen && (dir[dirLen - 1] == L'\\\\' || dir[dirLen - 1] == L'/')) dir[--dirLen] = L'\\0';
+    while (dirLen && (dir[dirLen - 1] == L'\\' || dir[dirLen - 1] == L'/')) dir[--dirLen] = L'\0';
     if (!CreateDirectoryW(dir, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
-        OutputDebugStringW(L"[MicBridge] unable to create ProgramData\\\\MicBridgeAPO directory\\n");
+        OutputDebugStringW(L"[MicBridge] unable to create ProgramData\\MicBridgeAPO directory\n");
         ReleaseSRWLockExclusive(&g_logLock);
         return false;
     }
@@ -76,14 +76,14 @@ static bool Log(const char* fmt, ...) {
         if (size.QuadPart > (1ull << 20)) {
             DeleteFileW(oldPath);
             if (!MoveFileExW(path, oldPath, MOVEFILE_REPLACE_EXISTING))
-                OutputDebugStringW(L"[MicBridge] warning: could not rotate MicBridge.log\\n");
+                OutputDebugStringW(L"[MicBridge] warning: could not rotate MicBridge.log\n");
         }
     }
 
     HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
-        OutputDebugStringA("[MicBridge] unable to open/create MicBridge.log\\n");
+        OutputDebugStringA("[MicBridge] unable to open/create MicBridge.log\n");
         ReleaseSRWLockExclusive(&g_logLock);
         return false;
     }
@@ -99,7 +99,7 @@ static bool Log(const char* fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line + n, sizeof(line) - (size_t)n - 3, fmt, ap);
     va_end(ap);
-    strcat_s(line, "\\r\\n");
+    strcat_s(line, "\r\n");
     DWORD written = 0;
     ok = WriteFile(h, line, (DWORD)strlen(line), &written, nullptr) && written == strlen(line);
     CloseHandle(h);
