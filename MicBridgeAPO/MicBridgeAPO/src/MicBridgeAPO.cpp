@@ -307,7 +307,7 @@ public:
         const WAVEFORMATEX* iw=ppIn[0]->pFormat->GetAudioFormat(); const WAVEFORMATEX* ow=ppOut[0]->pFormat->GetAudioFormat();
         UINT32 fi=ppIn[0]->u32MaxFrameCount, fo=ppOut[0]->u32MaxFrameCount;
         if (!iw || !ow || !IsFloat32(ppIn[0]->pFormat) || !IsFloat32(ppOut[0]->pFormat) ||
-            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fo==0 || fi!=fo) {
+            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fo<fi) {
             Log("LockForProcess rejected: format/frame mismatch in=%u/%u/%u out=%u/%u/%u",iw?iw->nSamplesPerSec:0,iw?iw->nChannels:0,fi,ow?ow->nSamplesPerSec:0,ow?ow->nChannels:0,fo);
             return APOERR_FORMAT_NOT_SUPPORTED;
         }
@@ -583,9 +583,11 @@ public:
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
+        Log("ClassFactory::CreateInstance requested");
         MicBridgeAPO* o = new (std::nothrow) MicBridgeAPO();
         if (!o) return E_OUTOFMEMORY;
         HRESULT hr = o->QueryInterface(iid, ppv);
+        Log("ClassFactory::CreateInstance QI hr=0x%08X", (unsigned)hr);
         o->Release();
         return hr;
     }
@@ -593,9 +595,14 @@ public:
 };
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
-    static Factory f;
+    if (!ppv) return E_POINTER;
+    *ppv = nullptr;
     if (!IsEqualCLSID(rclsid, CLSID_MicBridgeAPO)) return CLASS_E_CLASSNOTAVAILABLE;
-    return f.QueryInterface(riid, ppv);
+    Log("DllGetClassObject requested");
+    static Factory f;
+    HRESULT hr = f.QueryInterface(riid, ppv);
+    Log("DllGetClassObject hr=0x%08X", (unsigned)hr);
+    return hr;
 }
 
 extern "C" HRESULT __stdcall DllCanUnloadNow() { return g_objects.load() == 0 ? S_OK : S_FALSE; }
