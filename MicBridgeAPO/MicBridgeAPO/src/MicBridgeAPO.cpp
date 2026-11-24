@@ -56,7 +56,7 @@ static bool Log(const char* fmt, ...) {
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) { OutputDebugStringA("[MicBridge] unable to open MicBridge.log\n"); return false; }
     LARGE_INTEGER sz{};
-    if (GetFileSizeEx(h, &sz) && sz.QuadPart > (1 << 20)) { CloseHandle(h); return; }  // سقف 1MB
+    if (GetFileSizeEx(h, &sz) && sz.QuadPart > (1 << 20)) { CloseHandle(h); return false; }  // سقف 1MB
     char line[512];
     SYSTEMTIME st;
     GetLocalTime(&st);
