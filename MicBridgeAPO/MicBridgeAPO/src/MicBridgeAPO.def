@@ -1,0 +1,4 @@
+LIBRARY MicBridgeAPO
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow   PRIVATE
