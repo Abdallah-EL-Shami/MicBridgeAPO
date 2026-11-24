@@ -16,7 +16,7 @@ using DllGetClassObjectFn = HRESULT (STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*)
 
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) {
-        std::wprintf(L"Usage: apo_com_smoke.exe <path-to-MicBridgeAPO.dll>\\n");
+        wprintf(L"Usage: apo_com_smoke.exe <path-to-MicBridgeAPO.dll>\\n");
         return 2;
     }
 
