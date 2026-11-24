@@ -606,13 +606,19 @@ private:
         m_stop = true;
         if (m_sendEvt) SetEvent(m_sendEvt);
         if (m_thSend) {
-            DWORD wait = WaitForSingleObject(m_thSend, 2000);
-            if (wait != WAIT_OBJECT_0) Log("WARNING: send thread did not stop cleanly: wait=%lu error=%lu", wait, GetLastError());
+            DWORD wait = WaitForSingleObject(m_thSend, 5000);
+            if (wait != WAIT_OBJECT_0) {
+                Log("WARNING: send thread still active after 5s: wait=%lu error=%lu; waiting for safe shutdown", wait, GetLastError());
+                WaitForSingleObject(m_thSend, INFINITE);
+            }
             CloseHandle(m_thSend); m_thSend = nullptr;
         }
         if (m_thRecv) {
-            DWORD wait = WaitForSingleObject(m_thRecv, 2000);
-            if (wait != WAIT_OBJECT_0) Log("WARNING: receive thread did not stop cleanly: wait=%lu error=%lu", wait, GetLastError());
+            DWORD wait = WaitForSingleObject(m_thRecv, 5000);
+            if (wait != WAIT_OBJECT_0) {
+                Log("WARNING: receive thread still active after 5s: wait=%lu error=%lu; waiting for safe shutdown", wait, GetLastError());
+                WaitForSingleObject(m_thRecv, INFINITE);
+            }
             CloseHandle(m_thRecv); m_thRecv = nullptr;
         }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
