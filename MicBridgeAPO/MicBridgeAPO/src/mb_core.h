@@ -240,8 +240,9 @@ public:
         for (uint32_t i = 0; i < frames; ++i) {
             if (g_ < target) g_ = std::min(target, g_ + step);
             else if (g_ > target) g_ = std::max(target, g_ - step);
-            // Fade missing wet samples toward silence; never freeze the last sample.
-            const float w = (i < n) ? wetScratch[i] : 0.f;
+            // Hold the last wet sample only during the short crossfade while dry gain rises.
+            // This avoids a discontinuity; the ramp bounds the hold duration.
+            const float w = (i < n) ? wetScratch[i] : last_;
             last_ = w;
             const float dryG = dryOnFallback_ ? (1.f - g_) : 0.f;
             if (g_ > 0.f) touched_ = true;
