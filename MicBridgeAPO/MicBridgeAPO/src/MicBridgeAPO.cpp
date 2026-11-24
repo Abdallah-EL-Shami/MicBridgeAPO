@@ -50,38 +50,62 @@ static void DataPath(wchar_t* out, size_t n, const wchar_t* file) {
     swprintf_s(out, n, L"%s\\MicBridgeAPO\\%s", base, file);
 }
 
+static SRWLOCK g_logLock = SRWLOCK_INIT;
+
 static bool Log(const char* fmt, ...) {
-    // Ensure the ProgramData folder and log file exist. OPEN_ALWAYS creates a missing file.
-    wchar_t dir[MAX_PATH], path[MAX_PATH];
+    AcquireSRWLockExclusive(&g_logLock);
+    bool ok = false;
+    wchar_t dir[MAX_PATH], path[MAX_PATH], oldPath[MAX_PATH];
     DataPath(dir, MAX_PATH, L"");
-    // DataPath with an empty filename leaves a trailing separator; remove it for CreateDirectory.
     size_t dirLen = wcslen(dir);
-    while (dirLen && (dir[dirLen - 1] == L'\\' || dir[dirLen - 1] == L'/')) dir[--dirLen] = L'\\0';
+    while (dirLen && (dir[dirLen - 1] == L'\\\\' || dir[dirLen - 1] == L'/')) dir[--dirLen] = L'\\0';
     if (!CreateDirectoryW(dir, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
-        OutputDebugStringW(L"[MicBridge] unable to create ProgramData\\MicBridgeAPO directory\\n");
+        OutputDebugStringW(L"[MicBridge] unable to create ProgramData\\\\MicBridgeAPO directory\\n");
+        ReleaseSRWLockExclusive(&g_logLock);
         return false;
     }
     DataPath(path, MAX_PATH, L"MicBridge.log");
+    DataPath(oldPath, MAX_PATH, L"MicBridge.log.1");
+
+    // Keep a bounded rolling log instead of silently stopping diagnostics at 1 MiB.
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) {
+        ULARGE_INTEGER size{};
+        size.HighPart = fad.nFileSizeHigh;
+        size.LowPart = fad.nFileSizeLow;
+        if (size.QuadPart > (1ull << 20)) {
+            DeleteFileW(oldPath);
+            if (!MoveFileExW(path, oldPath, MOVEFILE_REPLACE_EXISTING))
+                OutputDebugStringW(L"[MicBridge] warning: could not rotate MicBridge.log\\n");
+        }
+    }
+
     HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { OutputDebugStringA("[MicBridge] unable to open MicBridge.log\n"); return false; }
-    LARGE_INTEGER sz{};
-    if (GetFileSizeEx(h, &sz) && sz.QuadPart > (1 << 20)) { CloseHandle(h); return false; }  // سقف 1MB
-    char line[512];
+    if (h == INVALID_HANDLE_VALUE) {
+        OutputDebugStringA("[MicBridge] unable to open/create MicBridge.log\\n");
+        ReleaseSRWLockExclusive(&g_logLock);
+        return false;
+    }
+
+    char line[768];
     SYSTEMTIME st;
     GetLocalTime(&st);
-    int n = _snprintf_s(line, sizeof line, _TRUNCATE, "%02d:%02d:%02d.%03d ", st.wHour, st.wMinute,
-                        st.wSecond, st.wMilliseconds);
+    int n = _snprintf_s(line, sizeof line, _TRUNCATE, "%04d-%02d-%02d %02d:%02d:%02d.%03d [PID=%lu TID=%lu] ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+        GetCurrentProcessId(), GetCurrentThreadId());
+    if (n < 0) n = 0;
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(line + n, sizeof(line) - n - 3, fmt, ap);
+    vsnprintf(line + n, sizeof(line) - (size_t)n - 3, fmt, ap);
     va_end(ap);
-    strcat_s(line, "\r\n");
-    DWORD w;
-    WriteFile(h, line, (DWORD)strlen(line), &w, nullptr);
+    strcat_s(line, "\\r\\n");
+    DWORD written = 0;
+    ok = WriteFile(h, line, (DWORD)strlen(line), &written, nullptr) && written == strlen(line);
     CloseHandle(h);
     OutputDebugStringA(line);
-    return true;
+    ReleaseSRWLockExclusive(&g_logLock);
+    return ok;
 }
 
 // ---------------------------------------------------------------- فحص تشخيصي مبكر (قراءة فقط)
