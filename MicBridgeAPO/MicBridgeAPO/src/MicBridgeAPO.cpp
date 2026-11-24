@@ -11,15 +11,19 @@
 //   45 : حجم الصوت بالبايت  uint16
 //   47 : عينات float32 (أقصاها 1200 بايت = 300 عينة في الحزمة)
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <unknwn.h>
+#include <objbase.h>
 #include <mmreg.h>
 #include <audioenginebaseapo.h>
-#include <baseaudioprocessingobject.h>
 
 #include <algorithm>
 #include <atomic>
@@ -179,10 +183,32 @@ static const APO_REG_PROPERTIES* RegProps() {
     return &p;
 }
 
+// ---------------------------------------------------------------- فحص الصيغة (float32 فقط)
+static bool IsFloat32(IAudioMediaType* t) {
+    if (!t) return false;
+    const WAVEFORMATEX* w = t->GetAudioFormat();
+    if (!w || w->wBitsPerSample != 32) return false;
+    if (w->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
+    if (w->wFormatTag == WAVE_FORMAT_EXTENSIBLE && w->cbSize >= 22) {
+        static const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+        const WAVEFORMATEXTENSIBLE* e = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(w);
+        return IsEqualGUID(e->SubFormat, kFloat) != 0;
+    }
+    return false;
+}
+static bool SameLayout(IAudioMediaType* a, IAudioMediaType* b) {
+    const WAVEFORMATEX* x = a->GetAudioFormat();
+    const WAVEFORMATEX* y = b->GetAudioFormat();
+    return x && y && x->nSamplesPerSec == y->nSamplesPerSec && x->nChannels == y->nChannels;
+}
+
 // ---------------------------------------------------------------- الـ APO
-class MicBridgeAPO : public CBaseAudioProcessingObject, public IAudioSystemEffects {
+class MicBridgeAPO : public IAudioProcessingObject,
+                     public IAudioProcessingObjectRT,
+                     public IAudioProcessingObjectConfiguration,
+                     public IAudioSystemEffects {
 public:
-    MicBridgeAPO() : CBaseAudioProcessingObject(RegProps()) { ++g_objects; }
+    MicBridgeAPO() { ++g_objects; }
     virtual ~MicBridgeAPO() { StopBridge(); --g_objects; }
 
     // IUnknown
@@ -209,11 +235,54 @@ public:
         return (ULONG)r;
     }
 
+    // IAudioProcessingObject (كانت في الفئة الأساسية، ننفذها بأنفسنا)
+    STDMETHOD(Reset)() override { return S_OK; }
+    STDMETHOD(GetLatency)(HNSTIME* pTime) override {
+        if (!pTime) return E_POINTER;
+        *pTime = 0;
+        return S_OK;
+    }
+    STDMETHOD(GetRegistrationProperties)(APO_REG_PROPERTIES** ppRegProps) override {
+        if (!ppRegProps) return E_POINTER;
+        *ppRegProps = static_cast<APO_REG_PROPERTIES*>(CoTaskMemAlloc(sizeof(APO_REG_PROPERTIES)));
+        if (!*ppRegProps) return E_OUTOFMEMORY;
+        memcpy(*ppRegProps, RegProps(), sizeof(APO_REG_PROPERTIES));
+        return S_OK;
+    }
+    STDMETHOD(Initialize)(UINT32, BYTE*) override { return S_OK; }
+    STDMETHOD(IsInputFormatSupported)(IAudioMediaType* pOut, IAudioMediaType* pReq,
+                                      IAudioMediaType** ppSupported) override {
+        if (!pReq || !ppSupported) return E_POINTER;
+        *ppSupported = nullptr;
+        if (!IsFloat32(pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
+        if (pOut && !SameLayout(pOut, pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
+        *ppSupported = pReq;
+        pReq->AddRef();
+        return S_OK;
+    }
+    STDMETHOD(IsOutputFormatSupported)(IAudioMediaType* pIn, IAudioMediaType* pReq,
+                                       IAudioMediaType** ppSupported) override {
+        if (!pReq || !ppSupported) return E_POINTER;
+        *ppSupported = nullptr;
+        if (!IsFloat32(pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
+        if (pIn && !SameLayout(pIn, pReq)) return APOERR_FORMAT_NOT_SUPPORTED;
+        *ppSupported = pReq;
+        pReq->AddRef();
+        return S_OK;
+    }
+    STDMETHOD(GetInputChannelCount)(UINT32* pCount) override {
+        if (!pCount) return E_POINTER;
+        *pCount = m_ch;
+        return S_OK;
+    }
+    // IAudioProcessingObjectRT
+    STDMETHOD_(UINT32, CalcInputFrames)(UINT32 outFrames) override { return outFrames; }
+    STDMETHOD_(UINT32, CalcOutputFrames)(UINT32 inFrames) override { return inFrames; }
+
     // IAudioProcessingObjectConfiguration
     STDMETHOD(LockForProcess)(UINT32 nIn, APO_CONNECTION_DESCRIPTOR** ppIn, UINT32 nOut,
                               APO_CONNECTION_DESCRIPTOR** ppOut) override {
-        HRESULT hr = CBaseAudioProcessingObject::LockForProcess(nIn, ppIn, nOut, ppOut);
-        if (FAILED(hr)) return hr;
+        if (nIn != 1 || nOut != 1 || !ppIn || !ppOut) return E_INVALIDARG;
         // الصيغة تأتي من محرك الصوت: هي نفس ما ضُبط في Advanced (معدل العينة وعدد القنوات).
         // عمق البت (24-bit مثلًا) لا يهم لأن المحرك يسلّم float32 دائمًا.
         const WAVEFORMATEX* wf = nullptr;
@@ -232,7 +301,7 @@ public:
     }
     STDMETHOD(UnlockForProcess)(void) override {
         StopBridge();
-        return CBaseAudioProcessingObject::UnlockForProcess();
+        return S_OK;
     }
 
     // IAudioProcessingObjectRT
