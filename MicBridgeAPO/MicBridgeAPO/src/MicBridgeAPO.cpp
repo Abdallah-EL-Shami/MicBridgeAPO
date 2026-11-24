@@ -49,12 +49,12 @@ static void DataPath(wchar_t* out, size_t n, const wchar_t* file) {
     swprintf_s(out, n, L"%s\\MicBridgeAPO\\%s", base, file);
 }
 
-static void Log(const char* fmt, ...) {
+static bool Log(const char* fmt, ...) {
     wchar_t path[MAX_PATH];
     DataPath(path, MAX_PATH, L"MicBridge.log");
     HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return;
+    if (h == INVALID_HANDLE_VALUE) { OutputDebugStringA("[MicBridge] unable to open MicBridge.log\n"); return false; }
     LARGE_INTEGER sz{};
     if (GetFileSizeEx(h, &sz) && sz.QuadPart > (1 << 20)) { CloseHandle(h); return; }  // سقف 1MB
     char line[512];
@@ -70,6 +70,8 @@ static void Log(const char* fmt, ...) {
     DWORD w;
     WriteFile(h, line, (DWORD)strlen(line), &w, nullptr);
     CloseHandle(h);
+    OutputDebugStringA(line);
+    return true;
 }
 
 // ---------------------------------------------------------------- الإعدادات
@@ -249,7 +251,13 @@ public:
         memcpy(*ppRegProps, RegProps(), sizeof(APO_REG_PROPERTIES));
         return S_OK;
     }
-    STDMETHOD(Initialize)(UINT32, BYTE*) override { return S_OK; }
+    STDMETHOD(Initialize)(UINT32 cbDataSize, BYTE* pbyData) override {
+        if (cbDataSize != 0 && !pbyData) { Log("Initialize rejected: null payload with size=%u", cbDataSize); return E_POINTER; }
+        if (m_initialized) { Log("Initialize rejected: already initialized"); return E_UNEXPECTED; }
+        m_initialized = true;
+        Log("Initialize succeeded: cbDataSize=%u data=%s", cbDataSize, pbyData ? "present" : "null");
+        return S_OK;
+    }
     STDMETHOD(IsInputFormatSupported)(IAudioMediaType* pOut, IAudioMediaType* pReq,
                                       IAudioMediaType** ppSupported) override {
         if (!pReq || !ppSupported) return E_POINTER;
@@ -455,7 +463,7 @@ private:
                 m_sendRing.pop(samples, n);
                 memset(h, 0, sizeof *h);
                 memcpy(h->magic, "MRSR", 4);
-                strncpy_s(h->id, sizeof h->id + 1, m_cfg.sendId, 32);
+                strncpy_s(h->id, sizeof h->id, m_cfg.sendId, _TRUNCATE);
                 h->ch = 1;
                 h->sr = m_rate;
                 h->bytes = (uint16_t)(n * sizeof(float));
@@ -531,6 +539,8 @@ private:
 
     // ------------------------------------------------------------ الحالة
     std::atomic<long> m_ref{1};
+    bool m_initialized = false;
+    bool m_locked = false;
     Config m_cfg{};
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
     std::atomic<bool> m_active{false}, m_stop{false};
@@ -549,6 +559,8 @@ private:
 class Factory : public IClassFactory {
 public:
     STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = nullptr;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IClassFactory)) {
             *ppv = static_cast<IClassFactory*>(this);
             return S_OK;
