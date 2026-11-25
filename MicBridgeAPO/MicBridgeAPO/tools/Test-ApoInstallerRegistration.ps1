@@ -60,6 +60,7 @@ Assert-Contains $apoSource 'm_latencyHns\.store' 'APO reports its configured jit
 Assert-Contains $apoSource 'm_resetProcessRequested' 'APO Reset defers process state changes to the processing thread'
 Assert-Contains $apoSource 'SO_REUSEADDR' 'APO can share the fixed ReaStream broadcast port'
 Assert-Contains $apoSource 'IsLocalIPv4' 'APO accepts only packets sourced from local interfaces'
+Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
 Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validation'
@@ -75,7 +76,7 @@ Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores Progr
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','tools/Test-ApoRuntime.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
