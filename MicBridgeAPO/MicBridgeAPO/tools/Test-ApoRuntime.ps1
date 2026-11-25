@@ -45,15 +45,22 @@ $lines.Add("Started: $(Get-Date -Format o)")
 $os = Get-CimInstance Win32_OperatingSystem
 $lines.Add("OS: $($os.Caption) $($os.Version)")
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$audiodgOwners = @()
+$audiodgOwners = @(); $cantabileOwners = @()
 foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='audiodg.exe'")) {
     try {
         $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner
-        if ($owner.ReturnValue -eq 0) { $audiodgOwners += ("{0}\\{1}" -f $owner.Domain, $owner.User) }
+        if ($owner.ReturnValue -eq 0) { $audiodgOwners += ("{0}\{1}" -f $owner.Domain, $owner.User) }
+    } catch {}
+}
+foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='Cantabile.exe'")) {
+    try {
+        $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner
+        if ($owner.ReturnValue -eq 0) { $cantabileOwners += ("{0}\{1}" -f $owner.Domain, $owner.User) }
     } catch {}
 }
 $lines.Add("CurrentUser: $currentUser")
 $lines.Add("AudioDG Owners: $($audiodgOwners -join '; ')")
+$lines.Add("Cantabile Owners: $($cantabileOwners -join '; ')")
 $lines.Add("EndpointId: $EndpointId")
 $lines.Add("DeviceState: $(Read-RegValue $capSub 'DeviceState')")
 $lines.Add("Legacy EFX CLSID: $(Read-RegValue $fxSub '{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},7')")
@@ -106,6 +113,7 @@ $checks = [ordered]@{
     StoppedSummaryAvailable = ($stoppedLine.Count -gt 0)
     NoRingOverflowDrops = ($stoppedLine.Count -gt 0 -and $sendRingDrops -eq 0 -and $recvRingDrops -eq 0)
     AudiodgSameUser = [bool]($audiodgOwners -contains $currentUser)
+    CantabileSameUserAsAudiodg = [bool](@($audiodgOwners | Where-Object { $cantabileOwners -contains $_ }).Count -gt 0)
     DllObservedInAudiodg = ($moduleSamples.Count -gt 0)
 }
 $report = New-Object System.Collections.Generic.List[string]
