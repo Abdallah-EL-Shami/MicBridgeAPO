@@ -209,6 +209,23 @@ if ($clsidRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\CLSID\$clsid" $c
 if ($apoRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" $apoRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing AudioEngine APO registration.' } }
 $audioSub = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $fxNowSub = "$capSub\$($dev.Id)\FxProperties"
+$installFilesBackup = @()
+$installFilesDir = Join-Path $transactionDir 'install-files'
+New-Item -ItemType Directory -Force -Path $installFilesDir | Out-Null
+foreach ($name in @('MicBridgeUI.ps1','uninstall.ps1','uninstall.bat')) {
+    $target = Join-Path $installDir $name
+    $backupPath = Join-Path $installFilesDir $name
+    $existed = Test-Path -LiteralPath $target
+    if ($existed) { Copy-Item -LiteralPath $target -Destination $backupPath -Force }
+    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath }
+}
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
+$shortcutBackup = Join-Path $transactionDir 'MicBridge.lnk'
+$shortcutExisted = Test-Path -LiteralPath $shortcutPath
+if ($shortcutExisted) { Copy-Item -LiteralPath $shortcutPath -Destination $shortcutBackup -Force }
+$controlPath = Join-Path $dataDir 'control.ini'
+$controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath $controlPath).Sddl } else { $null }
+$dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
 $transactionState = [pscustomobject]@{
     DeviceId = $dev.Id
     AudioProtected = Get-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG'
@@ -223,6 +240,12 @@ $transactionState = [pscustomobject]@{
     DllExisted = Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll')
     IniExisted = Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini')
     ControlExisted = Test-Path -LiteralPath (Join-Path $dataDir 'control.ini')
+    DataDirSddl = $dataDirSddl
+    ControlSddl = $controlSddl
+    InstallFiles = $installFilesBackup
+    ShortcutExisted = $shortcutExisted
+    ShortcutBackup = $shortcutBackup
+    InstallDirExisted = Test-Path -LiteralPath $installDir
 }
 $transactionState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $transactionStateFile -Encoding UTF8
 
@@ -244,8 +267,10 @@ $ini = Join-Path $dataDir 'MicBridge.ini'
 if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot 'MicBridge.ini') $ini }
 $ctrl = Join-Path $dataDir 'control.ini'
 if (-not (Test-Path $ctrl)) { Set-Content $ctrl "[Control]`r`nEnabled=1`r`n" -Encoding ASCII }
-icacls $dataDir /grant '*S-1-5-19:(OI)(CI)M' | Out-Null    # LOCAL SERVICE: يكتب السجل والحالة
-icacls $ctrl    /grant '*S-1-5-32-545:M'      | Out-Null    # المستخدمون: يغيّرون التشغيل/الإيقاف من الواجهة
+& icacls.exe $dataDir /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed for $dataDir with exit code $LASTEXITCODE" }
+& icacls.exe $ctrl /grant '*S-1-5-32-545:M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed for $ctrl with exit code $LASTEXITCODE" }
 
 # ---- 5) تسجيل COM و APO
 $dllPath = Join-Path $installDir 'MicBridgeAPO.dll'
@@ -354,8 +379,35 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             if ($tx.ApoRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'audioengine-apo.reg'))) { & reg.exe import (Join-Path $transactionDir 'audioengine-apo.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior AudioEngine APO registration.' } }
             if (-not $tx.IniExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -Force -ErrorAction SilentlyContinue }
             if (-not $tx.ControlExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'control.ini') -Force -ErrorAction SilentlyContinue }
+            foreach ($fileState in @($tx.InstallFiles)) {
+                $target = Join-Path $installDir $fileState.Name
+                if ($fileState.Existed -and (Test-Path -LiteralPath $fileState.Backup)) {
+                    Copy-Item -LiteralPath $fileState.Backup -Destination $target -Force -ErrorAction Stop
+                } elseif (-not $fileState.Existed) {
+                    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if ($tx.ShortcutExisted -and (Test-Path -LiteralPath $tx.ShortcutBackup)) {
+                Copy-Item -LiteralPath $tx.ShortcutBackup -Destination $shortcutPath -Force -ErrorAction Stop
+            } elseif (-not $tx.ShortcutExisted) {
+                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($tx.DataDirSddl) {
+                $acl = Get-Acl -LiteralPath $dataDir
+                $acl.SetSecurityDescriptorSddlForm([string]$tx.DataDirSddl)
+                Set-Acl -LiteralPath $dataDir -AclObject $acl
+            }
+            if ($tx.ControlSddl -and (Test-Path -LiteralPath $controlPath)) {
+                $acl = Get-Acl -LiteralPath $controlPath
+                $acl.SetSecurityDescriptorSddlForm([string]$tx.ControlSddl)
+                Set-Acl -LiteralPath $controlPath -AclObject $acl
+            }
             if (-not $tx.DllExisted -and -not $dllBackupPath) { Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue }
-            Write-InstallLog 'INFO' 'Registry endpoint, COM registration, and newly-created configuration state rolled back to the pre-attempt snapshot.'
+            if (-not $tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) {
+                $remaining = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
+                if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue }
+            }
+            Write-InstallLog 'INFO' 'Registry endpoint, COM registration, files, ACLs, and newly-created configuration state rolled back to the pre-attempt snapshot.'
         } catch {
             Write-InstallLog 'CRITICAL' "Transaction rollback was incomplete: $($_.Exception.ToString())"
             Write-Warning "تعذر إكمال التراجع التلقائي: $($_.Exception.Message). احتفظ بمجلد المعاملة وbackup.json."
