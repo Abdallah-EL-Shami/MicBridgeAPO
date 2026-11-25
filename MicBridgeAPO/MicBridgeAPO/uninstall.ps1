@@ -269,5 +269,9 @@ Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 
 
 Restart-Service -Name Audiosrv -Force
 Start-Sleep -Seconds 2
-if (Test-Path -LiteralPath $installDir) { Remove-Item -Recurse -Force $installDir -ErrorAction Stop }
+if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
+    Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
+} elseif (Test-Path -LiteralPath $installDir) {
+    Remove-Item -Recurse -Force $installDir -ErrorAction Stop
+}
 Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
