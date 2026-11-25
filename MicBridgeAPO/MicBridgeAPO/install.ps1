@@ -213,7 +213,7 @@ $fxNowSub = "$capSub\$($dev.Id)\FxProperties"
 $installFilesBackup = @()
 $installFilesDir = Join-Path $transactionDir 'install-files'
 New-Item -ItemType Directory -Force -Path $installFilesDir | Out-Null
-foreach ($name in @('MicBridgeUI.ps1','uninstall.ps1','uninstall.bat')) {
+foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
     $target = Join-Path $installDir $name
     $backupPath = Join-Path $installFilesDir $name
     $existed = Test-Path -LiteralPath $target
@@ -267,7 +267,7 @@ if (Test-Path -LiteralPath $installedDll) {
 $dllReplacementStarted = $true
 Copy-Item -LiteralPath $DllSource -Destination $installedDll -Force -ErrorAction Stop
 Write-InstallLog 'INFO' "New DLL copied. SHA256=$((Get-FileHash -LiteralPath $installedDll -Algorithm SHA256).Hash)"
-foreach ($f in 'MicBridgeUI.ps1','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
+foreach ($f in 'MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
 $ini = Join-Path $dataDir 'MicBridge.ini'
 if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot 'MicBridge.ini') $ini }
 $ctrl = Join-Path $dataDir 'control.ini'
