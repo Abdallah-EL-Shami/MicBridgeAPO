@@ -16,6 +16,26 @@ jobs:
       - name: Check installer registration and rollback safety
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-ApoInstallerRegistration.ps1
+      - name: Stage complete install package
+        shell: pwsh
+        run: |
+          $source = 'MicBridgeAPO/MicBridgeAPO'
+          $package = 'MicBridgeAPO-Package'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item 'build/Release/MicBridgeAPO.dll' $package
+          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md')
+          foreach ($file in $files) {
+            $path = Join-Path $source $file
+            if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }
+            Copy-Item -LiteralPath $path -Destination $package
+          }
+          Get-ChildItem $package | Select-Object Name,Length | Format-Table -AutoSize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MicBridgeAPO-Install-Package
+          path: MicBridgeAPO-Package/*
+          if-no-files-found: error
+          retention-days: 90
       - uses: actions/upload-artifact@v4
         with:
           name: MicBridgeAPO-dll
