@@ -80,6 +80,28 @@ Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores Progr
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
 
+# Exercise the exact REG_MULTI_SZ write/read contract in an isolated HKCU key.
+$registryProbePath = "HKCU:\\Software\\MicBridgeAPO-CI-$PID"
+try {
+    New-Item -Path $registryProbePath -Force | Out-Null
+    $expectedEffects = [string[]]@('{11111111-1111-1111-1111-111111111111}','{22222222-2222-2222-2222-222222222222}')
+    Set-ItemProperty -LiteralPath $registryProbePath -Name 'CompositeEffects' -Value $expectedEffects -Type MultiString
+    $probeKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\\MicBridgeAPO-CI-$PID")
+    if (-not $probeKey) { throw 'Could not reopen HKCU composite EFX probe key.' }
+    try {
+        if ($probeKey.GetValueKind('CompositeEffects') -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+            throw 'Set-ItemProperty did not create REG_MULTI_SZ.'
+        }
+        $actualEffects = [string[]]@($probeKey.GetValue('CompositeEffects'))
+        if ($actualEffects.Count -ne 2 -or $actualEffects[0] -ne $expectedEffects[0] -or $actualEffects[1] -ne $expectedEffects[1]) {
+            throw 'REG_MULTI_SZ values did not round-trip in order.'
+        }
+    } finally { $probeKey.Close() }
+    Write-Host 'PASS: REG_MULTI_SZ registry write/read round-trip'
+} finally {
+    Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 foreach ($scriptName in @('install.ps1','uninstall.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
