@@ -557,7 +557,7 @@ public:
             if (!silent && inb != outb) memcpy(outb, inb, (size_t)frames * ch * sizeof(float));
         };
 
-        if (!m_active.load(std::memory_order_relaxed) || frames == 0 || frames > m_scratch.size()) {
+        if (!m_active.load(std::memory_order_relaxed) || !m_userEnabled.load(std::memory_order_relaxed) || frames == 0 || frames > m_scratch.size()) {
             passthrough();
             return;
         }
@@ -595,9 +595,15 @@ private:
     void StartBridge() {
         StopBridge();
         LoadConfig(m_cfg);
+        wchar_t controlPath[MAX_PATH] = {};
+        DataPath(controlPath, MAX_PATH, L"control.ini");
+        m_userEnabled.store(GetPrivateProfileIntW(L"Control", L"Enabled", 1, controlPath) != 0,
+                            std::memory_order_release);
+        m_lastRxTick.store(0, std::memory_order_release);
         if (!m_cfg.enabled) {
             m_latencyHns.store(0, std::memory_order_release);
             Log("Disabled in INI: pass-through");
+            WriteStatus();
             return;
         }
         if (m_cfg.port < 1 || m_cfg.port > 65535 || !m_cfg.sendId[0] || !m_cfg.recvId[0] ||
@@ -663,10 +669,12 @@ private:
         if (sendState != 1 || recvState != 1) {
             Log("Bridge startup degraded: sendState=%d recvState=%d; keeping safe pass-through", sendState, recvState);
             StopBridge();
+            WriteStatus();
             return;
         }
         m_latencyHns.store((HNSTIME)((m_jitter * 10000000ull) / m_rate), std::memory_order_release);
         m_active = true;
+        WriteStatus();
         Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples latencyHns=%lld",
             m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter,
             (long long)m_latencyHns.load(std::memory_order_relaxed));
@@ -800,7 +808,25 @@ private:
             Log("recv: GetAdaptersAddresses failed %lu; only loopback will be accepted", addressStatus);
         else
             Log("recv: enumerated %u local IPv4 addresses", (unsigned)localAddresses.size());
+        ULONGLONG nextControlPoll = 0;
+        ULONGLONG nextStatusWrite = 0;
         while (!m_stop) {
+            const ULONGLONG now = GetTickCount64();
+            if (now >= nextControlPoll) {
+                wchar_t controlPath[MAX_PATH] = {};
+                DataPath(controlPath, MAX_PATH, L"control.ini");
+                const bool requestedEnabled = GetPrivateProfileIntW(L"Control", L"Enabled", 1, controlPath) != 0;
+                const bool previousEnabled = m_userEnabled.exchange(requestedEnabled, std::memory_order_acq_rel);
+                if (previousEnabled != requestedEnabled) {
+                    m_resetProcessRequested.store(true, std::memory_order_release);
+                    Log("UI control changed: Enabled=%d", requestedEnabled);
+                }
+                nextControlPoll = now + 100;
+            }
+            if (now >= nextStatusWrite) {
+                WriteStatus();
+                nextStatusWrite = now + 500;
+            }
             if (m_resetRecvRequested.exchange(false, std::memory_order_acq_rel)) {
                 m_resampler.Reset();
                 m_resamplerInputRate = 0;
@@ -837,6 +863,8 @@ private:
             // ExtractMono averages the channels into the mono bridge stream.
             mb::ExtractMono(parsed.data, frames, chs, -1, in);
             ++m_pktRx;
+            m_lastRxTick.store(GetTickCount64(), std::memory_order_release);
+            if (!m_userEnabled.load(std::memory_order_acquire)) continue;
 
             if (sr == m_rate) {
                 m_resampler.Reset();
@@ -858,13 +886,54 @@ private:
         closesocket(s);
     }
 
+
+    void WriteStatus() {
+        wchar_t statusPath[MAX_PATH] = {}, tempPath[MAX_PATH] = {};
+        DataPath(statusPath, MAX_PATH, L"status.txt");
+        swprintf_s(tempPath, L"%s.tmp", statusPath);
+        const bool configured = m_cfg.enabled;
+        const bool userEnabled = m_userEnabled.load(std::memory_order_acquire);
+        const bool active = m_active.load(std::memory_order_acquire);
+        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG lastRx = m_lastRxTick.load(std::memory_order_acquire);
+        const bool receiving = lastRx != 0 && now - lastRx < 1500;
+        const char* state = !configured ? "DISABLED" :
+            (!userEnabled ? "BYPASS" : (!active || !receiving ? "FALLBACK" : "PROCESSING"));
+        FILETIME ft{};
+        GetSystemTimeAsFileTime(&ft);
+        ULARGE_INTEGER stamp{};
+        stamp.LowPart = ft.dwLowDateTime;
+        stamp.HighPart = ft.dwHighDateTime;
+        char body[512] = {};
+        const int length = sprintf_s(body, sizeof(body),
+            "ts=%llu\nstate=%s\nbufMs=%.2f\nblockMs=%.2f\nrate=%u\nch=%u\ntx=%u\nrx=%u\nunderruns=%u\nbind=%d\n",
+            (unsigned long long)stamp.QuadPart, state,
+            m_rate ? (double)m_jitter * 1000.0 / m_rate : 0.0,
+            m_rate ? (double)m_maxFrames * 1000.0 / m_rate : 0.0,
+            m_rate, m_ch, m_pktTx.load(std::memory_order_relaxed),
+            m_pktRx.load(std::memory_order_relaxed), m_underruns.load(std::memory_order_relaxed),
+            m_recvStartup.load(std::memory_order_acquire) == 1 ? 1 : 0);
+        if (length <= 0) return;
+        HANDLE file = CreateFileW(tempPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        const BOOL ok = WriteFile(file, body, (DWORD)length, &written, nullptr);
+        FlushFileBuffers(file);
+        CloseHandle(file);
+        if (!ok || written != (DWORD)length) { DeleteFileW(tempPath); return; }
+        if (!MoveFileExW(tempPath, statusPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            DeleteFileW(tempPath);
+    }
+
     // ------------------------------------------------------------ الحالة
     std::atomic<long> m_ref{1};
     bool m_initialized = false;
     bool m_locked = false;
     Config m_cfg{};
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
-    std::atomic<bool> m_active{false}, m_stop{false};
+    std::atomic<bool> m_active{false}, m_stop{false}, m_userEnabled{true};
+    std::atomic<ULONGLONG> m_lastRxTick{0};
     std::atomic<HNSTIME> m_latencyHns{0};
     std::atomic<bool> m_resetProcessRequested{false}, m_resetRecvRequested{false};
     std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
