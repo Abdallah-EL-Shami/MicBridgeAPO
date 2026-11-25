@@ -316,12 +316,6 @@ if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
     Remove-Item -Recurse -Force $installDir -ErrorAction Stop
 }
 Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
-)) {
-            throw 'A required persistent COM recovery file is missing or invalid; uninstall stopped before changes.'
-        }
-    }
-}
-
 # Read-only global preflight: every capture endpoint value must have its documented registry type.
 $preflightRoot = $hklm.OpenSubKey($capSub, $false)
 if (-not $preflightRoot) { throw 'Cannot enumerate capture endpoints; uninstall stopped before changes.' }
