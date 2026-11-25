@@ -72,4 +72,15 @@ Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores Progr
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
 
+foreach ($scriptName in @('install.ps1','uninstall.ps1','tools/Test-ApoRuntime.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+    $scriptPath = Join-Path $root $scriptName
+    $tokens = $null; $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count -gt 0) {
+        $parseErrors | ForEach-Object { Write-Error ("PowerShell parse error in {0}: {1}" -f $scriptName, $_.Message) }
+        throw "PowerShell syntax validation failed for $scriptName"
+    }
+    Write-Host "PASS: PowerShell syntax $scriptName"
+}
+
 Write-Host 'All installer registration static checks passed.'
