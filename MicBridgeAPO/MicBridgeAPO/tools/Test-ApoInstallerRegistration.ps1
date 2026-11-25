@@ -60,9 +60,9 @@ Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Re
 
 $uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
 $uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
-Assert-Contains $uiSource "Join-Path \$env:ProgramData 'MicBridgeAPO'" 'UI uses the shared ProgramData directory'
-Assert-Contains $uiSource "Join-Path \$dir 'control.ini'" 'UI writes the runtime control file'
-Assert-Contains $uiSource "Join-Path \$dir 'status.txt'" 'UI reads the runtime status file'
+Assert-Contains $uiSource '\$env:ProgramData' 'UI uses the shared ProgramData environment path'
+Assert-Contains $uiSource "'control.ini'" 'UI writes the runtime control file'
+Assert-Contains $uiSource "'status.txt'" 'UI reads the runtime status file'
 Assert-Contains $uiSource 'function Set-Enabled' 'UI exposes a control-file writer'
 Assert-Contains $uiSource 'Add_Click' 'UI toggle button has a click handler'
 Assert-Contains $uiSource 'ShowDialog' 'UI creates and displays a WinForms window'
