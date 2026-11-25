@@ -17,11 +17,11 @@ $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
 $fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15' # PKEY_CompositeFX_EndpointEffectClsid (REG_MULTI_SZ)
-$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Association
 $ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
+$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $backupFile = Join-Path $dataDir 'backup.json'
 $installLog = Join-Path $dataDir 'Install.log'
 $dllBackupPath = $null
@@ -312,21 +312,18 @@ function Grant-Key([string]$sub) {
 Grant-Key $devSub
 if (-not (Test-Path "$capRoot\$($dev.Id)\FxProperties")) { New-Item "$capRoot\$($dev.Id)\FxProperties" | Out-Null }
 Grant-Key $fxSub
-$associationToUse = if ($transactionState.FxAssociation.Exists) { [string]$transactionState.FxAssociation.Value } elseif ($backup.PrevFxAssociation) { [string]$backup.PrevFxAssociation } else { $ksNodeTypeAny }
+$associationToUse = if ($transactionState.FxAssociation.Exists) { [string]$transactionState.FxAssociation.Value } else { $ksNodeTypeAny }
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $associationToUse -Type String
 
-# Restore the legacy single-CLSID property to its pre-MicBridge value, then register
-# MicBridge alongside the original EFX chain through the Windows 10 composite property.
-if ($backup.PrevEndpointEffect) {
-    Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -Value $backup.PrevEndpointEffect -Type String
-} else {
-    Remove-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -ErrorAction SilentlyContinue
-}
+# Build the live EFX chain from the endpoint's CURRENT driver state, never from
+# backup.json. On a clean endpoint with no vendor EFX this naturally starts empty.
+# Keep the legacy single-CLSID property untouched; CompositeFX is the multi-APO
+# registration used on Windows 10 version 1803 and later.
 $efxList = @()
 if ($transactionState.FxComposite.Exists) {
     $efxList = @($transactionState.FxComposite.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-} elseif ($backup.PrevEndpointEffect -and [string]$backup.PrevEndpointEffect -ne $clsid) {
-    $efxList = @([string]$backup.PrevEndpointEffect)
+} elseif ($transactionState.FxEffect.Exists -and [string]$transactionState.FxEffect.Value -ne $clsid) {
+    $efxList = @([string]$transactionState.FxEffect.Value)
 }
 # Replace only our own CLSID and retain the current vendor list, including later driver updates.
 $efxList = @($efxList | Where-Object { [string]$_ -ne $clsid })
