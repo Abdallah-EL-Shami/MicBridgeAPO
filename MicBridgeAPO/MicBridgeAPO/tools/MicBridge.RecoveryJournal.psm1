@@ -8,6 +8,8 @@ function Write-MBRecoveryJsonAtomic {
         New-Item -ItemType Directory -Force -Path $directory | Out-Null
     }
     $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    # Never delete the last known-good journal before the replacement is durable.
+    $backup = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.previous')
     $json = ConvertTo-Json -InputObject $Value -Depth 20
     $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json)
     $stream = $null
@@ -18,16 +20,14 @@ function Write-MBRecoveryJsonAtomic {
         $stream.Dispose()
         $stream = $null
         if (Test-Path -LiteralPath $Path) {
-            $backup = "$Path.previous"
-            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
             [IO.File]::Replace($temp,$Path,$backup,$true)
-            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
         } else {
             [IO.File]::Move($temp,$Path)
         }
     } finally {
         if ($stream) { $stream.Dispose() }
         if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        # A backup left by a crash is intentionally retained for forensic/manual recovery.
     }
 }
 
@@ -48,13 +48,14 @@ function New-MBRecoveryJournal {
         if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$') { throw "Invalid recovery step ID: $id" }
         $steps += [pscustomobject]@{ Id=$id; State='Pending'; Attempts=0; LastError=$null }
     }
+    $now = [DateTime]::UtcNow.ToString('o')
     $journal = [pscustomobject]@{
         SchemaVersion=1
         TransactionId=[guid]::NewGuid().ToString('D')
         Operation=$Operation
         DeviceId=$DeviceId.ToString('D')
-        CreatedUtc=[DateTime]::UtcNow.ToString('o')
-        UpdatedUtc=[DateTime]::UtcNow.ToString('o')
+        CreatedUtc=$now
+        UpdatedUtc=$now
         Steps=$steps
     }
     Write-MBRecoveryJsonAtomic -Path $Path -Value $journal
@@ -63,7 +64,12 @@ function New-MBRecoveryJournal {
 
 function Read-MBRecoveryJournal {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateSet('InstallRollback','Uninstall')][string]$ExpectedOperation,
+        [guid]$ExpectedDeviceId,
+        [string[]]$ExpectedStepIds
+    )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Recovery journal is missing: $Path"
     }
@@ -73,9 +79,21 @@ function Read-MBRecoveryJournal {
         throw "Recovery journal is unreadable: $($_.Exception.Message)"
     }
     $parsedDeviceId = [guid]::Empty
+    $parsedTransactionId = [guid]::Empty
+    $created = [DateTime]::MinValue
+    $updated = [DateTime]::MinValue
     if ($j.SchemaVersion -ne 1 -or $j.Operation -notin @('InstallRollback','Uninstall') -or
-        -not [guid]::TryParse([string]$j.DeviceId,[ref]$parsedDeviceId)) {
-        throw 'Recovery journal schema or identity is invalid; refusing recovery.'
+        -not [guid]::TryParse([string]$j.DeviceId,[ref]$parsedDeviceId) -or
+        -not [guid]::TryParse([string]$j.TransactionId,[ref]$parsedTransactionId) -or
+        -not [DateTime]::TryParse([string]$j.CreatedUtc,[ref]$created) -or
+        -not [DateTime]::TryParse([string]$j.UpdatedUtc,[ref]$updated)) {
+        throw 'Recovery journal schema, timestamps, or identity are invalid; refusing recovery.'
+    }
+    if ($ExpectedOperation -and $j.Operation -ne $ExpectedOperation) {
+        throw 'Recovery journal operation does not match the requested operation; refusing recovery.'
+    }
+    if ($PSBoundParameters.ContainsKey('ExpectedDeviceId') -and $parsedDeviceId -ne $ExpectedDeviceId) {
+        throw 'Recovery journal endpoint identity does not match the requested device; refusing recovery.'
     }
     if ($null -eq $j.Steps -or @($j.Steps).Count -eq 0) {
         throw 'Recovery journal has no steps; refusing recovery.'
@@ -91,6 +109,12 @@ function Read-MBRecoveryJournal {
     if (@($ids | Select-Object -Unique).Count -ne $ids.Count) {
         throw 'Recovery journal contains duplicate step IDs; refusing recovery.'
     }
+    if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) {
+        if (@($ExpectedStepIds).Count -ne $ids.Count) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
+        for ($i=0; $i -lt $ids.Count; $i++) {
+            if ([string]$ExpectedStepIds[$i] -ne $ids[$i]) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
+        }
+    }
     return $j
 }
 
@@ -100,47 +124,71 @@ function Invoke-MBRecoveryStep {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$StepId,
         [Parameter(Mandatory)][scriptblock]$Action,
-        [Parameter(Mandatory)][scriptblock]$Verify
+        [Parameter(Mandatory)][scriptblock]$Verify,
+        [ValidateSet('InstallRollback','Uninstall')][string]$ExpectedOperation,
+        [guid]$ExpectedDeviceId,
+        [string[]]$ExpectedStepIds,
+        [int]$LockTimeoutSeconds = 0
     )
-    $j = Read-MBRecoveryJournal -Path $Path
-    $stepMatches = @($j.Steps | Where-Object { $_.Id -eq $StepId })
-    if ($stepMatches.Count -ne 1) {
-        throw "Recovery step '$StepId' is not uniquely defined in the journal."
-    }
-    $step = $stepMatches[0]
-    if ($step.State -eq 'Completed') {
-        if (-not (& $Verify)) {
-            throw "Completed recovery step '$StepId' no longer satisfies its postcondition."
+    $lockPath = "$Path.lock"
+    $lock = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(0,$LockTimeoutSeconds))
+    do {
+        try {
+            $lock = New-Object IO.FileStream($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        } catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $deadline) { throw 'Another MicBridge recovery operation holds the journal lock; refusing concurrent recovery.' }
+            Start-Sleep -Milliseconds 100
         }
-        return
-    }
-    # A Running step is replayable. Callers must provide idempotent actions and a reliable postcondition.
-    if (& $Verify) {
-        $step.State = 'Completed'
-        $step.LastError = $null
-        $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
-        Write-MBRecoveryJsonAtomic -Path $Path -Value $j
-        return
-    }
-    $step.State = 'Running'
-    $step.Attempts = [int]$step.Attempts + 1
-    $step.LastError = $null
-    $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
-    Write-MBRecoveryJsonAtomic -Path $Path -Value $j
+    } while (-not $lock)
     try {
-        & $Action
-        if (-not (& $Verify)) {
-            throw "Postcondition failed for recovery step '$StepId'."
+        $readArgs = @{ Path=$Path }
+        if ($ExpectedOperation) { $readArgs.ExpectedOperation=$ExpectedOperation }
+        if ($PSBoundParameters.ContainsKey('ExpectedDeviceId')) { $readArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) { $readArgs.ExpectedStepIds=$ExpectedStepIds }
+        $j = Read-MBRecoveryJournal @readArgs
+        $stepMatches = @($j.Steps | Where-Object { $_.Id -eq $StepId })
+        if ($stepMatches.Count -ne 1) {
+            throw "Recovery step '$StepId' is not uniquely defined in the journal."
         }
-        $step.State = 'Completed'
+        $step = $stepMatches[0]
+        if ($step.State -eq 'Completed') {
+            if (-not (& $Verify)) {
+                throw "Completed recovery step '$StepId' no longer satisfies its postcondition."
+            }
+            return
+        }
+        # A Running step may only be replayed when the caller's action is idempotent
+        # and Verify reliably detects whether its external side effect already occurred.
+        if (& $Verify) {
+            $step.State = 'Completed'
+            $step.LastError = $null
+            $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
+            Write-MBRecoveryJsonAtomic -Path $Path -Value $j
+            return
+        }
+        $step.State = 'Running'
+        $step.Attempts = [int]$step.Attempts + 1
         $step.LastError = $null
         $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
         Write-MBRecoveryJsonAtomic -Path $Path -Value $j
-    } catch {
-        $step.LastError = $_.Exception.Message
-        $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
-        try { Write-MBRecoveryJsonAtomic -Path $Path -Value $j } catch { }
-        throw
+        try {
+            & $Action
+            if (-not (& $Verify)) {
+                throw "Postcondition failed for recovery step '$StepId'."
+            }
+            $step.State = 'Completed'
+            $step.LastError = $null
+            $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
+            Write-MBRecoveryJsonAtomic -Path $Path -Value $j
+        } catch {
+            $step.LastError = $_.Exception.Message
+            $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
+            try { Write-MBRecoveryJsonAtomic -Path $Path -Value $j } catch { }
+            throw
+        }
+    } finally {
+        if ($lock) { $lock.Dispose() }
     }
 }
 
