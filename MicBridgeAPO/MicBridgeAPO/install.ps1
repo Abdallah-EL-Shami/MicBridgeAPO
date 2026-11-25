@@ -132,12 +132,12 @@ if (Test-Path -LiteralPath $backupFile) {
     if ($existingBackup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
         if (($existingBackup.CreatedFx -eq $true) -and ($null -eq $existingBackup.FxKeySddl)) {
             $existingBackup | Add-Member -NotePropertyName PrevFxAssociation -NotePropertyValue $null
-            $existingBackup | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backupFile -Encoding UTF8
-            Write-InstallLog 'WARN' 'Legacy backup safely migrated: original backup proves FxProperties did not exist; original association was absent.'
+            Write-InstallLog 'WARN' 'Legacy backup compatibility field added in memory only; original backup.json was left byte-for-byte unchanged.'
         } else {
             throw "ملف backup.json قديم ولا يحتوي PrevFxAssociation، ولا توجد بيانات كافية لإثبات قيمتها الأصلية. أوقفت التثبيت دون تخمين أو تعديل النسخة الاحتياطية."
         }
     }
+    $backup = $existingBackup
 }
 Write-Host "تم العثور على: $($dev.Names)  ($($dev.Id))"
 $devSub = "$capSub\$($dev.Id)"
@@ -166,7 +166,6 @@ if (-not (Test-Path $backupFile)) {
     $backup | ConvertTo-Json -Depth 5 | Set-Content $backupFile -Encoding UTF8
     Write-Host "حُفظت القيم والصلاحيات الأصلية في $backupFile"
 } else {
-    $backup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
     Write-InstallLog 'INFO' 'Existing backup validated and retained; registry state was not used to guess historical values.'
 }
 
