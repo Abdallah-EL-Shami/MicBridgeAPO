@@ -41,6 +41,8 @@ static const GUID CLSID_MicBridgeAPO =
     {0xA3F6C1D2, 0x7B84, 0x4E19, {0x9C, 0x55, 0x2D, 0x8E, 0x1F, 0x0B, 0x6A, 0x47}};
 
 static std::atomic<long> g_objects{0};
+static std::atomic<long> g_factoryRefs{0};
+static std::atomic<long> g_serverLocks{0};
 static HMODULE g_module = nullptr;
 
 // ---------------------------------------------------------------- مسارات وسجل
@@ -788,8 +790,16 @@ public:
         Log("Factory::QueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
         return hr;
     }
-    STDMETHOD_(ULONG, AddRef)() override { return 2; }
-    STDMETHOD_(ULONG, Release)() override { return 1; }
+    STDMETHOD_(ULONG, AddRef)() override {
+        const long refs = ++m_ref;
+        ++g_factoryRefs;
+        return static_cast<ULONG>(refs);
+    }
+    STDMETHOD_(ULONG, Release)() override {
+        const long refs = --m_ref;
+        --g_factoryRefs;
+        return static_cast<ULONG>(refs);
+    }
     STDMETHOD(CreateInstance)(IUnknown* outer, REFIID iid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
@@ -810,7 +820,22 @@ public:
         o->Release();
         return hr;
     }
-    STDMETHOD(LockServer)(BOOL) override { return S_OK; }
+    STDMETHOD(LockServer)(BOOL lock) override {
+        if (lock) {
+            ++g_serverLocks;
+        } else {
+            long current = g_serverLocks.load();
+            while (current > 0 && !g_serverLocks.compare_exchange_weak(current, current - 1)) {}
+            if (current <= 0) {
+                Log("Factory::LockServer(FALSE) ignored: no matching server lock");
+                return E_UNEXPECTED;
+            }
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<long> m_ref{0};
 };
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
@@ -838,7 +863,7 @@ extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, voi
     return hr;
 }
 
-extern "C" HRESULT __stdcall DllCanUnloadNow() { return g_objects.load() == 0 ? S_OK : S_FALSE; }
+extern "C" HRESULT __stdcall DllCanUnloadNow() { return (g_objects.load() == 0 && g_factoryRefs.load() == 0 && g_serverLocks.load() == 0) ? S_OK : S_FALSE; }
 
 BOOL APIENTRY DllMain(HMODULE h, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
