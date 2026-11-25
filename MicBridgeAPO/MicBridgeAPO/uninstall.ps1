@@ -95,6 +95,10 @@ if (Test-Path $backupFile) {
             $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
             if ([string]$compositeState.DeviceId -ne [string]$b.DeviceId) { throw 'Composite EFX backup endpoint mismatch; refusing to restore another device.' }
             $originalList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            $baselineList = @($originalList)
+            if (-not $compositeState.Exists -and $b.PrevEndpointEffect -and [string]$b.PrevEndpointEffect -ne $clsid) {
+                $baselineList = @([string]$b.PrevEndpointEffect)
+            }
             $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\$($b.DeviceId)\FxProperties", $true)
             if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
             try {
@@ -104,8 +108,8 @@ if (Test-Path $backupFile) {
                         throw 'Current composite EFX value is not REG_MULTI_SZ; refusing to alter it during uninstall.'
                     }
                     $currentList = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
-                } elseif ($compositeState.Exists) {
-                    $currentList = @($originalList)
+                } else {
+                    $currentList = @($baselineList)
                 }
                 $originalHadMicBridge = ($originalList -contains $clsid)
                 if ($originalHadMicBridge) {
@@ -113,7 +117,17 @@ if (Test-Path $backupFile) {
                 } else {
                     $currentList = @($currentList | Where-Object { [string]$_ -ne $clsid })
                 }
-                if ($currentList.Count -gt 0) {
+
+                $matchesBaseline = ($currentList.Count -eq $baselineList.Count)
+                if ($matchesBaseline) {
+                    for ($index = 0; $index -lt $currentList.Count; $index++) {
+                        if ([string]$currentList[$index] -ne [string]$baselineList[$index]) { $matchesBaseline = $false; break }
+                    }
+                }
+                if (-not $compositeState.Exists -and $matchesBaseline) {
+                    # No vendor additions occurred; restore the original absence of the composite property.
+                    $key.DeleteValue($fxCompositeValue, $false)
+                } elseif ($currentList.Count -gt 0) {
                     $key.SetValue($fxCompositeValue, [string[]]$currentList, [Microsoft.Win32.RegistryValueKind]::MultiString)
                 } else {
                     $key.DeleteValue($fxCompositeValue, $false)
