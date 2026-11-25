@@ -103,14 +103,32 @@ foreach ($item in $expectedComFiles) {
         if (-not (Test-Path -LiteralPath $expectedPath -PathType Leaf)) {
             throw "Required COM recovery file '$($item.Name)' is missing; uninstall stopped before changes."
         }
-        $lines = @(Get-Content -LiteralPath $expectedPath -ErrorAction Stop)
-        if ($lines.Count -lt 2 -or $lines[0] -ne 'Windows Registry Editor Version 5.00') {
+        $regLines = @(Get-Content -LiteralPath $expectedPath -ErrorAction Stop)
+        if ($regLines.Count -lt 2 -or $regLines[0] -ne 'Windows Registry Editor Version 5.00') {
             throw "COM recovery file '$($item.Name)' has an invalid registry export header; uninstall stopped before changes."
         }
         $expectedRoot = 'HKEY_LOCAL_MACHINE\' + $item.Key
-        $sections = @($lines | Where-Object { $_ -match '^\[([^\]]+)\]
+        $sections = @()
+        foreach ($regLine in $regLines) {
+            if ($regLine.StartsWith('[') -and $regLine.EndsWith(']')) {
+                $sections += $regLine.Substring(1, $regLine.Length - 2)
+            }
+        }
+        if ($sections.Count -eq 0 -or $sections -notcontains $expectedRoot) {
+            throw "COM recovery file '$($item.Name)' does not contain its expected registry root; uninstall stopped before changes."
+        }
+        foreach ($section in $sections) {
+            if (-not [string]::Equals($section, $expectedRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                -not $section.StartsWith($expectedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                throw "COM recovery file '$($item.Name)' contains an unexpected registry tree; uninstall stopped before changes."
+            }
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace([string]$preflightBackup.DevKeySddl)) {
     throw 'backup.json has no endpoint ACL snapshot; uninstall stopped before changes to avoid guessing original permissions.'
 }
+
 if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
     throw 'Composite EFX recovery record is missing; uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
 }
