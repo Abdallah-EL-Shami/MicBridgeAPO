@@ -307,7 +307,7 @@ function Grant-Key([string]$sub) {
 Grant-Key $devSub
 if (-not (Test-Path "$capRoot\$($dev.Id)\FxProperties")) { New-Item "$capRoot\$($dev.Id)\FxProperties" | Out-Null }
 Grant-Key $fxSub
-$associationToUse = if ($backup.PrevFxAssociation) { [string]$backup.PrevFxAssociation } else { $ksNodeTypeAny }
+$associationToUse = if ($transactionState.FxAssociation.Exists) { [string]$transactionState.FxAssociation.Value } elseif ($backup.PrevFxAssociation) { [string]$backup.PrevFxAssociation } else { $ksNodeTypeAny }
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $associationToUse -Type String
 
 # Restore the legacy single-CLSID property to its pre-MicBridge value, then register
@@ -317,10 +317,15 @@ if ($backup.PrevEndpointEffect) {
 } else {
     Remove-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -ErrorAction SilentlyContinue
 }
-$compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
-$efxList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-if (-not $efxList) { $efxList = @() }
-if ($efxList -notcontains $clsid) { $efxList += $clsid }
+$efxList = @()
+if ($transactionState.FxComposite.Exists) {
+    $efxList = @($transactionState.FxComposite.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+} elseif ($backup.PrevEndpointEffect -and [string]$backup.PrevEndpointEffect -ne $clsid) {
+    $efxList = @([string]$backup.PrevEndpointEffect)
+}
+# Replace only our own CLSID and retain the current vendor list, including later driver updates.
+$efxList = @($efxList | Where-Object { [string]$_ -ne $clsid })
+$efxList += $clsid
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxCompositeValue -Value ([string[]]$efxList) -Type MultiString
 Write-InstallLog 'INFO' ("Registered composite EFX list: {0}" -f ($efxList -join '; '))
 
