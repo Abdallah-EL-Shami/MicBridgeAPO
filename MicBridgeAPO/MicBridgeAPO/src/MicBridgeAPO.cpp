@@ -911,7 +911,7 @@ private:
             m_rate ? (double)m_jitter * 1000.0 / m_rate : 0.0,
             m_rate ? (double)m_maxFrames * 1000.0 / m_rate : 0.0,
             m_rate, m_ch, m_pktTx.load(std::memory_order_relaxed),
-            m_pktRx.load(std::memory_order_relaxed), m_underruns.load(std::memory_order_relaxed),
+            m_pktRx.load(std::memory_order_relaxed), m_blender.underruns(),
             m_recvStartup.load(std::memory_order_acquire) == 1 ? 1 : 0);
         if (length <= 0) return;
         HANDLE file = CreateFileW(tempPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
