@@ -102,8 +102,15 @@ if (Test-Path $backupFile) {
             }
         }
     }
-    if ($null -ne $b.PrevDisableProtectedAudioDG) { Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord }
-    else { Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue }
+    if ($b.PSObject.Properties.Name -contains 'PrevDisableProtectedAudioDG') {
+        if ($null -ne $b.PrevDisableProtectedAudioDG) {
+            Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord
+        } else {
+            Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue
+        }
+    } else {
+        Write-Warning 'Backup has no DisableProtectedAudioDG snapshot; leaving the current Windows audio security setting unchanged.'
+    }
 
 }
 
