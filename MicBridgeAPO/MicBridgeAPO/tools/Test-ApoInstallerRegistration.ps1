@@ -51,4 +51,14 @@ Assert-Contains $apoSource 'm_resampler\.Process\(in, frames, step, m_rs\.data\(
 Assert-Contains $apoSource 'm_latencyHns\.store' 'APO reports its configured jitter-buffer latency'
 Assert-Contains $apoSource 'm_resetProcessRequested' 'APO Reset defers process state changes to the processing thread'
 
+Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
+Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
+Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
+Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
+Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
+Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
+Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
+Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
+Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
+
 Write-Host 'All installer registration static checks passed.'
