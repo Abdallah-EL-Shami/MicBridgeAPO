@@ -179,7 +179,7 @@ foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools
 
 
 Assert-Contains $uninstaller 'Read-only global preflight: every capture endpoint value must have its documented registry type' 'Uninstaller performs the global endpoint type preflight'
-Assert-Contains $uninstaller 'OpenSubKey\("\$capSub\\\\\$endpointId\\\\FxProperties"' 'Uninstaller uses normalized single-separator registry paths'
+Assert-Contains $uninstaller 'OpenSubKey\("\$capSub\\\$endpointId\\FxProperties"' 'Uninstaller uses normalized single-separator registry paths'
 if ([regex]::Matches($uninstaller, [regex]::Escape('Read-only global preflight: every capture endpoint value must have its documented registry type')).Count -ne 1) { throw 'FAIL: Uninstaller must contain exactly one global preflight block' }
 Write-Host 'PASS: Uninstaller contains exactly one global preflight block'
 $completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."'
