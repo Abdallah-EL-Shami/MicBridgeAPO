@@ -20,7 +20,7 @@
 - الاختبار الآلي يتحقق من مشاركة المنفذ على Windows؛ يجب أيضًا التأكد من وصول الحزم إلى عدادي ReaStream وMicBridge على الجهاز الفعلي.
 
 ## اختبار التشغيل على الجهاز
-من مجلد الحزمة بعد التثبيت، شغّل `powershell -ExecutionPolicy Bypass -File .\Test-ApoRuntime.ps1 -DurationSeconds 60`. عند الطلب ابدأ تسجيلًا فعليًا من AT2040USB ثم أوقفه؛ سيحفظ التقرير في `C:\ProgramData\MicBridgeAPO`. الاختبار للقراءة فقط.
+افتح Cantabile أولًا مع تفعيل ReaStream Receive/Send، ثم من مجلد الحزمة بعد التثبيت شغّل PowerShell x64 كمسؤول ونفّذ `powershell -ExecutionPolicy Bypass -File .\Test-ApoRuntime.ps1 -DurationSeconds 60`. عند الطلب ابدأ تسجيلًا فعليًا من AT2040USB ثم أوقفه؛ سيحفظ التقرير في `C:\ProgramData\MicBridgeAPO` ويتحقق من مالكي UDP/58710. الاختبار للقراءة فقط.
 
 ## الإزالة
 انقر مرتين على uninstall.bat. يعيد القيم الأصلية ومالك المفتاح وصلاحياته (SDDL).
