@@ -65,6 +65,8 @@ Assert-Contains $apoSource 'm_latencyHns\.store' 'APO reports its configured jit
 Assert-Contains $apoSource 'm_resetProcessRequested' 'APO Reset defers process state changes to the processing thread'
 Assert-Contains $apoSource 'SO_REUSEADDR' 'APO can share the fixed ReaStream broadcast port'
 Assert-Contains $apoSource 'IsLocalIPv4' 'APO accepts only packets sourced from local interfaces'
+Assert-Contains $apoSource 'ReadRegMultiStringContains' 'APO startup diagnostics inspect the composite EFX registration list'
+Assert-Contains $apoSource 'CompositeEFXMatch' 'APO startup diagnostics report composite EFX endpoint matches'
 Assert-Contains $apoSource 'Invalid bridge configuration' 'APO rejects invalid UDP ports and identical stream identifiers'
 Assert-Contains $apoSource 'm_sendRingDrops.fetch_add' 'APO counts samples dropped by the transmit ring'
 Assert-Contains $apoSource 'm_recvRingDrops.fetch_add' 'APO counts samples dropped by the receive ring'
