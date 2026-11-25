@@ -57,11 +57,19 @@ function Restore-Sddl([string]$sub, [string]$sddl) {   # يعيد المالك �
     $k.SetAccessControl($sec); $k.Close()
 }
 
-if (Test-Path $backupFile) {
-    $b = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
-    if (-not $b -or [string]::IsNullOrWhiteSpace([string]$b.DeviceId) -or [string]$b.DeviceId -notmatch '^\{?[0-9a-fA-F-]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?
-    $fxSub  = "$devSub\FxProperties"
-    $fxPath = "$capRoot\$($b.DeviceId)\FxProperties"
+if (Test-Path -LiteralPath $backupFile) {
+    try { $b = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'backup.json is unreadable or malformed; no registry or COM changes were made.' }
+    $parsedDeviceId = [guid]::Empty
+    if (-not $b -or -not [guid]::TryParse([string]$b.DeviceId, [ref]$parsedDeviceId)) {
+        throw 'backup.json has no valid capture endpoint DeviceId; no registry or COM changes were made.'
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$b.DevKeySddl)) {
+        throw 'backup.json has no endpoint ACL snapshot; refusing destructive uninstall because original permissions cannot be restored.'
+    }
+    $devSub = "$capSub\\$($b.DeviceId)"
+    $fxSub  = "$devSub\\FxProperties"
+    $fxPath = "$capRoot\\$($b.DeviceId)\\FxProperties"
 
     # 1) القيم (والمفاتيح ما زالت بصلاحيات كاملة للمسؤولين)
     if (Test-Path $fxPath) {
