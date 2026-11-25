@@ -665,7 +665,7 @@ private:
         }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load());
+        Log("Stopped: tx=%u rx=%u underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u nonLocal=%u", m_pktTx.load(), m_pktRx.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load(), m_nonLocalPackets.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -722,6 +722,15 @@ private:
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (s == INVALID_SOCKET) { m_recvStartup.store(-1, std::memory_order_release); Log("recv: socket failed %d", WSAGetLastError()); return; }
         Log("recv: UDP socket created");
+        // ReaStream's fixed UDP/58710 listener and MicBridge must both receive
+        // the same local-broadcast datagrams. Windows requires SO_REUSEADDR
+        // for the second bind; unicast fan-out is not guaranteed, so use broadcast.
+        BOOL reuse = TRUE;
+        if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof reuse) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: SO_REUSEADDR failed %d", error); closesocket(s); return;
+        }
         int rb = 1 << 20;
         if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rb, sizeof rb) != 0)
             Log("recv: SO_RCVBUF tuning failed %d (continuing with system default)", WSAGetLastError());
@@ -759,9 +768,18 @@ private:
                 m_resampler.Reset();
                 m_resamplerInputRate = 0;
             }
-            int n = recvfrom(s, (char*)pkt, sizeof pkt, 0, nullptr, nullptr);
+            sockaddr_in sender{};
+            int senderLen = sizeof(sender);
+            int n = recvfrom(s, (char*)pkt, sizeof pkt, 0,
+                             (sockaddr*)&sender, &senderLen);
             if (n <= 0) {
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
+                continue;
+            }
+            // This bridge is configured for same-machine local broadcast only.
+            // Reject packets sourced from the LAN or another remote interface.
+            if (sender.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+                ++m_nonLocalPackets;
                 continue;
             }
             if (n < (int)mb::kHeaderSize) { ++m_badPackets; continue; }
@@ -818,7 +836,7 @@ private:
     std::vector<float> m_scratch, m_rs;
     mb::LinearResampler m_resampler;
     uint32_t m_resamplerInputRate = 0;
-    std::atomic<uint32_t> m_resampleCapacityHits{0};
+    std::atomic<uint32_t> m_resampleCapacityHits{0}, m_nonLocalPackets{0};
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
     std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0}, m_sendErrors{0};
     std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
