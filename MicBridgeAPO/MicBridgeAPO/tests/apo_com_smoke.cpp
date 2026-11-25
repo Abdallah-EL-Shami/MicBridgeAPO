@@ -47,16 +47,6 @@ int wmain(int argc, wchar_t** argv) {
     CHECK_TRUE(canUnload() == S_FALSE);
     factory->Release();
 
-    // LockServer is independent of interface references and must be balanced.
-    CHECK_HR(factory->LockServer(TRUE));
-    CHECK_HR(factory->LockServer(TRUE));
-    CHECK_TRUE(canUnload() == S_FALSE);
-    CHECK_HR(factory->LockServer(FALSE));
-    CHECK_TRUE(canUnload() == S_FALSE);
-    CHECK_HR(factory->LockServer(FALSE));
-    CHECK_TRUE(canUnload() == S_FALSE);
-    CHECK_TRUE(factory->LockServer(FALSE) == E_UNEXPECTED);
-
     IAudioProcessingObject* apo = nullptr;
     CHECK_HR(factory->CreateInstance(nullptr, __uuidof(IAudioProcessingObject),
                                      reinterpret_cast<void**>(&apo)));
@@ -108,7 +98,21 @@ int wmain(int argc, wchar_t** argv) {
     CHECK_HR(validApo->Initialize(sizeof(good), reinterpret_cast<BYTE*>(&good)));
     validApo->Release();
 
+    // Prove server locks alone keep the module alive after the factory ref is released.
+    CHECK_HR(factory->LockServer(TRUE));
+    CHECK_HR(factory->LockServer(TRUE));
     factory->Release();
+    factory = nullptr;
+    CHECK_TRUE(canUnload() == S_FALSE);
+
+    IClassFactory* unlockFactory = nullptr;
+    CHECK_HR(getClassObject(CLSID_MicBridgeAPO, IID_IClassFactory,
+                            reinterpret_cast<void**>(&unlockFactory)));
+    CHECK_HR(unlockFactory->LockServer(FALSE));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    CHECK_HR(unlockFactory->LockServer(FALSE));
+    CHECK_TRUE(unlockFactory->LockServer(FALSE) == E_UNEXPECTED);
+    unlockFactory->Release();
     CHECK_HR(canUnload());
     CoUninitialize();
     FreeLibrary(module);
