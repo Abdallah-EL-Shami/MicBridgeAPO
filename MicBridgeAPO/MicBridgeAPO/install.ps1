@@ -179,6 +179,7 @@ if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
             if ($fxKey.GetValueNames() -contains $fxCompositeValue) {
                 $compositeExists = $true
                 $compositeKind = [string]$fxKey.GetValueKind($fxCompositeValue)
+                if ($compositeKind -ne 'MultiString') { throw "Composite EFX registry value has unexpected type '$compositeKind'; refusing to overwrite it." }
                 $compositeValue = @($fxKey.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
             }
         } finally { $fxKey.Close() }
@@ -306,7 +307,8 @@ function Grant-Key([string]$sub) {
 Grant-Key $devSub
 if (-not (Test-Path "$capRoot\$($dev.Id)\FxProperties")) { New-Item "$capRoot\$($dev.Id)\FxProperties" | Out-Null }
 Grant-Key $fxSub
-Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $ksNodeTypeAny -Type String
+$associationToUse = if ($backup.PrevFxAssociation) { [string]$backup.PrevFxAssociation } else { $ksNodeTypeAny }
+Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $associationToUse -Type String
 
 # Restore the legacy single-CLSID property to its pre-MicBridge value, then register
 # MicBridge alongside the original EFX chain through the Windows 10 composite property.
