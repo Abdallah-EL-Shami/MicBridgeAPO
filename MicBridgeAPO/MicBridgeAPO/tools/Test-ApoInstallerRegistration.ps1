@@ -43,7 +43,9 @@ Assert-Contains $installer '\$fxCompositeValue\s*=\s*''\{d04e05a6-594b-4fb6-a80d
 Assert-Contains $installer 'composite-efx-backup.json' 'Installer stores composite EFX state outside the original backup'
 Assert-Contains $installer 'Type MultiString' 'Installer writes the composite EFX chain as REG_MULTI_SZ'
 Assert-NotContains $installer 'Name \$fxValue -Value \$clsid' 'Installer does not overwrite the legacy single-APO EFX property'
-Assert-Contains $uninstaller 'Restore the pre-install composite endpoint-effect list exactly' 'Uninstaller restores the original composite EFX list'
+Assert-Contains $uninstaller 'Remove only MicBridge from the live composite list' 'Uninstaller preserves vendor EFX entries added after installation'
+Assert-Contains $uninstaller '\$currentLegacy' 'Uninstaller does not overwrite a vendor-updated legacy EFX value'
+Assert-Contains $uninstaller '\$expectedAssociation' 'Uninstaller restores association only when it still matches MicBridge state'
 Assert-Contains $uninstaller 'RegistryValueKind]::MultiString' 'Uninstaller restores the composite property with REG_MULTI_SZ type'
 
 $apoSource = Get-Content -LiteralPath (Join-Path $root 'src/MicBridgeAPO.cpp') -Raw
