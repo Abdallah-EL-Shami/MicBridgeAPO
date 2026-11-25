@@ -72,6 +72,11 @@ Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntim
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntime.ps1') -Raw) 'SharedUdpPortOwnedByCantabileAndAudioDG' 'Runtime probe confirms both processes own UDP/58710'
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntime.ps1') -Raw) 'UdpReceiveBindFailed' 'Runtime probe reports UDP bind failure'
 Assert-Contains $uninstaller 'matchesBaseline' 'Uninstaller restores original composite-property absence when vendor state is unchanged'
+Assert-Contains $uninstaller 'backup.json is missing' 'Uninstaller fails closed when the recovery backup is missing'
+Assert-Contains $uninstaller 'preflightIds' 'Uninstaller validates all capture endpoint value types before registry changes'
+Assert-Contains $uninstaller 'cleanupIds' 'Uninstaller scans all capture endpoints for stale MicBridge references'
+Assert-Contains $uninstaller 'PrevDisableProtectedAudioDG' 'Uninstaller restores the Windows audio security setting only from a recorded snapshot'
+Assert-Contains $uninstaller 'leaving the current Windows audio security setting unchanged' 'Uninstaller does not guess a missing legacy audio security snapshot'
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
