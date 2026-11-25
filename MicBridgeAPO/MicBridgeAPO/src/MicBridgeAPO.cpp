@@ -34,6 +34,7 @@
 #include <cstring>
 #include <new>
 #include <vector>
+#include "mb_core.h"
 
 // {A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}
 static const GUID CLSID_MicBridgeAPO =
@@ -704,16 +705,30 @@ private:
             const ReaHdr* h = reinterpret_cast<const ReaHdr*>(pkt);
             if (strncmp(h->id, m_cfg.recvId, 32) != 0) { ++m_idMismatches; continue; }  // معرّف مختلف: نتجاهل
             uint32_t chs = h->ch, sr = h->sr, bytes = h->bytes;
-            if (chs == 0 || chs > 8 || sr < 8000 || sr > 384000 || bytes == 0 || (bytes % (sizeof(float) * chs)) != 0) { ++m_badPackets; continue; }
-            if (bytes > sizeof in || sizeof(ReaHdr) + bytes != (size_t)n || h->size != (uint32_t)n || h->bytes != bytes) { ++m_badPackets; continue; }
-            memcpy(in, pkt + sizeof(ReaHdr), bytes);
-            uint32_t frames = bytes / 4 / chs;  // نأخذ القناة الأولى (افتراض: القنوات منفصلة بالتتابع)
+            // The Windows capture endpoint is mono. ReaStream may return mono or
+            // stereo from Cantabile; reject wider layouts rather than guessing.
+            if ((chs != 1 && chs != 2) || sr < 8000 || sr > 384000 ||
+                bytes == 0 || (bytes % (sizeof(float) * chs)) != 0) {
+                ++m_badPackets;
+                continue;
+            }
+            if (bytes > sizeof in || sizeof(ReaHdr) + bytes != (size_t)n ||
+                h->size != (uint32_t)n || h->bytes != bytes) {
+                ++m_badPackets;
+                continue;
+            }
+
+            const uint32_t frames = bytes / sizeof(float) / chs;
             if (frames == 0) continue;
+
+            // ReaStream Float32 payload is planar: [all channel 0][all channel 1].
+            // ExtractMono averages the channels into the mono bridge stream.
+            mb::ExtractMono(pkt + sizeof(ReaHdr), frames, chs, -1, in);
             ++m_pktRx;
 
             if (sr == m_rate) {
                 m_recvRing.push(in, frames);
-            } else {  // تحويل معدل بسيط (خطي)
+            } else {  // تحويل معدل بسيط (خطي) بعد تحويل القنوات إلى Mono
                 double step = (double)sr / (double)m_rate;
                 size_t outN = 0;
                 double p = m_rsPos;

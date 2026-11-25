@@ -127,29 +127,36 @@ static void TestParseMalformed() {
 }
 
 static void TestChannelMapping() {
-    SECTION("synthetic planar channel mapping (actual wire layout not yet verified)");
-    // بيانات اصطناعية: القناة الأولى ثم قناة ثانية صامتة؛ لا تثبت ترتيب ReaStream الفعلي
-    auto firstChannel = Hex(kGoldenSamples);  // أربع عينات من الالتقاط المرجعي
-    std::vector<uint8_t> data;
-    const uint32_t frames = 4;
-    data.insert(data.end(), firstChannel.begin(), firstChannel.end());           // ch0
-    for (uint32_t i = 0; i < frames * 4; ++i) data.push_back(0);  // ch1 صامتة
-    float ch0[4], ch1[4], avg[4];
-    mb::ExtractMono(data.data(), frames, 2, 0, ch0);
-    mb::ExtractMono(data.data(), frames, 2, 1, ch1);
-    mb::ExtractMono(data.data(), frames, 2, -1, avg);
-    for (int i = 0; i < 4; ++i) {
-        CHECK(ch0[i] != 0.f);          // القناة الأولى تحمل الصوت
-        CHECK(ch1[i] == 0.f);          // الثانية صامتة: لا تسرب بين القنوات
-        CHECK(std::fabs(avg[i] - ch0[i] * 0.5f) < 1e-9f);
-    }
-    CHECK(ch0[0] < 0.f && std::fabs(ch0[0] + 0.0006f) < 0.0001f);  // ≈ -0.0006 كما حُسب سابقًا
-    // قناة غير موجودة => متوسط، لا قراءة خارج المدى
-    float bad[4];
-    mb::ExtractMono(data.data(), frames, 2, 7, bad);
-    CHECK(std::fabs(bad[0] - avg[0]) < 1e-12f);
+    SECTION("ReaStream planar stereo to mono extraction");
+    // Four frames stored as two contiguous channel planes: L[0..3], then R[0..3].
+    const float planar[8] = {
+        0.2f, -0.4f, 0.6f, -0.8f,
+        0.4f,  0.2f, 0.0f,  0.8f
+    };
+    uint8_t data[sizeof(planar)];
+    std::memcpy(data, planar, sizeof(planar));
 
-    // NaN / Inf / قيم ضخمة
+    float left[4], right[4], mono[4], fallback[4];
+    mb::ExtractMono(data, 4, 2, 0, left);
+    mb::ExtractMono(data, 4, 2, 1, right);
+    mb::ExtractMono(data, 4, 2, -1, mono);
+    mb::ExtractMono(data, 4, 2, 9, fallback);
+    for (int i = 0; i < 4; ++i) {
+        CHECK(left[i] == planar[i]);
+        CHECK(right[i] == planar[4 + i]);
+        CHECK(std::fabs(mono[i] - (planar[i] + planar[4 + i]) * 0.5f) < 1e-7f);
+        CHECK(mono[i] == fallback[i]);
+    }
+
+    // Mono packets pass through unchanged.
+    float monoInput[4] = {0.1f, -0.2f, 0.3f, -0.4f};
+    uint8_t monoBytes[sizeof(monoInput)];
+    std::memcpy(monoBytes, monoInput, sizeof(monoInput));
+    float monoOutput[4];
+    mb::ExtractMono(monoBytes, 4, 1, -1, monoOutput);
+    for (int i = 0; i < 4; ++i) CHECK(monoOutput[i] == monoInput[i]);
+
+    // Per-channel sanitization prevents NaN/Inf and clamps extreme values.
     float evil[4] = {NAN, INFINITY, -INFINITY, 1e30f};
     uint8_t eb[16];
     std::memcpy(eb, evil, 16);

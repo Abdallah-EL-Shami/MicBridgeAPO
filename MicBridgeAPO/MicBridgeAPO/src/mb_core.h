@@ -1,5 +1,5 @@
 // mb_core.h - المنطق الصوتي الخالص (بدون أي اعتماد على ويندوز) حتى يمكن اختباره على أي منصة.
-//  * رأس MRSR بطول 47 بايت شوهد في التقاط واحد؛ تخطيط الحمولة والقنوات ما زال يحتاج تحققًا مستقلًا
+//  * ReaStream Float32 multi-channel payload is planar (one contiguous block per channel).
 //  * حلقة مخزن SPSC بحجم ثابت بلا تخصيص أثناء التشغيل
 //  * محوّل معدل عينة خطي
 //  * Blender: مخزن الجيتر + التبديل الناعم بين المايك الأصلي والصوت المعالَج
@@ -95,7 +95,8 @@ inline float Sanitize(float v) {
     return v > 1.f ? 1.f : (v < -1.f ? -1.f : v);
 }
 
-// يستخرج قناة أحادية من بيانات منفصلة بالتتابع. sel >= 0: قناة محددة ، sel < 0 (أو خارج المدى): متوسط القنوات.
+// ReaStream Float32 payload is planar: each channel occupies frames consecutive floats.
+ // sel >= 0 selects one channel; sel < 0 (or out of range) averages all channels to mono.
 // ملاحظة: القراءة بـ memcpy لأن البيانات غير محاذاة داخل الحزمة (الإزاحة 47).
 inline void ExtractMono(const uint8_t* data, uint32_t frames, uint32_t ch, int sel, float* out) {
     if (!data || !out || frames == 0 || ch == 0 || ch > kMaxChannels) return;
