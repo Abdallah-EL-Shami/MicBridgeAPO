@@ -74,6 +74,11 @@ if (Test-Path $backupFile) {
         if ($b.PSObject.Properties.Name -contains 'PrevFxAssociation') {
             if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
             else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
+        } elseif (($b.CreatedFx -eq $true) -and ($null -eq $b.FxKeySddl)) {
+            # Legacy backup proves FxProperties did not exist before MicBridge's first install.
+            Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue
+        } else {
+            Write-Warning 'Legacy backup does not prove the original FX association; leaving that property untouched.'
         }
 
         # The old installer may have created FxProperties. Delete it only if it is empty;
