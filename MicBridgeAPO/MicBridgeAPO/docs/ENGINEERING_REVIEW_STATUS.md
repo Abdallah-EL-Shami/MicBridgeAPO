@@ -13,6 +13,7 @@ This is an implementation status report, not release approval. Code changes have
 - Added stricter Float32 format validation for channel count, sample rate, block alignment, average byte rate, valid bits, and channel-mask consistency.
 - Implemented deferred Reset requests so the processing thread and receive worker reset only the state they own.
 - Added an atomic latency report based on the configured jitter-buffer target.
+- Confirmed the registration flags as APO_FLAG_DEFAULT | APO_FLAG_INPLACE; APOProcess handles both aliased in-place buffers and distinct input/output buffers, and the COM smoke test now asserts this registration contract.
 - Changed endpoint-effect registration to use PKEY_CompositeFX_EndpointEffectClsid (REG_MULTI_SZ) on Windows 10 1803+, merging MicBridge into the current vendor list, preserving the original list separately, and removing only MicBridge on uninstall while retaining later vendor additions.
 - Added a separate composite-EFX recovery record; the original first-install backup.json is not overwritten, including during legacy-backup compatibility handling.
 - Added per-attempt installer snapshots for endpoint registry values, endpoint ACLs, audio policy value, COM registration keys, DLL state, selected install files, shortcut, and configuration ACLs. The installer catch path attempts to restore that snapshot rather than blindly invoking uninstall.
@@ -26,7 +27,7 @@ This is an implementation status report, not release approval. Code changes have
 5. ReaStream's 47-byte header and planar Float32 interpretation are empirical assumptions. Validate the exact plugin version, mono/stereo packet layout, chunk sizes, and sample-rate behavior with a packet capture.
 6. The current 4096-byte receive-payload ceiling is a defensive cap, not a proven maximum for every ReaStream version. Larger packets are rejected.
 7. Socket startup readiness is checked, but persistent runtime worker-health reporting and recovery after an unexpected worker exit still need implementation.
-8. The APO's use of APO_FLAG_INPLACE, frame-count constraints, and real-time memory residency need a final Windows SDK contract review.
+8. APO_FLAG_INPLACE is now documented and tested against the SDK contract; frame-count constraints and real-time memory residency still need target Audio Engine review.
 9. GetLatency reports the configured jitter target, not a measured network round-trip or worst-case end-to-end delay.
 10. No target-machine Audio Engine integration test has yet demonstrated COM activation, format negotiation, LockForProcess, APOProcess, and audible capture-graph insertion.
 
