@@ -60,6 +60,10 @@ Assert-Contains $apoSource 'm_latencyHns\.store' 'APO reports its configured jit
 Assert-Contains $apoSource 'm_resetProcessRequested' 'APO Reset defers process state changes to the processing thread'
 Assert-Contains $apoSource 'SO_REUSEADDR' 'APO can share the fixed ReaStream broadcast port'
 Assert-Contains $apoSource 'IsLocalIPv4' 'APO accepts only packets sourced from local interfaces'
+Assert-Contains $apoSource 'Invalid bridge configuration' 'APO rejects invalid UDP ports and identical stream identifiers'
+Assert-Contains $apoSource 'm_sendRingDrops.fetch_add' 'APO counts samples dropped by the transmit ring'
+Assert-Contains $apoSource 'm_recvRingDrops.fetch_add' 'APO counts samples dropped by the receive ring'
+Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntime.ps1') -Raw) 'NoRingOverflowDrops' 'Runtime probe reports ring overflow status'
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
