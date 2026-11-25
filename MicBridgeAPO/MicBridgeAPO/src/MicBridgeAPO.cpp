@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <mutex>
 #include <vector>
 #include "mb_core.h"
 
@@ -821,7 +822,7 @@ private:
                     m_resetProcessRequested.store(true, std::memory_order_release);
                     Log("UI control changed: Enabled=%d", requestedEnabled);
                 }
-                nextControlPoll = now + 100;
+                nextControlPoll = now + 250;
             }
             if (now >= nextStatusWrite) {
                 WriteStatus();
@@ -888,6 +889,8 @@ private:
 
 
     void WriteStatus() {
+        // StartBridge and RecvLoop may publish concurrently; serialize the shared temp-file replacement.
+        std::lock_guard<std::mutex> statusGuard(m_statusMutex);
         wchar_t statusPath[MAX_PATH] = {}, tempPath[MAX_PATH] = {};
         DataPath(statusPath, MAX_PATH, L"status.txt");
         swprintf_s(tempPath, L"%s.tmp", statusPath);
@@ -927,6 +930,7 @@ private:
     }
 
     // ------------------------------------------------------------ الحالة
+    std::mutex m_statusMutex;
     std::atomic<long> m_ref{1};
     bool m_initialized = false;
     bool m_locked = false;
