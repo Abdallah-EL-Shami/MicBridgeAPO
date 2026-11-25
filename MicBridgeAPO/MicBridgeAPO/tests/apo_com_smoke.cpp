@@ -37,9 +37,25 @@ int wmain(int argc, wchar_t** argv) {
                             reinterpret_cast<void**>(&factory)));
     CHECK_TRUE(canUnload() == S_FALSE);
 
+    // Factory references must keep the DLL non-unloadable and balance exactly.
     IUnknown* factoryIdentity = nullptr;
     CHECK_HR(factory->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&factoryIdentity)));
+    CHECK_TRUE(canUnload() == S_FALSE);
     factoryIdentity->Release();
+
+    factory->AddRef();
+    CHECK_TRUE(canUnload() == S_FALSE);
+    factory->Release();
+
+    // LockServer is independent of interface references and must be balanced.
+    CHECK_HR(factory->LockServer(TRUE));
+    CHECK_HR(factory->LockServer(TRUE));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    CHECK_HR(factory->LockServer(FALSE));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    CHECK_HR(factory->LockServer(FALSE));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    CHECK_TRUE(factory->LockServer(FALSE) == E_UNEXPECTED);
 
     IAudioProcessingObject* apo = nullptr;
     CHECK_HR(factory->CreateInstance(nullptr, __uuidof(IAudioProcessingObject),
@@ -97,6 +113,6 @@ int wmain(int argc, wchar_t** argv) {
     CoUninitialize();
     FreeLibrary(module);
 
-    std::puts("PASS: COM factory, APO interfaces, registration properties, and Initialize validation");
+    std::puts("PASS: COM factory refs, LockServer balancing, APO interfaces, registration properties, and Initialize validation");
     return 0;
 }
