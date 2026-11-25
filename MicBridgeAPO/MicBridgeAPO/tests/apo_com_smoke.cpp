@@ -28,9 +28,18 @@ int wmain(int argc, wchar_t** argv) {
 
     CHECK_HR(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
 
+    using DllCanUnloadNowFn = HRESULT (STDAPICALLTYPE*)();
+    auto canUnload = reinterpret_cast<DllCanUnloadNowFn>(GetProcAddress(module, "DllCanUnloadNow"));
+    CHECK_TRUE(canUnload != nullptr);
+
     IClassFactory* factory = nullptr;
     CHECK_HR(getClassObject(CLSID_MicBridgeAPO, IID_IClassFactory,
                             reinterpret_cast<void**>(&factory)));
+    CHECK_TRUE(canUnload() == S_FALSE);
+
+    IUnknown* factoryIdentity = nullptr;
+    CHECK_HR(factory->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&factoryIdentity)));
+    factoryIdentity->Release();
 
     IAudioProcessingObject* apo = nullptr;
     CHECK_HR(factory->CreateInstance(nullptr, __uuidof(IAudioProcessingObject),
@@ -84,9 +93,6 @@ int wmain(int argc, wchar_t** argv) {
     validApo->Release();
 
     factory->Release();
-    using DllCanUnloadNowFn = HRESULT (STDAPICALLTYPE*)();
-    auto canUnload = reinterpret_cast<DllCanUnloadNowFn>(GetProcAddress(module, "DllCanUnloadNow"));
-    CHECK_TRUE(canUnload != nullptr);
     CHECK_HR(canUnload());
     CoUninitialize();
     FreeLibrary(module);
