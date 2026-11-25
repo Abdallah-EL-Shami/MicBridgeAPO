@@ -227,7 +227,7 @@ function Remove-MicBridgeCaptureReferences {
 
 Remove-MicBridgeCaptureReferences
 
-if (Test-Path -LiteralPath $backupFile)) {
+if (Test-Path -LiteralPath $backupFile) {
     try {
         if ($b.FxKeySddl -and (Test-Path -LiteralPath $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
         Restore-Sddl $devSub $b.DevKeySddl
