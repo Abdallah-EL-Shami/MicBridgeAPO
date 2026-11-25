@@ -81,12 +81,12 @@ Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten suppo
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
 
 # Exercise the exact REG_MULTI_SZ write/read contract in an isolated HKCU key.
-$registryProbePath = "HKCU:\\Software\\MicBridgeAPO-CI-$PID"
+$registryProbePath = "HKCU:\Software\MicBridgeAPO-CI-$PID"
 try {
     New-Item -Path $registryProbePath -Force | Out-Null
     $expectedEffects = [string[]]@('{11111111-1111-1111-1111-111111111111}','{22222222-2222-2222-2222-222222222222}')
     Set-ItemProperty -LiteralPath $registryProbePath -Name 'CompositeEffects' -Value $expectedEffects -Type MultiString
-    $probeKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\\MicBridgeAPO-CI-$PID")
+    $probeKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\MicBridgeAPO-CI-$PID")
     if (-not $probeKey) { throw 'Could not reopen HKCU composite EFX probe key.' }
     try {
         if ($probeKey.GetValueKind('CompositeEffects') -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
