@@ -357,6 +357,7 @@ public:
     STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
+        HRESULT hr = E_NOINTERFACE;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IAudioProcessingObject))
             *ppv = static_cast<IAudioProcessingObject*>(this);
         else if (iid == __uuidof(IAudioProcessingObjectRT))
@@ -365,10 +366,14 @@ public:
             *ppv = static_cast<IAudioProcessingObjectConfiguration*>(this);
         else if (iid == __uuidof(IAudioSystemEffects))
             *ppv = static_cast<IAudioSystemEffects*>(this);
-        else
-            return E_NOINTERFACE;
-        AddRef();
-        return S_OK;
+        if (*ppv) {
+            AddRef();
+            hr = S_OK;
+        }
+        wchar_t iidText[40] = {};
+        StringFromGUID2(iid, iidText, ARRAYSIZE(iidText));
+        Log("MicBridgeAPO::QueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
+        return hr;
     }
     STDMETHOD_(ULONG, AddRef)() override { return (ULONG)++m_ref; }
     STDMETHOD_(ULONG, Release)() override {
@@ -773,22 +778,33 @@ public:
     STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
+        HRESULT hr = E_NOINTERFACE;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IClassFactory)) {
             *ppv = static_cast<IClassFactory*>(this);
-            return S_OK;
+            hr = S_OK;
         }
-        *ppv = nullptr;
-        return E_NOINTERFACE;
+        wchar_t iidText[40] = {};
+        StringFromGUID2(iid, iidText, ARRAYSIZE(iidText));
+        Log("Factory::QueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
+        return hr;
     }
     STDMETHOD_(ULONG, AddRef)() override { return 2; }
     STDMETHOD_(ULONG, Release)() override { return 1; }
     STDMETHOD(CreateInstance)(IUnknown* outer, REFIID iid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
-        if (outer) return CLASS_E_NOAGGREGATION;
-        Log("ClassFactory::CreateInstance requested");
+        if (outer) {
+            Log("ClassFactory::CreateInstance rejected aggregation");
+            return CLASS_E_NOAGGREGATION;
+        }
+        wchar_t iidText[40] = {};
+        StringFromGUID2(iid, iidText, ARRAYSIZE(iidText));
+        Log("ClassFactory::CreateInstance requested iid=%ls", iidText);
         MicBridgeAPO* o = new (std::nothrow) MicBridgeAPO();
-        if (!o) return E_OUTOFMEMORY;
+        if (!o) {
+            Log("ClassFactory::CreateInstance allocation failed: E_OUTOFMEMORY");
+            return E_OUTOFMEMORY;
+        }
         HRESULT hr = o->QueryInterface(iid, ppv);
         Log("ClassFactory::CreateInstance QI hr=0x%08X", (unsigned)hr);
         o->Release();
@@ -798,10 +814,20 @@ public:
 };
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
-    if (!ppv) return E_POINTER;
+    wchar_t clsidText[40] = {}, iidText[40] = {};
+    StringFromGUID2(rclsid, clsidText, ARRAYSIZE(clsidText));
+    StringFromGUID2(riid, iidText, ARRAYSIZE(iidText));
+    Log("DllGetClassObject entry clsid=%ls iid=%ls ppv=%p", clsidText, iidText, ppv);
+    if (!ppv) {
+        Log("DllGetClassObject rejected: null ppv");
+        return E_POINTER;
+    }
     *ppv = nullptr;
-    if (!IsEqualCLSID(rclsid, CLSID_MicBridgeAPO)) return CLASS_E_CLASSNOTAVAILABLE;
-    Log("DllGetClassObject requested");
+    if (!IsEqualCLSID(rclsid, CLSID_MicBridgeAPO)) {
+        Log("DllGetClassObject rejected: class not available for clsid=%ls", clsidText);
+        return CLASS_E_CLASSNOTAVAILABLE;
+    }
+    Log("DllGetClassObject requested for MicBridgeAPO");
     static INIT_ONCE diagnosticOnce = INIT_ONCE_STATIC_INIT;
     InitOnceExecuteOnce(&diagnosticOnce,
         [](PINIT_ONCE, PVOID, PVOID*) -> BOOL { RunStartupDiagnostics(); return TRUE; },
