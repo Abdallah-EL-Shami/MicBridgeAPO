@@ -12,6 +12,13 @@ if (-not $isAdmin) {
     Start-Process powershell -Verb RunAs -ArgumentList $a
     exit
 }
+
+# Serialize the complete installer/rollback operation.
+$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
+Import-Module -Name $recoveryModule -Force -ErrorAction Stop
+$operationLockPath = Join-Path (Join-Path $env:ProgramData 'MicBridgeAPO') 'operation'
+$operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+
  
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
@@ -460,4 +467,6 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     Write-Host "فشل التثبيت: $($failure.Exception.Message)" -ForegroundColor Red
     Write-Host "سجل التثبيت: $installLog" -ForegroundColor Yellow
     Write-Warning "قد تكون بعض تغييرات Registry قد نُفذت. لا تشغّل uninstall.bat ولا تحذف backup.json؛ أرسل Install.log للمراجعة."
+} finally {
+    if ($operationLock) { $operationLock.Dispose() }
 }
