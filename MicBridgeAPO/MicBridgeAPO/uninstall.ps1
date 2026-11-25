@@ -90,7 +90,6 @@ if (Test-Path $backupFile) {
 
         # The old installer may have created FxProperties. Delete it only if it is empty;
         # never recursively delete driver/vendor properties added later.
-        # Preserve the current vendor list while removing only this APO.
         # Remove only MicBridge from the live composite list; retain vendor entries added after installation.
         if (Test-Path -LiteralPath $compositeBackupFile) {
             $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
@@ -146,8 +145,10 @@ if (Test-Path $backupFile) {
     }
 } else { Write-Warning 'لم أجد backup.json، سأزيل التسجيل فقط.' }
 
-Remove-Item -Recurse -Force "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "HKLM:\SOFTWARE\Classes\CLSID\$clsid" -ErrorAction SilentlyContinue
+$apoRegistrationPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+$comRegistrationPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+if (Test-Path -LiteralPath $apoRegistrationPath) { Remove-Item -LiteralPath $apoRegistrationPath -Recurse -Force -ErrorAction Stop }
+if (Test-Path -LiteralPath $comRegistrationPath) { Remove-Item -LiteralPath $comRegistrationPath -Recurse -Force -ErrorAction Stop }
 Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk') -Force -ErrorAction SilentlyContinue
 
 Restart-Service -Name Audiosrv -Force
