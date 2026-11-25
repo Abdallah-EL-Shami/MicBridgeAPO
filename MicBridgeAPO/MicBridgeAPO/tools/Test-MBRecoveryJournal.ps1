@@ -62,7 +62,34 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     try { Read-MBRecoveryJournal -Path $badPath | Out-Null; throw 'FAIL: corrupt journal accepted' }
     catch { if ($_.Exception.Message -eq 'FAIL: corrupt journal accepted') { throw } }
 
-    Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and fail-closed validation'
+
+    # Caller identity and exact step-plan binding must fail closed.
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedOperation InstallRollback | Out-Null
+        throw 'FAIL: operation mismatch accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: operation mismatch accepted') { throw } }
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedDeviceId ([guid]::NewGuid()) | Out-Null
+        throw 'FAIL: endpoint mismatch accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: endpoint mismatch accepted') { throw } }
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedStepIds @('RestoreCom','RestoreEndpointAcl','RestoreEndpointValues') | Out-Null
+        throw 'FAIL: altered step plan accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: altered step plan accepted') { throw } }
+
+    # An exclusive lock prevents two recovery processes from executing concurrently.
+    $lockPath = "$journalPath.lock"
+    $heldLock = New-Object IO.FileStream($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    $ranWhileLocked = $false
+    try {
+        try {
+            Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestoreEndpointAcl' -Action { $script:ranWhileLocked=$true } -Verify { $false }
+            throw 'FAIL: recovery proceeded while lock was held'
+        } catch { if ($_.Exception.Message -eq 'FAIL: recovery proceeded while lock was held') { throw } }
+    } finally { $heldLock.Dispose() }
+    if ($ranWhileLocked) { throw 'FAIL: action ran despite a held recovery lock' }
+
+    Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and identity binding, exclusive locking, and fail-closed validation'
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
