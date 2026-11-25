@@ -64,6 +64,8 @@ Assert-Contains $apoSource 'Invalid bridge configuration' 'APO rejects invalid U
 Assert-Contains $apoSource 'm_sendRingDrops.fetch_add' 'APO counts samples dropped by the transmit ring'
 Assert-Contains $apoSource 'm_recvRingDrops.fetch_add' 'APO counts samples dropped by the receive ring'
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntime.ps1') -Raw) 'NoRingOverflowDrops' 'Runtime probe reports ring overflow status'
+Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Test-ApoRuntime.ps1') -Raw) 'SharedUdpPortOwnedByCantabileAndAudioDG' 'Runtime probe confirms both processes own UDP/58710'
+Assert-Contains $uninstaller 'matchesBaseline' 'Uninstaller restores original composite-property absence when vendor state is unchanged'
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
