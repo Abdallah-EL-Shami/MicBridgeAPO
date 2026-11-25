@@ -91,27 +91,24 @@ try {
 if ([string]$preflightComposite.DeviceId -ne [string]$preflightBackup.DeviceId) {
     throw 'Composite EFX recovery record belongs to another endpoint; uninstall stopped before changes.'
 }
-if ($preflightComposite.PSObject.Properties.Name -notcontains 'Exists' -or
-    $preflightComposite.PSObject.Properties.Name -notcontains 'Kind' -or
-    $preflightComposite.PSObject.Properties.Name -notcontains 'Value' -or
-    [string]$preflightComposite.Kind -ne 'MultiString' -or
-    ($preflightComposite.Exists -isnot [bool]) -or
-    ($preflightComposite.Value -isnot [array])) {
-    throw 'Composite EFX recovery record has an invalid schema; uninstall stopped before changes.'
+if ($preflightBackup.PrevClsidRegistrationExists) {
+    $regFile = [string]$preflightBackup.PrevClsidRegistrationFile
+    if ([string]::IsNullOrWhiteSpace($regFile) -or -not (Test-Path -LiteralPath $regFile)) {
+        throw 'A required persistent COM recovery file is missing; uninstall stopped before changes.'
+    }
+    $regHeader = Get-Content -LiteralPath $regFile -TotalCount 1 -ErrorAction Stop
+    if ($regHeader -ne 'Windows Registry Editor Version 5.00') {
+        throw 'A required persistent COM recovery file is invalid; uninstall stopped before changes.'
+    }
 }
-foreach ($entry in @(
-    @($preflightBackup.PrevClsidRegistrationExists, $preflightBackup.PrevClsidRegistrationFile),
-    @($preflightBackup.PrevApoRegistrationExists, $preflightBackup.PrevApoRegistrationFile)
-)) {
-    if ($entry[0]) {
-        $regFile = [string]$entry[1]
-        if ([string]::IsNullOrWhiteSpace($regFile) -or -not (Test-Path -LiteralPath $regFile)) {
-            throw 'A required persistent COM recovery file is missing; uninstall stopped before changes.'
-        }
-        $regHeader = Get-Content -LiteralPath $regFile -TotalCount 1 -ErrorAction Stop
-        if ($regHeader -ne 'Windows Registry Editor Version 5.00') {
-            throw 'A required persistent COM recovery file is invalid; uninstall stopped before changes.'
-        }
+if ($preflightBackup.PrevApoRegistrationExists) {
+    $regFile = [string]$preflightBackup.PrevApoRegistrationFile
+    if ([string]::IsNullOrWhiteSpace($regFile) -or -not (Test-Path -LiteralPath $regFile)) {
+        throw 'A required persistent COM recovery file is missing; uninstall stopped before changes.'
+    }
+    $regHeader = Get-Content -LiteralPath $regFile -TotalCount 1 -ErrorAction Stop
+    if ($regHeader -ne 'Windows Registry Editor Version 5.00') {
+        throw 'A required persistent COM recovery file is invalid; uninstall stopped before changes.'
     }
 }
 
