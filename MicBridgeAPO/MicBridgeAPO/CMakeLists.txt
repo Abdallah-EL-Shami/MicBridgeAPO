@@ -38,6 +38,13 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME micbridge_core_tests COMMAND micbridge_core_tests)
 
+    if(WIN32)
+        add_executable(micbridge_udp_broadcast_share_smoke tests/udp_broadcast_share_smoke.cpp)
+        target_compile_options(micbridge_udp_broadcast_share_smoke PRIVATE /W4 /permissive- /EHsc)
+        target_link_libraries(micbridge_udp_broadcast_share_smoke PRIVATE ws2_32)
+        add_test(NAME micbridge_udp_broadcast_share_smoke COMMAND micbridge_udp_broadcast_share_smoke)
+    endif()
+
     if(WIN32 AND MICBRIDGE_BUILD_APO)
         add_executable(micbridge_apo_com_smoke tests/apo_com_smoke.cpp)
         target_compile_options(micbridge_apo_com_smoke PRIVATE /W4 /permissive- /EHsc)
