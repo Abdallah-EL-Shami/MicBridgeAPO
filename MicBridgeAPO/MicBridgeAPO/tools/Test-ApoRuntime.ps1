@@ -93,9 +93,9 @@ foreach ($owner in $udpOwnersBefore) { $lines.Add(("UDP before: {0}:{1} PID={2} 
 $lines.Add("Log file present before test: $(Test-Path -LiteralPath $logPath)")
 Write-Report $outPath $lines.ToArray()
 
-Write-Host "سجل الاختبار: $outPath"
-Write-Host "بعد الضغط على Enter ابدأ تسجيلًا فعليًا من AT2040USB في التطبيق الذي تستخدمه، ثم أوقف التسجيل قبل انتهاء المدة."
-[void](Read-Host 'اضغط Enter عندما تكون مستعدًا')
+Write-Host "Test log: $outPath"
+Write-Host "Press Enter, start a real AT2040USB recording in your audio application, then stop recording before the duration ends."
+[void](Read-Host 'Press Enter when ready')
 $moduleSamples = New-Object System.Collections.Generic.List[string]
 $deadline = (Get-Date).AddSeconds($DurationSeconds)
 while ((Get-Date) -lt $deadline) {
@@ -156,5 +156,5 @@ $report.Add('--- New MicBridge log lines ---')
 foreach ($line in $newLog) { $report.Add($line) }
 $report | Add-Content -LiteralPath $outPath -Encoding UTF8
 $checks.GetEnumerator() | ForEach-Object { Write-Host ("{0,-26} {1}" -f $_.Key, $_.Value) }
-Write-Host "انتهى الاختبار. التقرير: $outPath"
-Write-Host 'هذا الاختبار لا يغيّر Registry أو إعدادات الصوت؛ غياب module enumeration وحده ليس دليلًا قاطعًا على عدم التحميل.'
+Write-Host "Test finished. Report: $outPath"
+Write-Host 'This test does not modify the Registry or audio settings. Missing module enumeration alone does not prove the APO was not loaded.'
