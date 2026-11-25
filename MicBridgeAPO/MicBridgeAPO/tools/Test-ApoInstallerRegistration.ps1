@@ -106,6 +106,39 @@ Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validati
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
 Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
+
+Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
+Assert-Contains $installer '\[IO\.File\]::Replace' 'Atomic JSON helper replaces an existing snapshot atomically'
+Assert-Contains $installer 'ComRegistrationSnapshotVersion = 1' 'Permanent backup records the COM snapshot schema version'
+Assert-Contains $installer 'com-registration-backup' 'Permanent COM recovery files live outside temporary transaction folders'
+Assert-Contains $installer 'previous-clsid.reg' 'Permanent backup names the original COM CLSID export'
+Assert-Contains $installer 'previous-audioengine-apo.reg' 'Permanent backup names the original AudioEngine APO export'
+Assert-Contains $installer 'existing backup predates persistent COM recovery data' 'Installer refuses unsafe upgrades with legacy backups'
+Assert-Contains $uninstaller 'ComRegistrationSnapshotVersion' 'Uninstaller requires a persistent COM recovery snapshot before mutation'
+Assert-Contains $uninstaller 'Composite EFX recovery record is missing; uninstall stopped before changing' 'Uninstaller fails closed when the original composite EFX snapshot is missing'
+Assert-Contains $uninstaller 'PSObject\.Properties\.Name -notcontains ''Exists''' 'Uninstaller requires the composite snapshot Exists field'
+Assert-Contains $uninstaller '\$preflightComposite\.Exists -isnot \[bool\]' 'Uninstaller rejects a non-Boolean composite Exists field'
+Assert-Contains $uninstaller 'PSObject\.Properties\.Name -notcontains ''Kind''' 'Uninstaller requires the composite snapshot Kind field'
+Assert-Contains $uninstaller 'preflightComposite\.Kind -ne ''MultiString''' 'Uninstaller accepts only the MultiString recovery kind'
+Assert-Contains $uninstaller 'PSObject\.Properties\.Name -notcontains ''Value''' 'Uninstaller requires the composite snapshot Value field'
+Assert-Contains $uninstaller '\$preflightComposite\.Value -isnot \[array\]' 'Uninstaller requires the composite recovery value to be a list'
+Assert-Contains $uninstaller 'TryParse\(\$effectId' 'Uninstaller validates every saved composite CLSID'
+Assert-Contains $uninstaller 'expectedComFiles' 'Uninstaller validates both COM recovery file identities before mutation'
+Assert-Contains $uninstaller 'GetFullPath' 'Uninstaller canonicalizes recorded COM recovery paths'
+Assert-Contains $uninstaller 'OrdinalIgnoreCase' 'Uninstaller rejects COM recovery paths outside the installer-owned location'
+Assert-Contains $uninstaller 'does not contain its expected registry root' 'Uninstaller validates the exported COM registry root'
+Assert-Contains $uninstaller 'contains an unexpected registry tree' 'Uninstaller rejects unrelated registry trees in COM recovery exports'
+Assert-Contains $uninstaller 'Windows Registry Editor Version 5\.00' 'Uninstaller validates the original COM registry export header'
+Assert-Contains $uninstaller 'if \(\$preflightBackup\.PrevClsidRegistrationExists\)' 'Uninstaller validates the saved CLSID export when it existed'
+Assert-Contains $uninstaller 'if \(\$preflightBackup\.PrevApoRegistrationExists\)' 'Uninstaller validates the saved AudioEngine export when it existed'
+Assert-Contains $uninstaller 'PrevClsidRegistrationExists' 'Uninstaller restores the pre-install COM CLSID when it existed'
+Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores the pre-install AudioEngine APO registration when it existed'
+Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
+Assert-Contains $uninstaller 'Do not run a broad cleanup over every endpoint' 'Uninstaller avoids deleting pre-existing CLSID references on unrelated endpoints'
+Assert-Contains $uninstaller 'remainingReferences' 'Uninstaller blocks binary removal if dangling endpoint references cannot be made safe'
+Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\$transactionState\s+-Path\s+\$transactionStateFile' 'Transaction snapshot uses atomic JSON persistence'
+Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{' 'Composite EFX snapshot uses atomic JSON persistence'
+
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
 Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
@@ -140,10 +173,23 @@ foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
     if ($parseErrors.Count -gt 0) {
-        $parseErrors | ForEach-Object { Write-Error ("PowerShell parse error in {0}: {1}" -f $scriptName, $_.Message) }
+        foreach ($parseError in $parseErrors) {
+            Write-Host ("PowerShell parse error in {0} at line {1}, column {2}: {3}" -f $scriptName, $parseError.Extent.StartLineNumber, $parseError.Extent.StartColumnNumber, $parseError.Message)
+            Write-Host ("Offending text: {0}" -f $parseError.Extent.Text)
+        }
         throw "PowerShell syntax validation failed for $scriptName"
     }
     Write-Host "PASS: PowerShell syntax $scriptName"
 }
+
+
+Assert-Contains $uninstaller 'Read-only global preflight: every capture endpoint value must have its documented registry type' 'Uninstaller performs the global endpoint type preflight'
+Assert-Contains $uninstaller 'OpenSubKey\("\$capSub\\\$endpointId\\FxProperties"' 'Uninstaller uses normalized single-separator registry paths'
+if ([regex]::Matches($uninstaller, [regex]::Escape('Read-only global preflight: every capture endpoint value must have its documented registry type')).Count -ne 1) { throw 'FAIL: Uninstaller must contain exactly one global preflight block' }
+Write-Host 'PASS: Uninstaller contains exactly one global preflight block'
+$completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."'
+$completionIndex = $uninstaller.LastIndexOf($completionLine)
+if ($completionIndex -lt 0 -or $uninstaller.Substring($completionIndex + $completionLine.Length).Trim().Length -ne 0) { throw 'FAIL: Uninstaller has executable content after its completion message' }
+Write-Host 'PASS: No executable content follows the uninstall completion message'
 
 Write-Host 'All installer registration static checks passed.'

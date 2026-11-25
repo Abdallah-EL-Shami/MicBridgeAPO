@@ -27,6 +27,17 @@ $installLog = Join-Path $dataDir 'Install.log'
 $dllBackupPath = $null
 $dllBackupHash = $null
 $dllReplacementStarted = $false
+function Write-JsonAtomic([object]$Value, [string]$Path, [int]$Depth = 8) {
+    $directory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $json = ConvertTo-Json -InputObject $Value -Depth $Depth
+        [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp, $Path, $null, $true) }
+        else { [IO.File]::Move($temp, $Path) }
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
+}
 function Write-InstallLog([string]$Level, [string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
     try {
@@ -127,6 +138,9 @@ $dev = $found[0]
 # This check happens before checkpoints, file copies, ACL changes, or registry writes.
 if (Test-Path -LiteralPath $backupFile) {
     $existingBackup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
+    if ($existingBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$existingBackup.ComRegistrationSnapshotVersion -ne 1) {
+        throw 'The existing backup predates persistent COM recovery data. Its original COM state cannot be reconstructed safely; refusing an in-place upgrade that would make uninstall destructive.'
+    }
     if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
         throw "ملف النسخة الاحتياطية يخص جهازًا آخر ($($existingBackup.DeviceId)) وليس المايك الحالي ($($dev.Id)). لم يتم إجراء أي تغييرات. لا تحذف backup.json؛ أرسل هذه الرسالة للمراجعة."
     }
@@ -159,12 +173,29 @@ if (-not (Test-Path $backupFile)) {
     $devSddl = Get-Sddl $devSub
     $fxSddl  = if ($fxExists) { Get-Sddl $fxSub } else { $null }
     if (-not $devSddl) { throw 'تعذر قراءة صلاحيات مفتاح المايك، ألغيت التثبيت قبل أي تغيير.' }
+    # Persist the pre-MicBridge COM registrations outside the temporary transaction directory.
+    # These files survive successful installation and are consumed by the uninstaller.
+    $comBackupDir = Join-Path $dataDir 'com-registration-backup'
+    New-Item -ItemType Directory -Force -Path $comBackupDir | Out-Null
+    $comClsidPath = "HKLM\SOFTWARE\Classes\CLSID\$clsid"
+    $comApoPath = "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+    $prevClsidRegistrationExists = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+    $prevApoRegistrationExists = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+    $prevClsidRegistrationFile = Join-Path $comBackupDir 'previous-clsid.reg'
+    $prevApoRegistrationFile = Join-Path $comBackupDir 'previous-audioengine-apo.reg'
+    if ($prevClsidRegistrationExists) { & reg.exe export $comClsidPath $prevClsidRegistrationFile /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not persist the original COM CLSID registration.' } }
+    if ($prevApoRegistrationExists) { & reg.exe export $comApoPath $prevApoRegistrationFile /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not persist the original AudioEngine APO registration.' } }
     $backup = [pscustomobject]@{
+        ComRegistrationSnapshotVersion = 1
+        PrevClsidRegistrationExists = $prevClsidRegistrationExists
+        PrevApoRegistrationExists = $prevApoRegistrationExists
+        PrevClsidRegistrationFile = $prevClsidRegistrationFile
+        PrevApoRegistrationFile = $prevApoRegistrationFile
         DeviceId = $dev.Id; PrevDisableProtectedAudioDG = $prevDis; PrevEndpointEffect = $prevFx
         PrevFxAssociation = if ($fxExists) { (Get-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue } else { $null }
         DevKeySddl = $devSddl; FxKeySddl = $fxSddl; CreatedFx = (-not $fxExists)
     }
-    $backup | ConvertTo-Json -Depth 5 | Set-Content $backupFile -Encoding UTF8
+    Write-JsonAtomic -Value $backup -Path $backupFile -Depth 8
     Write-Host "حُفظت القيم والصلاحيات الأصلية في $backupFile"
 } else {
     Write-InstallLog 'INFO' 'Existing backup validated and retained; registry state was not used to guess historical values.'
@@ -188,8 +219,7 @@ if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
     if (-not $compositeExists -and $backup.PrevEndpointEffect -and [string]$backup.PrevEndpointEffect -ne $clsid) {
         $compositeValue = @([string]$backup.PrevEndpointEffect)
     }
-    [pscustomobject]@{ DeviceId=$dev.Id; Exists=$compositeExists; Kind=$compositeKind; Value=$compositeValue } |
-        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $compositeBackupFile -Encoding UTF8
+    Write-JsonAtomic -Value ([pscustomobject]@{ DeviceId=$dev.Id; Exists=$compositeExists; Kind=$compositeKind; Value=$compositeValue }) -Path $compositeBackupFile -Depth 5
     Write-InstallLog 'INFO' 'Captured original composite EFX state in a separate recovery record.'
 } else {
     $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
@@ -251,7 +281,7 @@ $transactionState = [pscustomobject]@{
 if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxComposite.Kind -ne 'MultiString') {
     throw "Current composite EFX value has unexpected type '$($transactionState.FxComposite.Kind)'; refusing to overwrite it."
 }
-$transactionState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $transactionStateFile -Encoding UTF8
+Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 
 # ---- 4) الملفات
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
