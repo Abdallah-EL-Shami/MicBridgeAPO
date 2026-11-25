@@ -590,6 +590,8 @@ private:
         m_pktTx = 0;
         m_underruns = 0;
         m_stop = false;
+        m_sendStartup.store(0, std::memory_order_release);
+        m_recvStartup.store(0, std::memory_order_release);
         m_sendEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         m_thSend = CreateThread(nullptr, 0, SendThunk, this, 0, nullptr);
         m_thRecv = CreateThread(nullptr, 0, RecvThunk, this, 0, nullptr);
@@ -603,6 +605,23 @@ private:
             Log("WARNING: SetThreadPriority(send) failed: %lu", GetLastError());
         if (!SetThreadPriority(m_thRecv, THREAD_PRIORITY_HIGHEST))
             Log("WARNING: SetThreadPriority(recv) failed: %lu", GetLastError());
+
+        // Do not advertise an active bridge until both worker sockets are ready.
+        // LockForProcess is a control-path callback, so a bounded startup wait is safe here.
+        const ULONGLONG deadline = GetTickCount64() + 1500;
+        while (GetTickCount64() < deadline &&
+               m_sendStartup.load(std::memory_order_acquire) == 0 &&
+               m_recvStartup.load(std::memory_order_acquire) == 0) Sleep(5);
+        while (GetTickCount64() < deadline &&
+               (m_sendStartup.load(std::memory_order_acquire) == 0 ||
+                m_recvStartup.load(std::memory_order_acquire) == 0)) Sleep(5);
+        const int sendState = m_sendStartup.load(std::memory_order_acquire);
+        const int recvState = m_recvStartup.load(std::memory_order_acquire);
+        if (sendState != 1 || recvState != 1) {
+            Log("Bridge startup degraded: sendState=%d recvState=%d; keeping safe pass-through", sendState, recvState);
+            StopBridge();
+            return;
+        }
         m_active = true;
         Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples",
             m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter);
@@ -640,18 +659,23 @@ private:
     // ------------------------------------------------------------ خيط الإرسال
     void SendLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) { Log("send: socket failed %d", WSAGetLastError()); return; }
+        if (s == INVALID_SOCKET) { m_sendStartup.store(-1, std::memory_order_release); Log("send: socket failed %d", WSAGetLastError()); return; }
         Log("send: UDP socket created");
         BOOL on = TRUE;
-        setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on);
+        if (setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on) != 0) {
+            const int error = WSAGetLastError(); m_sendStartup.store(-1, std::memory_order_release);
+            Log("send: SO_BROADCAST failed %d", error); closesocket(s); return;
+        }
         sockaddr_in dst{};
         dst.sin_family = AF_INET;
         dst.sin_port = htons((u_short)m_cfg.port);
         if (inet_pton(AF_INET, m_cfg.bcast, &dst.sin_addr) != 1) {
+            m_sendStartup.store(-1, std::memory_order_release);
             Log("send: bad BroadcastAddress '%s'", m_cfg.bcast);
             closesocket(s);
             return;
         }
+        m_sendStartup.store(1, std::memory_order_release);
         uint8_t pkt[sizeof(ReaHdr) + 1200];
         ReaHdr* h = reinterpret_cast<ReaHdr*>(pkt);
         float samples[300];
@@ -681,7 +705,7 @@ private:
     // ------------------------------------------------------------ خيط الاستقبال
     void RecvLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) { Log("recv: socket failed %d", WSAGetLastError()); return; }
+        if (s == INVALID_SOCKET) { m_recvStartup.store(-1, std::memory_order_release); Log("recv: socket failed %d", WSAGetLastError()); return; }
         Log("recv: UDP socket created");
         BOOL on = TRUE;
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof on);
@@ -692,14 +716,22 @@ private:
         sockaddr_in a{};
         a.sin_family = AF_INET;
         a.sin_port = htons((u_short)m_cfg.port);
-        if (inet_pton(AF_INET, m_cfg.bind, &a.sin_addr) != 1) a.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (inet_pton(AF_INET, m_cfg.bind, &a.sin_addr) != 1) {
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: invalid BindAddress '%s'", m_cfg.bind);
+            closesocket(s);
+            return;
+        }
         if (bind(s, (sockaddr*)&a, sizeof a) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
             Log("recv: bind %s:%d failed, error %d (المايك سيمرّ بدون معالجة)", m_cfg.bind, m_cfg.port,
-                WSAGetLastError());
+                error);
             closesocket(s);
             return;
         }
         Log("recv: listening on %s:%d", m_cfg.bind, m_cfg.port);
+        m_recvStartup.store(1, std::memory_order_release);
         uint8_t pkt[4096];
         float in[1024];
         while (!m_stop) {
@@ -762,6 +794,7 @@ private:
     Config m_cfg{};
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
     std::atomic<bool> m_active{false}, m_stop{false};
+    std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
     bool m_wsa = false;
     FloatRing m_sendRing, m_recvRing;
     bool m_primed = false;
