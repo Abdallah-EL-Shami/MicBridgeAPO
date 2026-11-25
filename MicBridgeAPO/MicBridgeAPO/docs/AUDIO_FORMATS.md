@@ -25,7 +25,7 @@ It does not reinterpret 24-bit PCM bytes as floats. Supporting PCM24 requires a 
 
 ## EFX coexistence
 
-On Windows 10 version 1803 and later, the installer registers MicBridge in PKEY_CompositeFX_EndpointEffectClsid (property ID 15, REG_MULTI_SZ) and preserves the original composite list in a separate recovery record. It restores the original legacy PKEY_FX_EndpointEffectClsid value rather than replacing it with MicBridge. The uninstaller restores the original composite list.
+On Windows 10 version 1803 and later, the installer registers MicBridge in PKEY_CompositeFX_EndpointEffectClsid (property ID 15, REG_MULTI_SZ) and preserves the original composite list in a separate recovery record. It restores the original legacy PKEY_FX_EndpointEffectClsid value rather than replacing it with MicBridge. The uninstaller removes only MicBridge from the live list and retains other entries, including vendor APOs added after installation.
 
 This preserves the prior EFX CLSIDs in the registry, but it does not prove that Windows activates the complete chain or that the chosen order is appropriate for every Realtek APO. Verify actual graph activation and audio ordering on the target machine.
 
