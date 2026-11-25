@@ -25,7 +25,7 @@ if(MICBRIDGE_BUILD_APO)
         _WINSOCK_DEPRECATED_NO_WARNINGS
     )
     target_compile_options(MicBridgeAPO PRIVATE /W4 /permissive- /EHsc)
-    target_link_libraries(MicBridgeAPO PRIVATE ws2_32 ole32)
+    target_link_libraries(MicBridgeAPO PRIVATE ws2_32 ole32 iphlpapi)
 endif()
 
 if(BUILD_TESTING)
