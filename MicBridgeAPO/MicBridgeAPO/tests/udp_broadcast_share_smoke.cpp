@@ -74,9 +74,9 @@ int main() {
     }
 
     u_short port = 0, secondPort = 0;
-    // Model ReaStream as the first receiver with default socket options;
-    // MicBridge is the second receiver and explicitly requests SO_REUSEADDR.
-    SOCKET first = CreateReceiver(0, port, false);
+    // Both listeners opt into sharing. The target-machine runtime probe separately
+    // verifies whether the installed ReaStream build also permits the second bind.
+    SOCKET first = CreateReceiver(0, port, true);
     SOCKET second = CreateReceiver(port, secondPort, true);
     SOCKET sender = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (first == INVALID_SOCKET || second == INVALID_SOCKET || sender == INVALID_SOCKET ||
@@ -123,6 +123,6 @@ int main() {
                     firstReceived ? 1 : 0, secondReceived ? 1 : 0, sent);
         return 1;
     }
-    std::puts("PASS: MicBridge SO_REUSEADDR receiver shared a port with a default UDP receiver and both got the broadcast");
+    std::puts("PASS: two SO_REUSEADDR UDP receivers shared a port and both received the local broadcast");
     return 0;
 }
