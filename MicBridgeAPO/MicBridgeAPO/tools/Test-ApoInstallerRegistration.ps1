@@ -116,6 +116,16 @@ Assert-Contains $installer 'previous-audioengine-apo.reg' 'Permanent backup name
 Assert-Contains $installer 'existing backup predates persistent COM recovery data' 'Installer refuses unsafe upgrades with legacy backups'
 Assert-Contains $uninstaller 'ComRegistrationSnapshotVersion' 'Uninstaller requires a persistent COM recovery snapshot before mutation'
 Assert-Contains $uninstaller 'Composite EFX recovery record is missing; uninstall stopped before changing' 'Uninstaller fails closed when the original composite EFX snapshot is missing'
+Assert-Contains $uninstaller "PSObject\\.Properties\\.Name -notcontains 'Exists'" 'Uninstaller requires the composite snapshot Exists field'
+Assert-Contains $uninstaller '\$preflightComposite\\.Exists -isnot \\[bool\\]' 'Uninstaller rejects a non-Boolean composite Exists field'
+Assert-Contains $uninstaller "PSObject\\.Properties\\.Name -notcontains 'Kind'" 'Uninstaller requires the composite snapshot Kind field'
+Assert-Contains $uninstaller "preflightComposite\\.Kind -ne 'MultiString'" 'Uninstaller accepts only the MultiString recovery kind'
+Assert-Contains $uninstaller "PSObject\\.Properties\\.Name -notcontains 'Value'" 'Uninstaller requires the composite snapshot Value field'
+Assert-Contains $uninstaller '\$preflightComposite\\.Value -isnot \\[array\\]' 'Uninstaller requires the composite recovery value to be a list'
+Assert-Contains $uninstaller 'TryParse\\(\\$effectId' 'Uninstaller validates every saved composite CLSID'
+Assert-Contains $uninstaller "Windows Registry Editor Version 5\\.00" 'Uninstaller validates the original COM registry export header'
+Assert-Contains $uninstaller "if \\(\\$preflightBackup\\.PrevClsidRegistrationExists\\)" 'Uninstaller validates the saved CLSID export when it existed'
+Assert-Contains $uninstaller "if \\(\\$preflightBackup\\.PrevApoRegistrationExists\\)" 'Uninstaller validates the saved AudioEngine export when it existed'
 Assert-Contains $uninstaller 'PrevClsidRegistrationExists' 'Uninstaller restores the pre-install COM CLSID when it existed'
 Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores the pre-install AudioEngine APO registration when it existed'
 Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
@@ -158,7 +168,10 @@ foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
     if ($parseErrors.Count -gt 0) {
-        $parseErrors | ForEach-Object { Write-Error ("PowerShell parse error in {0}: {1}" -f $scriptName, $_.Message) }
+        foreach ($parseError in $parseErrors) {
+            Write-Host ("PowerShell parse error in {0} at line {1}, column {2}: {3}" -f $scriptName, $parseError.Extent.StartLineNumber, $parseError.Extent.StartColumnNumber, $parseError.Message)
+            Write-Host ("Offending text: {0}" -f $parseError.Extent.Text)
+        }
         throw "PowerShell syntax validation failed for $scriptName"
     }
     Write-Host "PASS: PowerShell syntax $scriptName"
