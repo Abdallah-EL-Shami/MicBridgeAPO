@@ -87,14 +87,28 @@ if (Test-Path $backupFile) {
         if (Test-Path -LiteralPath $compositeBackupFile) {
             $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
             if ([string]$compositeState.DeviceId -ne [string]$b.DeviceId) { throw 'Composite EFX backup endpoint mismatch; refusing to restore another device.' }
-            if ($compositeState.Exists) {
-                $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\\$($b.DeviceId)\\FxProperties", $true)
-                if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
-                try { $key.SetValue($fxCompositeValue, [string[]]@($compositeState.Value), [Microsoft.Win32.RegistryValueKind]::MultiString) }
-                finally { $key.Close() }
-            } else {
-                Remove-ItemProperty -LiteralPath $fxPath -Name $fxCompositeValue -ErrorAction SilentlyContinue
-            }
+            $originalList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\$($b.DeviceId)\FxProperties", $true)
+            if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
+            try {
+                $currentList = @()
+                if ($key.GetValueNames() -contains $fxCompositeValue) {
+                    $currentList = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+                } elseif ($compositeState.Exists) {
+                    $currentList = @($originalList)
+                }
+                $originalHadMicBridge = ($originalList -contains $clsid)
+                if ($originalHadMicBridge) {
+                    if ($currentList -notcontains $clsid) { $currentList += $clsid }
+                } else {
+                    $currentList = @($currentList | Where-Object { [string]$_ -ne $clsid })
+                }
+                if ($currentList.Count -gt 0) {
+                    $key.SetValue($fxCompositeValue, [string[]]$currentList, [Microsoft.Win32.RegistryValueKind]::MultiString)
+                } else {
+                    $key.DeleteValue($fxCompositeValue, $false)
+                }
+            } finally { $key.Close() }
         }
 
         if ($b.CreatedFx) {
