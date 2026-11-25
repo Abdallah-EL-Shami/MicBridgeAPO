@@ -17,7 +17,7 @@ It does not reinterpret 24-bit PCM bytes as floats. Supporting PCM24 requires a 
 ## ReaStream payload contract and limits
 
 - The current implementation parses a 47-byte header and a Float32 payload, with a receive payload ceiling of 4096 bytes.
-- Both the Cantabile ReaStream receiver and MicBridge receive on UDP/58710. The bridge therefore uses SO_REUSEADDR and requires local-broadcast transmission (`127.255.255.255`) so the datagram can be fanned out; Windows does not guarantee deterministic delivery for competing unicast sockets on a shared port. The receive path accepts only loopback-sourced packets.
+- Both the Cantabile ReaStream receiver and MicBridge receive on UDP/58710. The bridge therefore uses SO_REUSEADDR and requires local-broadcast transmission (`127.255.255.255`) so the datagram can be fanned out; Windows does not guarantee deterministic delivery for competing unicast sockets on a shared port. The receive path accepts packets sourced from any local IPv4 interface, including loopback, and rejects remote senders.
 - It accepts mono or stereo return packets only; stereo is downmixed by averaging the two channels.
 - The implementation treats payloads as planar Float32. This remains an observed/inferred protocol assumption, not an official ReaStream specification. Validate it against the exact installed ReaStream version with captured mono and stereo packets before release.
 - Receive-side sample-rate conversion now uses the same stateful LinearResampler implementation exercised by portable tests. A sample-rate change resets its phase/history.
