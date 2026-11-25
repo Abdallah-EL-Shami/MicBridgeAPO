@@ -73,9 +73,9 @@ if ($after.Count -gt 0) {
     foreach ($line in $before) { $beforeSet[$line] = $true }
     foreach ($line in $after) { if (-not $beforeSet.ContainsKey($line)) { $newLog += $line } }
 }
-$stoppedLine = @($newLog | Where-Object { $_ -match 'Stopped: tx=\\d+ rx=\\d+' } | Select-Object -Last 1)
+$stoppedLine = @($newLog | Where-Object { $_ -match 'Stopped: tx=\d+ rx=\d+' } | Select-Object -Last 1)
 $txPackets = 0; $rxPackets = 0
-if ($stoppedLine.Count -gt 0 -and $stoppedLine[0] -match 'Stopped: tx=(\\d+) rx=(\\d+)') {
+if ($stoppedLine.Count -gt 0 -and $stoppedLine[0] -match 'Stopped: tx=(\d+) rx=(\d+)') {
     $txPackets = [int]$Matches[1]
     $rxPackets = [int]$Matches[2]
 }
