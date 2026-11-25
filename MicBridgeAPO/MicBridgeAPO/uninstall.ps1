@@ -148,16 +148,7 @@ if (Test-Path $backupFile) {
     if ($null -ne $b.PrevDisableProtectedAudioDG) { Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord }
     else { Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue }
 
-    # 2) إرجاع المالك والصلاحيات الأصلية (الداخلي أولًا ثم المفتاح الأب)
-    try {
-        if ($b.FxKeySddl -and (Test-Path $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
-        Restore-Sddl $devSub $b.DevKeySddl
-        Write-Host 'أُعيد مالك المفتاح وصلاحياته كما كانت.'
-    } catch {
-        Write-Warning "تعذر إرجاع الصلاحيات الأصلية: $($_.Exception.Message)"
-        throw 'Uninstall stopped before COM/DLL removal because endpoint ACL restoration failed. Keep backup.json and retry after resolving the permission error.'
-    }
-} else { Write-Warning 'لم أجد backup.json، سأزيل التسجيل فقط.' }
+}
 
 
 # Remove only MicBridge references from every capture endpoint before deleting COM/DLL.
@@ -236,8 +227,17 @@ function Remove-MicBridgeCaptureReferences {
 
 Remove-MicBridgeCaptureReferences
 
-if (-not (Test-Path -LiteralPath $backupFile)) {
-    throw 'MicBridge references were cleaned, but backup.json is missing. The original DisableProtectedAudioDG value and endpoint ACL/association cannot be proven or restored. COM registration and DLL were deliberately retained to avoid leaving Windows audio configuration in an unknown state. Restore the matching backup and retry uninstall.'
+if (Test-Path -LiteralPath $backupFile)) {
+    try {
+        if ($b.FxKeySddl -and (Test-Path -LiteralPath $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
+        Restore-Sddl $devSub $b.DevKeySddl
+        Write-Host 'أُعيد مالك المفتاح وصلاحياته الأصلية.'
+    } catch {
+        Write-Warning "تعذر إرجاع صلاحيات endpoint: $($_.Exception.Message)"
+        throw 'Uninstall stopped before COM/DLL removal because endpoint ACL restoration failed. Keep backup.json and retry.'
+    }
+} else {
+    Write-Warning 'backup.json مفقود: أزيلت مراجع MicBridge وتأكد خلوها، لكن لا يمكن استعادة DisableProtectedAudioDG أو ACL/association الأصلية دون النسخة. تُترك هذه القيم دون تخمين.'
 }
 
 $apoRegistrationPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
