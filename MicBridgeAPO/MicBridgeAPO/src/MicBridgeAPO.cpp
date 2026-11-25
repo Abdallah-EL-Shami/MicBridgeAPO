@@ -783,6 +783,7 @@ public:
         HRESULT hr = E_NOINTERFACE;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IClassFactory)) {
             *ppv = static_cast<IClassFactory*>(this);
+            AddRef();
             hr = S_OK;
         }
         wchar_t iidText[40] = {};
