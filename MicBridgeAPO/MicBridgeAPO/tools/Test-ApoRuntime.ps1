@@ -127,6 +127,7 @@ $checks = [ordered]@{
     FormatAccepted = [bool]($newLog -match 'Is(Input|Output)FormatSupported accepted')
     LockForProcess = [bool]($newLog -match 'LockForProcess entered')
     UdpBridgeStarted = [bool]($newLog -match 'Started: rate=')
+    UdpReceiveBindFailed = [bool]($newLog -match 'recv: bind .* failed|recv: SO_REUSEADDR failed')
     ApoProcessSummary = [bool]($newLog -match 'APOProcess summary:')
     SentRawPackets = ($txPackets -gt 0)
     ReceivedReaStreamPackets = ($rxPackets -gt 0)
