@@ -12,29 +12,34 @@ try {
     $journal = New-MBRecoveryJournal -Path $journalPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreEndpointValues','RestoreEndpointAcl','RestoreCom')
     if ($journal.SchemaVersion -ne 1 -or $journal.Steps.Count -ne 3) { throw 'FAIL: journal creation/schema' }
 
+    # Exercise a real abrupt process death after the side effect, before the journal
+    # can persist Completed. FailFast bypasses PowerShell catch/finally handlers.
     $state = Join-Path $tempRoot 'effect.txt'
-    $actionCount = 0
-    $action = {
-        $script:actionCount++
-        [IO.File]::WriteAllText($state,'applied')
-        throw 'Injected interruption after side effect'
-    }.GetNewClosure()
-    $verify = { Test-Path -LiteralPath $state }.GetNewClosure()
+    $childPath = Join-Path $tempRoot 'crash-child.ps1'
+    $childSource = @'
+param([string]$ModulePath,[string]$JournalPath,[string]$StatePath)
+$ErrorActionPreference = 'Stop'
+Import-Module -Name $ModulePath -Force
+$state = $StatePath
+Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action {
+    [IO.File]::WriteAllText($state,'applied')
+    [Environment]::FailFast('Injected hard process termination after side effect')
+} -Verify { Test-Path -LiteralPath $state }
+'@
+    [IO.File]::WriteAllText($childPath,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $powershell = Join-Path $PSHOME 'powershell.exe'
+    if (-not (Test-Path -LiteralPath $powershell)) { $powershell = (Get-Command pwsh.exe -ErrorAction Stop).Source }
+    $child = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$childPath,$modulePath,$journalPath,$state) -Wait -PassThru
+    if ($child.ExitCode -eq 0) { throw 'FAIL: crash child unexpectedly exited successfully' }
+    if (-not (Test-Path -LiteralPath $state)) { throw 'FAIL: child did not persist the simulated external side effect' }
 
-    try {
-        Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestoreEndpointValues' -Action $action -Verify $verify
-        throw 'FAIL: injected interruption was not propagated'
-    } catch {
-        if ($_.Exception.Message -eq 'FAIL: injected interruption was not propagated') { throw }
-        if ($_.Exception.Message -notlike '*Injected interruption*') { throw }
-    }
+    $afterCrash = Read-MBRecoveryJournal -Path $journalPath
+    $step = @($afterCrash.Steps | Where-Object Id -eq 'RestoreEndpointValues')[0]
+    if ($step.State -ne 'Running' -or $step.Attempts -ne 1) { throw 'FAIL: abrupt process death did not leave a durable Running state' }
 
-    $afterFailure = Read-MBRecoveryJournal -Path $journalPath
-    $step = @($afterFailure.Steps | Where-Object Id -eq 'RestoreEndpointValues')[0]
-    if ($step.State -ne 'Running' -or $step.Attempts -ne 1) { throw 'FAIL: interrupted step was not durably marked Running' }
-
-    # Simulate process death after the side effect but before completion was persisted.
-    Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestoreEndpointValues' -Action { throw 'Action must not repeat when postcondition already holds' } -Verify $verify
+    # A fresh parent process context resumes by observing the postcondition;
+    # the action must not run a second time.
+    Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestoreEndpointValues' -Action { throw 'Action must not repeat when postcondition already holds' } -Verify { Test-Path -LiteralPath $state }
     $afterResume = Read-MBRecoveryJournal -Path $journalPath
     $step = @($afterResume.Steps | Where-Object Id -eq 'RestoreEndpointValues')[0]
     if ($step.State -ne 'Completed' -or $step.Attempts -ne 1) { throw 'FAIL: recovery did not recognize the already-applied effect' }
@@ -57,7 +62,7 @@ try {
     try { Read-MBRecoveryJournal -Path $badPath | Out-Null; throw 'FAIL: corrupt journal accepted' }
     catch { if ($_.Exception.Message -eq 'FAIL: corrupt journal accepted') { throw } }
 
-    Write-Host 'PASS: durable journal creation, interrupted-step resume, retry, and fail-closed validation'
+    Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and fail-closed validation'
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
