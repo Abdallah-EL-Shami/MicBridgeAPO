@@ -269,7 +269,7 @@ function Invoke-MBRecoveryPlan {
 function Protect-MBRecoveryDirectory {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    if (-not $IsWindows -and $env:OS -ne 'Windows_NT') {
+    if ($env:OS -ne 'Windows_NT') {
         throw 'Recovery directory ACL hardening is supported only on Windows.'
     }
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
