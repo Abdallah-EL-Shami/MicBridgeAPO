@@ -42,6 +42,8 @@ Assert-Contains $installer 'PKEY_CompositeFX_EndpointEffectClsid' 'Installer use
 Assert-Contains $installer '\$fxCompositeValue\s*=\s*''\{d04e05a6-594b-4fb6-a80d-01af5eed7d1d\},15''' 'Installer targets the composite EFX property key'
 Assert-Contains $installer 'composite-efx-backup.json' 'Installer stores composite EFX state outside the original backup'
 Assert-Contains $installer 'Type MultiString' 'Installer writes the composite EFX chain as REG_MULTI_SZ'
+Assert-Contains $installer 'Current composite EFX value has unexpected type' 'Installer refuses to overwrite a malformed composite EFX value'
+Assert-Contains $uninstaller 'Current composite EFX value is not REG_MULTI_SZ' 'Uninstaller refuses to mutate a malformed composite EFX value'
 Assert-NotContains $installer 'Name \$fxValue -Value \$clsid' 'Installer does not overwrite the legacy single-APO EFX property'
 Assert-Contains $uninstaller 'Remove only MicBridge from the live composite list' 'Uninstaller preserves vendor EFX entries added after installation'
 Assert-Contains $uninstaller '\$currentLegacy' 'Uninstaller does not overwrite a vendor-updated legacy EFX value'
