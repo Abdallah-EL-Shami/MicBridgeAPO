@@ -2,7 +2,7 @@
 
 Branch: `integration/apo-runtime-hardening`
 
-This is an implementation status report, not release approval. Code changes have been made, but target-machine activation and the latest Windows CI result remain unverified.
+This is an implementation status report, not release approval. Windows CI passed for commit `8ee81e024e03f5717b0925269f2ce2b1cf38d8d7`; target-machine activation and physical-device integration remain unverified.
 
 ## Implemented on this branch
 
@@ -21,11 +21,13 @@ This is an implementation status report, not release approval. Code changes have
 
 ## Still unverified / remaining engineering work
 
-1. The expanded Windows build and test suite has not yet been confirmed green for the latest commit. No package from the latest source should be installed until CI is verified.
+- Windows CI for commit `8ee81e024e03f5717b0925269f2ce2b1cf38d8d7` passed: MSVC x64 build, all 3 CTest tests (core, shared UDP broadcast, COM smoke), installer/static checks, dynamic REG_MULTI_SZ round-trip, PowerShell parser checks, and package staging/artifact upload. Artifacts are available from the associated Actions run.
+
+1. The CI result proves compilation and automated tests on the GitHub Windows runner; it does not prove target-device Audio Engine or ReaStream activation.
 2. Static installer checks are not a PowerShell execution test. The transaction rollback must be exercised on a disposable Windows VM with injected failures at each mutation stage.
 3. The uninstaller now stops before COM/DLL removal if endpoint ACL restoration fails, but it still needs failure-injection testing for each registry/ACL restoration stage.
 4. Composite EFX registration preserves current vendor entries and avoids replacing the legacy single-effect value, but does not prove Audio Engine activation, effect order, or compatibility with the exact Realtek driver. Verify on the target endpoint.
-5. ReaStream's 47-byte header and planar Float32 interpretation are empirical assumptions. The Windows UDP shared-broadcast smoke test must pass, and the target Cantabile ReaStream instance must be configured for `127.255.255.255` broadcast (not unicast). Use the target probe to confirm both Cantabile and AudioDG own UDP/58710 simultaneously and that the APO logs a successful receive bind; Windows warns that cross-account SO_REUSEADDR sharing has socket-option requirements and can be vulnerable to local port hijacking. Validate the exact plugin version, mono/stereo packet layout, chunk sizes, and sample-rate behavior with a packet capture.
+5. ReaStream's 47-byte header and planar Float32 interpretation are empirical assumptions. The Windows UDP shared-broadcast smoke test passed when both test sockets opt into SO_REUSEADDR. The target Cantabile ReaStream instance must be configured for `127.255.255.255` broadcast (not unicast). Use the target probe to confirm both Cantabile and AudioDG own UDP/58710 simultaneously and that the APO logs a successful receive bind; Windows warns that cross-account SO_REUSEADDR sharing has socket-option requirements and can be vulnerable to local port hijacking. Validate the exact plugin version, mono/stereo packet layout, chunk sizes, and sample-rate behavior with a packet capture.
 6. The current 4096-byte receive-payload ceiling is a defensive cap, not a proven maximum for every ReaStream version. Larger packets are rejected.
 7. Socket startup readiness is checked, but persistent runtime worker-health reporting and recovery after an unexpected worker exit still need implementation.
 8. APO_FLAG_INPLACE is now documented and tested against the SDK contract; frame-count constraints and real-time memory residency still need target Audio Engine review.
