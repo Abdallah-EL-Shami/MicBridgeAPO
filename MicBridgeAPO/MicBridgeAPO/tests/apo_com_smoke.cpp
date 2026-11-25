@@ -55,6 +55,7 @@ int wmain(int argc, wchar_t** argv) {
     CHECK_HR(apo->GetRegistrationProperties(&props));
     CHECK_TRUE(props != nullptr);
     CHECK_TRUE(IsEqualCLSID(props->clsid, CLSID_MicBridgeAPO));
+    CHECK_TRUE(props->Flags == (APO_FLAG)(APO_FLAG_DEFAULT | APO_FLAG_INPLACE));
     CHECK_TRUE(props->u32MinInputConnections == 1 && props->u32MaxInputConnections == 1);
     CHECK_TRUE(props->u32MinOutputConnections == 1 && props->u32MaxOutputConnections == 1);
     CHECK_TRUE(props->u32NumAPOInterfaces == 1);
