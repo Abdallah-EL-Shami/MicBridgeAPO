@@ -35,6 +35,6 @@ Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failu
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
 Assert-Contains $installer 'Previous DLL restored' 'Installer attempts DLL restoration after failure'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
-Assert-NotContains $installer 'existingAssociation = (Get-ItemProperty' 'Installer does not infer historical association from current registry state'
+Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
 Write-Host 'All installer registration static checks passed.'
