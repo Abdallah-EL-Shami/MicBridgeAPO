@@ -192,4 +192,105 @@ function Invoke-MBRecoveryStep {
     }
 }
 
-Export-ModuleMember -Function New-MBRecoveryJournal,Read-MBRecoveryJournal,Invoke-MBRecoveryStep
+function Enter-MBRecoveryOperationLock {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [int]$TimeoutSeconds = 0
+    )
+    # This lock is deliberately separate from the short journal-write lock.
+    # The caller holds it across the ENTIRE install rollback or uninstall plan.
+    $lockPath = "$Path.operation.lock"
+    $directory = Split-Path -Parent $lockPath
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(0,$TimeoutSeconds))
+    do {
+        try {
+            $stream = New-Object IO.FileStream($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+            $metadata = (New-Object Text.UTF8Encoding($false)).GetBytes(("PID={0};UTC={1}" -f $PID,[DateTime]::UtcNow.ToString('o')))
+            $stream.SetLength(0)
+            $stream.Write($metadata,0,$metadata.Length)
+            $stream.Flush($true)
+            return $stream
+        } catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw 'Another MicBridge install/recovery/uninstall operation is active; refusing to interleave registry, ACL, COM, or file changes.'
+            }
+            Start-Sleep -Milliseconds 150
+        }
+    } while ($true)
+}
+
+function Invoke-MBRecoveryPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][ValidateSet('InstallRollback','Uninstall')][string]$ExpectedOperation,
+        [Parameter(Mandatory)][guid]$ExpectedDeviceId,
+        [Parameter(Mandatory)][string[]]$ExpectedStepIds,
+        [Parameter(Mandatory)][hashtable]$Actions,
+        [Parameter(Mandatory)][hashtable]$Verifiers,
+        [int]$LockTimeoutSeconds = 0
+    )
+    if (-not $ExpectedStepIds -or @($ExpectedStepIds | Select-Object -Unique).Count -ne $ExpectedStepIds.Count) {
+        throw 'Recovery plan requires a non-empty, unique, ordered step list.'
+    }
+    foreach ($id in $ExpectedStepIds) {
+        if (-not $Actions.ContainsKey($id) -or $Actions[$id] -isnot [scriptblock] -or
+            -not $Verifiers.ContainsKey($id) -or $Verifiers[$id] -isnot [scriptblock]) {
+            throw "Recovery plan is incomplete: action and verifier are required for '$id'."
+        }
+    }
+    $operationLock = Enter-MBRecoveryOperationLock -Path $Path -TimeoutSeconds $LockTimeoutSeconds
+    $failures = @()
+    try {
+        $journal = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+        foreach ($id in $ExpectedStepIds) {
+            try {
+                Invoke-MBRecoveryStep -Path $Path -StepId $id -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds -Action $Actions[$id] -Verify $Verifiers[$id]
+            } catch {
+                # A failed step is recorded and does not suppress independent later
+                # restorations. The caller receives every failure after all steps run.
+                $failures += [pscustomobject]@{ StepId=$id; Error=$_.Exception.Message }
+            }
+        }
+    } finally {
+        if ($operationLock) { $operationLock.Dispose() }
+    }
+    if ($failures.Count -gt 0) {
+        $summary = ($failures | ForEach-Object { "$($_.StepId): $($_.Error)" }) -join ' | '
+        throw "Recovery plan incomplete; completed independent steps were retained and failed steps remain retryable. $summary"
+    }
+    return Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+}
+
+function Protect-MBRecoveryDirectory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not $IsWindows -and $env:OS -ne 'Windows_NT') {
+        throw 'Recovery directory ACL hardening is supported only on Windows.'
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $acl.SetAccessRuleProtection($true,$false)
+    $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    $acl.Access | ForEach-Object { [void]$acl.RemoveAccessRuleAll($_) }
+    $admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    foreach ($sid in @($admins,$system)) {
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+        [void]$acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+    $check = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    if (-not $check.AreAccessRulesProtected -or $check.Owner -notmatch 'S-1-5-32-544|Administrators') {
+        throw 'Recovery directory ACL verification failed; refusing to continue.'
+    }
+    return $check.Sddl
+}
+
+Export-ModuleMember -Function New-MBRecoveryJournal,Read-MBRecoveryJournal,Invoke-MBRecoveryStep,Enter-MBRecoveryOperationLock,Invoke-MBRecoveryPlan,Protect-MBRecoveryDirectory
