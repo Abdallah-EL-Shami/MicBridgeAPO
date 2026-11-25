@@ -58,7 +58,161 @@ function Restore-Sddl([string]$sub, [string]$sddl) {   # يعيد المالك �
 }
 
 if (Test-Path $backupFile) {
-    $b = Get-Content $backupFile -Raw | ConvertFrom-Json
+    $b = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
+    if (-not $b -or [string]::IsNullOrWhiteSpace([string]$b.DeviceId) -or [string]$b.DeviceId -notmatch '^\{?[0-9a-fA-F-]{36}\}?
+    $fxSub  = "$devSub\FxProperties"
+    $fxPath = "$capRoot\$($b.DeviceId)\FxProperties"
+
+    # 1) القيم (والمفاتيح ما زالت بصلاحيات كاملة للمسؤولين)
+    if (Test-Path $fxPath) {
+        # The current installer leaves the legacy single-CLSID value untouched.
+        # Only undo it when it still contains MicBridge from an older installer.
+        $currentLegacy = (Get-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue).$fxValue
+        if ([string]$currentLegacy -eq $clsid) {
+            if ($b.PrevEndpointEffect) { Set-ItemProperty -LiteralPath $fxPath -Name $fxValue -Value $b.PrevEndpointEffect -Type String }
+            else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue }
+        }
+
+        # Restore the association only if it still has the value installed by MicBridge.
+        $currentAssociation = (Get-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue
+        $expectedAssociation = if ($b.PrevFxAssociation) { [string]$b.PrevFxAssociation } else { '{00000000-0000-0000-0000-000000000000}' }
+        if ([string]$currentAssociation -eq $expectedAssociation) {
+            if ($b.PSObject.Properties.Name -contains 'PrevFxAssociation') {
+                if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
+                else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
+            } elseif (($b.CreatedFx -eq $true) -and ($null -eq $b.FxKeySddl)) {
+                # Legacy backup proves FxProperties did not exist before MicBridge's first install.
+                Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue
+            } else {
+                Write-Warning 'Legacy backup does not prove the original FX association; leaving that property untouched.'
+            }
+        }
+
+        # The old installer may have created FxProperties. Delete it only if it is empty;
+        # never recursively delete driver/vendor properties added later.
+        # Composite EFX cleanup is centralized below and scans every capture endpoint.
+
+        if ($b.CreatedFx) {
+            $relativeFx = "$capSub\$($b.DeviceId)\FxProperties"
+            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relativeFx)
+            if ($key) {
+                $empty = ($key.GetValueNames().Count -eq 0 -and $key.GetSubKeyNames().Count -eq 0)
+                $key.Close()
+                if ($empty) { Remove-Item -LiteralPath $fxPath -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+    if ($null -ne $b.PrevDisableProtectedAudioDG) { Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord }
+    else { Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue }
+
+}
+
+
+# Remove only MicBridge references from every capture endpoint before deleting COM/DLL.
+# Never rewrite vendor entries, malformed values, endpoint association, or driver ACLs here.
+function Remove-MicBridgeCaptureReferences {
+    $captureRoot = $hklm.OpenSubKey($capSub, $false)
+    if (-not $captureRoot) { throw 'Cannot enumerate Windows capture endpoints; refusing COM/DLL removal.' }
+    try { $endpointIds = @($captureRoot.GetSubKeyNames()) }
+    finally { $captureRoot.Close() }
+
+    foreach ($endpointId in $endpointIds) {
+        $fxRelative = "$capSub\$endpointId\FxProperties"
+        $probe = $hklm.OpenSubKey($fxRelative, $false)
+        if (-not $probe) { continue }
+        $probe.Close()
+
+        $key = $hklm.OpenSubKey($fxRelative, $true)
+        if (-not $key) { throw "Cannot safely inspect/write capture endpoint '$endpointId'; refusing COM/DLL removal." }
+        try {
+            $names = @($key.GetValueNames())
+            if ($names -contains $fxCompositeValue) {
+                if ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+                    throw "Capture endpoint '$endpointId' has a malformed composite EFX value; refusing to remove COM/DLL."
+                }
+                $live = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+                $kept = @($live | Where-Object { [string]$_ -ine $clsid })
+                if ($kept.Count -ne $live.Count) {
+                    if ($kept.Count -gt 0) {
+                        $key.SetValue($fxCompositeValue, [string[]]$kept, [Microsoft.Win32.RegistryValueKind]::MultiString)
+                    } else {
+                        $key.DeleteValue($fxCompositeValue, $false)
+                    }
+                }
+            }
+
+            if ($names -contains $fxValue) {
+                if ($key.GetValueKind($fxValue) -ne [Microsoft.Win32.RegistryValueKind]::String) {
+                    throw "Capture endpoint '$endpointId' has a malformed legacy EFX value; refusing to remove COM/DLL."
+                }
+                $legacy = [string]$key.GetValue($fxValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                if ($legacy -ieq $clsid) { $key.DeleteValue($fxValue, $false) }
+            }
+        } finally { $key.Close() }
+    }
+
+    # Independent read-only verification: no capture endpoint may still reference this CLSID.
+    $captureRoot = $hklm.OpenSubKey($capSub, $false)
+    if (-not $captureRoot) { throw 'Cannot verify capture endpoint references; refusing COM/DLL removal.' }
+    try { $endpointIds = @($captureRoot.GetSubKeyNames()) }
+    finally { $captureRoot.Close() }
+    foreach ($endpointId in $endpointIds) {
+        $key = $hklm.OpenSubKey("$capSub\$endpointId\FxProperties", $false)
+        if (-not $key) { continue }
+        try {
+            $names = @($key.GetValueNames())
+            if ($names -contains $fxCompositeValue) {
+                if ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+                    throw "Cannot verify malformed composite EFX on '$endpointId'; refusing COM/DLL removal."
+                }
+                $values = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+                if ($values | Where-Object { [string]$_ -ieq $clsid }) {
+                    throw "MicBridge remains in composite EFX on '$endpointId'; refusing COM/DLL removal."
+                }
+            }
+            if ($names -contains $fxValue) {
+                if ($key.GetValueKind($fxValue) -ne [Microsoft.Win32.RegistryValueKind]::String) {
+                    throw "Cannot verify malformed legacy EFX on '$endpointId'; refusing COM/DLL removal."
+                }
+                if ([string]$key.GetValue($fxValue) -ieq $clsid) {
+                    throw "MicBridge remains in legacy EFX on '$endpointId'; refusing COM/DLL removal."
+                }
+            }
+        } finally { $key.Close() }
+    }
+}
+
+Remove-MicBridgeCaptureReferences
+
+if (Test-Path -LiteralPath $backupFile) {
+    try {
+        if ($b.FxKeySddl -and (Test-Path -LiteralPath $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
+        Restore-Sddl $devSub $b.DevKeySddl
+        Write-Host 'أُعيد مالك المفتاح وصلاحياته الأصلية.'
+    } catch {
+        Write-Warning "تعذر إرجاع صلاحيات endpoint: $($_.Exception.Message)"
+        throw 'Uninstall stopped before COM/DLL removal because endpoint ACL restoration failed. Keep backup.json and retry.'
+    }
+} else {
+    Write-Warning 'backup.json مفقود: أزيلت مراجع MicBridge وتأكد خلوها، لكن لا يمكن استعادة DisableProtectedAudioDG أو ACL/association الأصلية دون النسخة. تُترك هذه القيم دون تخمين.'
+}
+
+$apoRegistrationPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+$comRegistrationPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+if (Test-Path -LiteralPath $apoRegistrationPath) { Remove-Item -LiteralPath $apoRegistrationPath -Recurse -Force -ErrorAction Stop }
+if (Test-Path -LiteralPath $comRegistrationPath) { Remove-Item -LiteralPath $comRegistrationPath -Recurse -Force -ErrorAction Stop }
+Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk') -Force -ErrorAction SilentlyContinue
+
+Restart-Service -Name Audiosrv -Force
+Start-Sleep -Seconds 2
+Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
+) {
+        throw 'backup.json is malformed or has no valid capture endpoint DeviceId; no registry or COM changes were made.'
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$b.DevKeySddl)) {
+        throw 'backup.json has no valid endpoint ACL snapshot; refusing destructive uninstall because original permissions cannot be restored.'
+    }
     $devSub = "$capSub\$($b.DeviceId)"
     $fxSub  = "$devSub\FxProperties"
     $fxPath = "$capRoot\$($b.DeviceId)\FxProperties"
