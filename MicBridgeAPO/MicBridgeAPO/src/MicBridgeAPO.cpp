@@ -19,6 +19,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include <windows.h>
 #include <unknwn.h>
 #include <objbase.h>
@@ -51,6 +52,42 @@ static void DataPath(wchar_t* out, size_t n, const wchar_t* file) {
     DWORD r = GetEnvironmentVariableW(L"ProgramData", base, MAX_PATH);
     if (!r || r >= MAX_PATH) wcscpy_s(base, L"C:\\ProgramData");
     swprintf_s(out, n, L"%s\\MicBridgeAPO\\%s", base, file);
+}
+
+static ULONG EnumerateLocalIPv4(std::vector<DWORD>& addresses) {
+    addresses.clear();
+    addresses.push_back(htonl(INADDR_LOOPBACK));
+
+    ULONG bytes = 0;
+    ULONG rc = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, nullptr, &bytes);
+    if (rc == ERROR_NO_DATA) return NO_ERROR;
+    if (rc != ERROR_BUFFER_OVERFLOW || bytes == 0) return rc;
+
+    std::vector<BYTE> storage(bytes);
+    auto* adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(storage.data());
+    rc = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, adapters, &bytes);
+    if (rc != NO_ERROR) return rc;
+
+    for (auto* adapter = adapters; adapter; adapter = adapter->Next) {
+        for (auto* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next) {
+            if (!unicast->Address.lpSockaddr || unicast->Address.lpSockaddr->sa_family != AF_INET)
+                continue;
+            const auto* address = reinterpret_cast<const sockaddr_in*>(unicast->Address.lpSockaddr);
+            if (address->sin_addr.s_addr != htonl(INADDR_ANY) &&
+                address->sin_addr.s_addr != htonl(INADDR_BROADCAST))
+                addresses.push_back(address->sin_addr.s_addr);
+        }
+    }
+    std::sort(addresses.begin(), addresses.end());
+    addresses.erase(std::unique(addresses.begin(), addresses.end()), addresses.end());
+    return NO_ERROR;
+}
+static bool IsLocalIPv4(DWORD address, const std::vector<DWORD>& localAddresses) {
+    return std::find(localAddresses.begin(), localAddresses.end(), address) != localAddresses.end();
 }
 
 static SRWLOCK g_logLock = SRWLOCK_INIT;
@@ -763,6 +800,12 @@ private:
         float in[mb::kMaxRxBytes / sizeof(float)];
         uint8_t expectedId[32];
         mb::MakeId(m_cfg.recvId, expectedId);
+        std::vector<DWORD> localAddresses;
+        const ULONG addressStatus = EnumerateLocalIPv4(localAddresses);
+        if (addressStatus != NO_ERROR)
+            Log("recv: GetAdaptersAddresses failed %lu; only loopback will be accepted", addressStatus);
+        else
+            Log("recv: enumerated %u local IPv4 addresses", (unsigned)localAddresses.size());
         while (!m_stop) {
             if (m_resetRecvRequested.exchange(false, std::memory_order_acq_rel)) {
                 m_resampler.Reset();
@@ -776,9 +819,9 @@ private:
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
                 continue;
             }
-            // This bridge is configured for same-machine local broadcast only.
-            // Reject packets sourced from the LAN or another remote interface.
-            if (sender.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+            // ReaStream's *local broadcast can originate from any local NIC address.
+            // Accept local interface addresses (including loopback), reject remote hosts.
+            if (!IsLocalIPv4(sender.sin_addr.s_addr, localAddresses)) {
                 ++m_nonLocalPackets;
                 continue;
             }
