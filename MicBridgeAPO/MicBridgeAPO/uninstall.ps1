@@ -91,6 +91,26 @@ try {
 if ([string]$preflightComposite.DeviceId -ne [string]$preflightBackup.DeviceId) {
     throw 'Composite EFX recovery record belongs to another endpoint; uninstall stopped before changes.'
 }
+# Validate the complete recovery-record schema while still in the read-only preflight.
+# Never let malformed JSON values reach registry restoration code.
+if ($preflightComposite.PSObject.Properties.Name -notcontains 'Exists' -or
+    $preflightComposite.Exists -isnot [bool]) {
+    throw 'Composite EFX recovery record has an invalid Exists field; uninstall stopped before changes.'
+}
+if ($preflightComposite.PSObject.Properties.Name -notcontains 'Kind' -or
+    [string]$preflightComposite.Kind -ne 'MultiString') {
+    throw 'Composite EFX recovery record has an invalid registry Kind; uninstall stopped before changes.'
+}
+if ($preflightComposite.PSObject.Properties.Name -notcontains 'Value' -or
+    $preflightComposite.Value -isnot [array]) {
+    throw 'Composite EFX recovery record has an invalid Value list; uninstall stopped before changes.'
+}
+foreach ($effectId in $preflightComposite.Value) {
+    $parsedEffectId = [guid]::Empty
+    if ($effectId -isnot [string] -or -not [guid]::TryParse($effectId, [ref]$parsedEffectId)) {
+        throw 'Composite EFX recovery record contains an invalid CLSID; uninstall stopped before changes.'
+    }
+}
 if ($preflightBackup.PrevClsidRegistrationExists) {
     $regFile = [string]$preflightBackup.PrevClsidRegistrationFile
     if ([string]::IsNullOrWhiteSpace($regFile) -or -not (Test-Path -LiteralPath $regFile)) {
