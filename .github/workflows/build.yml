@@ -2,6 +2,7 @@ name: build-dll
 on:
   workflow_dispatch:
   push:
+  pull_request:
 jobs:
   build:
     runs-on: windows-latest
@@ -23,7 +24,7 @@ jobs:
           $package = 'MicBridgeAPO-Package'
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item 'build/Release/MicBridgeAPO.dll' $package
-          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md')
+          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1')
           foreach ($file in $files) {
             $path = Join-Path $source $file
             if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }

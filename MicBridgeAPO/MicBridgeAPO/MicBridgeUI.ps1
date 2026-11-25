@@ -80,9 +80,9 @@ function Refresh-Ui {
     }
     $lat = (Num $h 'bufMs') + (Num $h 'blockMs')
     $lblLat.Text = ('التأخير الإضافي التقريبي: {0:N0} ms' -f $lat)
-    $lblCpu.Text = ('حمل المعالج (الـ APO): {0:N2} %' -f (Num $h 'cpu'))
+    $lblCpu.Text = 'حمل المعالج: غير متاح في هذه النسخة'
     $lblFmt.Text = ('الصيغة: {0} Hz، {1} قناة' -f (Num $h 'rate'), (Num $h 'ch'))
-    $lblPkt.Text = ('حزم/ثانية: إرسال {0:N0} | استقبال {1:N0} | انقطاعات: {2}' -f (Num $h 'tx'), (Num $h 'rx'), (Num $h 'underruns'))
+    $lblPkt.Text = ('الحزم منذ التشغيل: إرسال {0:N0} | استقبال {1:N0} | انقطاعات: {2}' -f (Num $h 'tx'), (Num $h 'rx'), (Num $h 'underruns'))
     if ($h['bind'] -eq '0') { $lblWarn.Text = 'تحذير: تعذّر فتح منفذ الاستقبال، راجع MicBridge.log' }
 }
 

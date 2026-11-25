@@ -15,7 +15,12 @@
 
 ## Cantabile
 - ReaStream Receive بالمعرّف APO_MIC_RAW في أول السلسلة.
-- ReaStream Send بالمعرّف APO_MIC_FX في آخرها (Mono). وضع الشبكة: Local broadcast.
+- ReaStream Send بالمعرّف APO_MIC_FX في آخرها (Mono). اكتب `127.255.255.255` في خانة IP للإرسال.
+- لا تستخدم عنوان Unicast. كل من ReaStream وMicBridge يستقبلان على UDP/58710 ويحتاجان نسخة من حزمة البث نفسها؛ عنوان البث المحلي المحدد يطابق `MicBridge.ini`.
+- الاختبار الآلي يتحقق من مشاركة المنفذ على Windows؛ يجب أيضًا التأكد من وصول الحزم إلى عدادي ReaStream وMicBridge على الجهاز الفعلي.
+
+## اختبار التشغيل على الجهاز
+افتح Cantabile أولًا مع تفعيل ReaStream Receive/Send، ثم من مجلد الحزمة بعد التثبيت شغّل PowerShell x64 كمسؤول ونفّذ `powershell -ExecutionPolicy Bypass -File .\Test-ApoRuntime.ps1 -DurationSeconds 60`. عند الطلب ابدأ تسجيلًا فعليًا من AT2040USB ثم أوقفه؛ سيحفظ التقرير في `C:\ProgramData\MicBridgeAPO` ويتحقق من مالكي UDP/58710. الاختبار للقراءة فقط.
 
 ## الإزالة
 انقر مرتين على uninstall.bat. يعيد القيم الأصلية ومالك المفتاح وصلاحياته (SDDL).

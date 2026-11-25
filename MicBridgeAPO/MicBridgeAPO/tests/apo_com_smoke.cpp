@@ -28,9 +28,24 @@ int wmain(int argc, wchar_t** argv) {
 
     CHECK_HR(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
 
+    using DllCanUnloadNowFn = HRESULT (STDAPICALLTYPE*)();
+    auto canUnload = reinterpret_cast<DllCanUnloadNowFn>(GetProcAddress(module, "DllCanUnloadNow"));
+    CHECK_TRUE(canUnload != nullptr);
+
     IClassFactory* factory = nullptr;
     CHECK_HR(getClassObject(CLSID_MicBridgeAPO, IID_IClassFactory,
                             reinterpret_cast<void**>(&factory)));
+    CHECK_TRUE(canUnload() == S_FALSE);
+
+    // Factory references must keep the DLL non-unloadable and balance exactly.
+    IUnknown* factoryIdentity = nullptr;
+    CHECK_HR(factory->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&factoryIdentity)));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    factoryIdentity->Release();
+
+    factory->AddRef();
+    CHECK_TRUE(canUnload() == S_FALSE);
+    factory->Release();
 
     IAudioProcessingObject* apo = nullptr;
     CHECK_HR(factory->CreateInstance(nullptr, __uuidof(IAudioProcessingObject),
@@ -40,6 +55,7 @@ int wmain(int argc, wchar_t** argv) {
     CHECK_HR(apo->GetRegistrationProperties(&props));
     CHECK_TRUE(props != nullptr);
     CHECK_TRUE(IsEqualCLSID(props->clsid, CLSID_MicBridgeAPO));
+    CHECK_TRUE(props->Flags == (APO_FLAG)(APO_FLAG_DEFAULT | APO_FLAG_INPLACE));
     CHECK_TRUE(props->u32MinInputConnections == 1 && props->u32MaxInputConnections == 1);
     CHECK_TRUE(props->u32MinOutputConnections == 1 && props->u32MaxOutputConnections == 1);
     CHECK_TRUE(props->u32NumAPOInterfaces == 1);
@@ -83,14 +99,25 @@ int wmain(int argc, wchar_t** argv) {
     CHECK_HR(validApo->Initialize(sizeof(good), reinterpret_cast<BYTE*>(&good)));
     validApo->Release();
 
+    // Prove server locks alone keep the module alive after the factory ref is released.
+    CHECK_HR(factory->LockServer(TRUE));
+    CHECK_HR(factory->LockServer(TRUE));
     factory->Release();
-    using DllCanUnloadNowFn = HRESULT (STDAPICALLTYPE*)();
-    auto canUnload = reinterpret_cast<DllCanUnloadNowFn>(GetProcAddress(module, "DllCanUnloadNow"));
-    CHECK_TRUE(canUnload != nullptr);
+    factory = nullptr;
+    CHECK_TRUE(canUnload() == S_FALSE);
+
+    IClassFactory* unlockFactory = nullptr;
+    CHECK_HR(getClassObject(CLSID_MicBridgeAPO, IID_IClassFactory,
+                            reinterpret_cast<void**>(&unlockFactory)));
+    CHECK_HR(unlockFactory->LockServer(FALSE));
+    CHECK_TRUE(canUnload() == S_FALSE);
+    CHECK_HR(unlockFactory->LockServer(FALSE));
+    CHECK_TRUE(unlockFactory->LockServer(FALSE) == E_UNEXPECTED);
+    unlockFactory->Release();
     CHECK_HR(canUnload());
     CoUninitialize();
     FreeLibrary(module);
 
-    std::puts("PASS: COM factory, APO interfaces, registration properties, and Initialize validation");
+    std::puts("PASS: COM factory refs, LockServer balancing, APO interfaces, registration properties, and Initialize validation");
     return 0;
 }

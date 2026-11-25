@@ -25,7 +25,7 @@ if(MICBRIDGE_BUILD_APO)
         _WINSOCK_DEPRECATED_NO_WARNINGS
     )
     target_compile_options(MicBridgeAPO PRIVATE /W4 /permissive- /EHsc)
-    target_link_libraries(MicBridgeAPO PRIVATE ws2_32 ole32)
+    target_link_libraries(MicBridgeAPO PRIVATE ws2_32 ole32 iphlpapi)
 endif()
 
 if(BUILD_TESTING)
@@ -37,6 +37,13 @@ if(BUILD_TESTING)
         target_compile_options(micbridge_core_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME micbridge_core_tests COMMAND micbridge_core_tests)
+
+    if(WIN32)
+        add_executable(micbridge_udp_broadcast_share_smoke tests/udp_broadcast_share_smoke.cpp)
+        target_compile_options(micbridge_udp_broadcast_share_smoke PRIVATE /W4 /permissive- /EHsc)
+        target_link_libraries(micbridge_udp_broadcast_share_smoke PRIVATE ws2_32)
+        add_test(NAME micbridge_udp_broadcast_share_smoke COMMAND micbridge_udp_broadcast_share_smoke)
+    endif()
 
     if(WIN32 AND MICBRIDGE_BUILD_APO)
         add_executable(micbridge_apo_com_smoke tests/apo_com_smoke.cpp)

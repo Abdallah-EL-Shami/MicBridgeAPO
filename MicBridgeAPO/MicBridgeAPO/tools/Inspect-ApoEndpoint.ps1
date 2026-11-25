@@ -11,6 +11,7 @@ $capSub = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot = "HKLM:\$capSub"
 $fxSubKey = '{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D}'
 $epEffectName = "$fxSubKey,7"       # PKEY_FX_EndpointEffectClsid
+$compositeEffectName = "$fxSubKey,15" # PKEY_CompositeFX_EndpointEffectClsid
 $fxAssociationName = "$fxSubKey,0"  # PKEY_FX_Association
 $disableSysFxName = '{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},5'
 
@@ -58,7 +59,13 @@ Write-Host ''
 Write-Host '=== Selected Capture endpoint ==='
 Write-Host ("EndpointId: {0}" -f $EndpointId)
 Write-Host ("DeviceState: {0}" -f (Read-LmValue $devSub 'DeviceState'))
+$compositeEffects = Read-LmValue $fxSub $compositeEffectName
+$compositeText = if ($compositeEffects -is [array]) { $compositeEffects -join '; ' } else { [string]$compositeEffects }
+$fxKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($fxSub)
+$compositeKind = if ($fxKey -and ($fxKey.GetValueNames() -contains $compositeEffectName)) { [string]$fxKey.GetValueKind($compositeEffectName) } else { '<absent>' }
+if ($fxKey) { $fxKey.Close() }
 Write-Host ("PKEY_FX_EndpointEffectClsid ({0}): {1}" -f $epEffectName, (Read-LmValue $fxSub $epEffectName))
+Write-Host ("PKEY_CompositeFX_EndpointEffectClsid ({0}) [{1}]: {2}" -f $compositeEffectName, $compositeKind, $compositeText)
 Write-Host ("PKEY_FX_Association ({0}): {1}" -f $fxAssociationName, (Read-LmValue $fxSub $fxAssociationName))
 Write-Host ("PKEY_AudioEndpoint_Disable_SysFx ({0}): {1}" -f $disableSysFxName, (Read-LmValue $fxSub $disableSysFxName))
 

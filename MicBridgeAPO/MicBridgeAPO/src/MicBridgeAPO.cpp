@@ -19,6 +19,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include <windows.h>
 #include <unknwn.h>
 #include <objbase.h>
@@ -33,6 +34,7 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <mutex>
 #include <vector>
 #include "mb_core.h"
 
@@ -41,6 +43,8 @@ static const GUID CLSID_MicBridgeAPO =
     {0xA3F6C1D2, 0x7B84, 0x4E19, {0x9C, 0x55, 0x2D, 0x8E, 0x1F, 0x0B, 0x6A, 0x47}};
 
 static std::atomic<long> g_objects{0};
+static std::atomic<long> g_factoryRefs{0};
+static std::atomic<long> g_serverLocks{0};
 static HMODULE g_module = nullptr;
 
 // ---------------------------------------------------------------- مسارات وسجل
@@ -49,6 +53,42 @@ static void DataPath(wchar_t* out, size_t n, const wchar_t* file) {
     DWORD r = GetEnvironmentVariableW(L"ProgramData", base, MAX_PATH);
     if (!r || r >= MAX_PATH) wcscpy_s(base, L"C:\\ProgramData");
     swprintf_s(out, n, L"%s\\MicBridgeAPO\\%s", base, file);
+}
+
+static ULONG EnumerateLocalIPv4(std::vector<DWORD>& addresses) {
+    addresses.clear();
+    addresses.push_back(htonl(INADDR_LOOPBACK));
+
+    ULONG bytes = 0;
+    ULONG rc = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, nullptr, &bytes);
+    if (rc == ERROR_NO_DATA) return NO_ERROR;
+    if (rc != ERROR_BUFFER_OVERFLOW || bytes == 0) return rc;
+
+    std::vector<BYTE> storage(bytes);
+    auto* adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(storage.data());
+    rc = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, adapters, &bytes);
+    if (rc != NO_ERROR) return rc;
+
+    for (auto* adapter = adapters; adapter; adapter = adapter->Next) {
+        for (auto* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next) {
+            if (!unicast->Address.lpSockaddr || unicast->Address.lpSockaddr->sa_family != AF_INET)
+                continue;
+            const auto* address = reinterpret_cast<const sockaddr_in*>(unicast->Address.lpSockaddr);
+            if (address->sin_addr.s_addr != htonl(INADDR_ANY) &&
+                address->sin_addr.s_addr != htonl(INADDR_BROADCAST))
+                addresses.push_back(address->sin_addr.s_addr);
+        }
+    }
+    std::sort(addresses.begin(), addresses.end());
+    addresses.erase(std::unique(addresses.begin(), addresses.end()), addresses.end());
+    return NO_ERROR;
+}
+static bool IsLocalIPv4(DWORD address, const std::vector<DWORD>& localAddresses) {
+    return std::find(localAddresses.begin(), localAddresses.end(), address) != localAddresses.end();
 }
 
 static SRWLOCK g_logLock = SRWLOCK_INIT;
@@ -123,6 +163,23 @@ static bool ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* valueN
     DWORD bytes = sizeof(DWORD), type = 0;
     return RegGetValueW(root, subKey, valueName, RRF_RT_REG_DWORD, &type, value, &bytes) == ERROR_SUCCESS;
 }
+static bool ReadRegMultiStringContains(HKEY root, const wchar_t* subKey,
+                                      const wchar_t* valueName, const wchar_t* expected) {
+    DWORD bytes = 0, type = 0;
+    LONG rc = RegGetValueW(root, subKey, valueName, RRF_RT_REG_MULTI_SZ, &type, nullptr, &bytes);
+    if (rc != ERROR_SUCCESS && rc != ERROR_MORE_DATA) return false;
+    if (type != REG_MULTI_SZ || bytes < 2 * sizeof(wchar_t)) return false;
+
+    std::vector<wchar_t> values(bytes / sizeof(wchar_t) + 2, L'\0');
+    rc = RegGetValueW(root, subKey, valueName, RRF_RT_REG_MULTI_SZ,
+                      &type, values.data(), &bytes);
+    if (rc != ERROR_SUCCESS || type != REG_MULTI_SZ) return false;
+
+    for (const wchar_t* item = values.data(); *item; item += wcslen(item) + 1) {
+        if (_wcsicmp(item, expected) == 0) return true;
+    }
+    return false;
+}
 static void RunStartupDiagnostics() {
     wchar_t process[MAX_PATH] = L"<unknown>";
     GetModuleFileNameW(nullptr, process, MAX_PATH);
@@ -186,7 +243,12 @@ static void RunStartupDiagnostics() {
             swprintf_s(fxKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s\\FxProperties", endpoint);
             const bool effectOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
                 L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},7", effect, 128);
-            if (effectOk && _wcsicmp(effect, L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}") == 0) {
+            const bool legacyMatch = effectOk &&
+                _wcsicmp(effect, L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}") == 0;
+            const bool compositeMatch = ReadRegMultiStringContains(HKEY_LOCAL_MACHINE, fxKey,
+                L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},15",
+                L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}");
+            if (legacyMatch || compositeMatch) {
                 DWORD state = 0;
                 wchar_t stateKey[512];
                 swprintf_s(stateKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s", endpoint);
@@ -194,8 +256,9 @@ static void RunStartupDiagnostics() {
                 const bool assocOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
                     L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},0", association, 128);
                 ++matched;
-                Log("APO endpoint match #%u: id=%ls DeviceState=%lu(present=%d) Association=%ls(present=%d)",
-                    matched, endpoint, state, stateOk, assocOk ? association : L"<missing>", assocOk);
+                Log("APO endpoint match #%u: id=%ls DeviceState=%lu(present=%d) LegacyEFX=%ls(present=%d) CompositeEFXMatch=%d Association=%ls(present=%d)",
+                    matched, endpoint, state, stateOk, effectOk ? effect : L"<missing>", effectOk,
+                    compositeMatch, assocOk ? association : L"<missing>", assocOk);
             }
         }
         RegCloseKey(capture);
@@ -243,44 +306,6 @@ static void LoadConfig(Config& c) {
     if (c.jitterMs > 500) c.jitterMs = 500;
 }
 
-// ---------------------------------------------------------------- Ring buffer (منتج واحد / مستهلك واحد)
-class FloatRing {
-public:
-    static constexpr uint64_t N = 1u << 16;  // 65536 عينة
-    FloatRing() : buf(N) {}
-    uint64_t available() const { return head.load(std::memory_order_acquire) - tail.load(std::memory_order_acquire); }
-    void push(const float* s, uint64_t n) {  // المنتج فقط
-        uint64_t h = head.load(std::memory_order_relaxed);
-        uint64_t t = tail.load(std::memory_order_acquire);
-        uint64_t freeSpace = N - (h - t);
-        if (n > freeSpace) n = freeSpace;  // الامتلاء: نتجاهل الأحدث
-        for (uint64_t i = 0; i < n; ++i) buf[(h + i) & (N - 1)] = s[i];
-        head.store(h + n, std::memory_order_release);
-    }
-    uint64_t pop(float* d, uint64_t n) {  // المستهلك فقط
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        uint64_t a = head.load(std::memory_order_acquire) - t;
-        if (n > a) n = a;
-        for (uint64_t i = 0; i < n; ++i) d[i] = buf[(t + i) & (N - 1)];
-        tail.store(t + n, std::memory_order_release);
-        return n;
-    }
-    void skip(uint64_t n) {  // المستهلك فقط
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        uint64_t a = head.load(std::memory_order_acquire) - t;
-        if (n > a) n = a;
-        tail.store(t + n, std::memory_order_release);
-    }
-    void reset() {  // فقط والخيوط متوقفة
-        head.store(0);
-        tail.store(0);
-    }
-
-private:
-    std::vector<float> buf;
-    std::atomic<uint64_t> head{0}, tail{0};
-};
-
 #pragma pack(push, 1)
 struct ReaHdr {
     char magic[4];
@@ -320,21 +345,37 @@ static const APO_REG_PROPERTIES* RegProps() {
 static bool IsFloat32(IAudioMediaType* t) {
     if (!t) return false;
     const WAVEFORMATEX* w = t->GetAudioFormat();
-    if (!w || w->wBitsPerSample != 32) return false;
-    if (w->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
+    if (!w || w->wBitsPerSample != 32 || w->nChannels == 0 || w->nChannels > 8 ||
+        w->nSamplesPerSec < mb::kMinRate || w->nSamplesPerSec > mb::kMaxRate ||
+        w->nBlockAlign != w->nChannels * sizeof(float) ||
+        w->nAvgBytesPerSec != w->nSamplesPerSec * w->nBlockAlign) return false;
+    if (w->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return w->cbSize == 0;
     if (w->wFormatTag == WAVE_FORMAT_EXTENSIBLE && w->cbSize >= 22) {
         static const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
         const WAVEFORMATEXTENSIBLE* e = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(w);
-        return IsEqualGUID(e->SubFormat, kFloat) != 0;
+        if (!IsEqualGUID(e->SubFormat, kFloat) || e->Samples.wValidBitsPerSample != 32) return false;
+        if (e->dwChannelMask) {
+            DWORD mask = e->dwChannelMask; UINT32 count = 0;
+            while (mask) { count += (mask & 1u); mask >>= 1; }
+            if (count != w->nChannels) return false;
+        }
+        return true;
     }
     return false;
+}
+static DWORD ChannelMask(IAudioMediaType* t) {
+    const WAVEFORMATEX* w = t ? t->GetAudioFormat() : nullptr;
+    if (w && w->wFormatTag == WAVE_FORMAT_EXTENSIBLE && w->cbSize >= 22)
+        return reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(w)->dwChannelMask;
+    return 0;
 }
 static bool SameLayout(IAudioMediaType* a, IAudioMediaType* b) {
     if (!a || !b) return false;
     const WAVEFORMATEX* x = a->GetAudioFormat();
     const WAVEFORMATEX* y = b->GetAudioFormat();
     return x && y && x->nSamplesPerSec == y->nSamplesPerSec && x->nChannels == y->nChannels &&
-           x->wBitsPerSample == y->wBitsPerSample;
+           x->wBitsPerSample == y->wBitsPerSample && x->nBlockAlign == y->nBlockAlign &&
+           x->nAvgBytesPerSec == y->nAvgBytesPerSec && ChannelMask(a) == ChannelMask(b);
 }
 static void LogMediaType(const char* stage, IAudioMediaType* type, HRESULT hr) {
     const WAVEFORMATEX* wf = type ? type->GetAudioFormat() : nullptr;
@@ -383,10 +424,16 @@ public:
     }
 
     // IAudioProcessingObject (كانت في الفئة الأساسية، ننفذها بأنفسنا)
-    STDMETHOD(Reset)() override { return S_OK; }
+    STDMETHOD(Reset)() override {
+        // Defer state changes to each owning thread: Reset may race with APOProcess
+        // and the UDP receive worker. No shared SPSC indices are reset here.
+        m_resetProcessRequested.store(true, std::memory_order_release);
+        m_resetRecvRequested.store(true, std::memory_order_release);
+        return S_OK;
+    }
     STDMETHOD(GetLatency)(HNSTIME* pTime) override {
         if (!pTime) return E_POINTER;
-        *pTime = 0;
+        *pTime = m_latencyHns.load(std::memory_order_acquire);
         return S_OK;
     }
     STDMETHOD(GetRegistrationProperties)(APO_REG_PROPERTIES** ppRegProps) override {
@@ -466,7 +513,7 @@ public:
         const WAVEFORMATEX* iw=ppIn[0]->pFormat->GetAudioFormat(); const WAVEFORMATEX* ow=ppOut[0]->pFormat->GetAudioFormat();
         UINT32 fi=ppIn[0]->u32MaxFrameCount, fo=ppOut[0]->u32MaxFrameCount;
         if (!iw || !ow || !IsFloat32(ppIn[0]->pFormat) || !IsFloat32(ppOut[0]->pFormat) ||
-            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fo<fi) {
+            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fi>16384 || fo<fi || fo>16384) {
             Log("LockForProcess rejected: format/frame mismatch in=%u/%u/%u out=%u/%u/%u",iw?iw->nSamplesPerSec:0,iw?iw->nChannels:0,fi,ow?ow->nSamplesPerSec:0,ow?ow->nChannels:0,fo);
             return APOERR_FORMAT_NOT_SUPPORTED;
         }
@@ -477,9 +524,10 @@ public:
     STDMETHOD(UnlockForProcess)(void) override {
         if (!m_locked) { Log("UnlockForProcess while not locked"); return S_OK; }
         StopBridge();
-        Log("APOProcess summary: calls=%llu frames=%llu silentCalls=%llu invalidCalls=%llu underruns=%u",
+        Log("APOProcess summary: calls=%llu frames=%llu silentCalls=%llu invalidCalls=%llu underruns=%u overruns=%u primings=%u",
             (unsigned long long)m_processCalls.load(), (unsigned long long)m_processFrames.load(),
-            (unsigned long long)m_silentCalls.load(), (unsigned long long)m_invalidCalls.load(), m_underruns.load());
+            (unsigned long long)m_silentCalls.load(), (unsigned long long)m_invalidCalls.load(),
+            m_blender.underruns(), m_blender.overruns(), m_blender.primings());
         m_locked=false; Log("UnlockForProcess succeeded"); return S_OK;
     }
 
@@ -498,6 +546,10 @@ public:
         float* outb = reinterpret_cast<float*>(out->pBuffer);
         const bool silent = (in->u32BufferFlags == BUFFER_SILENT);
         if (silent) ++m_silentCalls;
+        if (m_resetProcessRequested.exchange(false, std::memory_order_acq_rel)) {
+            m_blender.Reset();
+            m_recvRing.skip(m_recvRing.available());
+        }
 
         out->u32ValidFrameCount = frames;
         out->u32BufferFlags = in->u32BufferFlags;
@@ -506,7 +558,7 @@ public:
             if (!silent && inb != outb) memcpy(outb, inb, (size_t)frames * ch * sizeof(float));
         };
 
-        if (!m_active.load(std::memory_order_relaxed) || frames == 0 || frames > m_scratch.size()) {
+        if (!m_active.load(std::memory_order_relaxed) || !m_userEnabled.load(std::memory_order_relaxed) || frames == 0 || frames > m_scratch.size()) {
             passthrough();
             return;
         }
@@ -524,39 +576,19 @@ public:
                 tmp[i] = s / (float)ch;
             }
         }
-        m_sendRing.push(tmp, frames);
+        const uint64_t sendDropped = m_sendRing.push(tmp, frames);
+        if (sendDropped) m_sendRingDrops.fetch_add(sendDropped, std::memory_order_relaxed);
         SetEvent(m_sendEvt);
 
-        // 2) استقبال الصوت المعالج
-        uint64_t avail = m_recvRing.available();
-        if (!m_primed && avail >= m_jitter) m_primed = true;
-        if (m_primed) {
-            if (avail > m_hi) {  // انجراف الساعات: نعيد التأخير إلى الحد الطبيعي
-                m_recvRing.skip(avail - m_jitter);
-                avail = m_recvRing.available();
-            }
-            if (avail >= frames) {
-                m_recvRing.pop(tmp, frames);
-                if (ch == 1) {
-                    memcpy(outb, tmp, frames * sizeof(float));
-                } else {
-                    for (UINT32 i = 0; i < frames; ++i)
-                        for (uint32_t c = 0; c < ch; ++c) outb[i * ch + c] = tmp[i];
-                }
-                out->u32BufferFlags = BUFFER_VALID;
-                return;
-            }
-            m_primed = false;  // نقص بيانات: نرجع للاحتياط حتى يمتلئ المخزن من جديد
-            ++m_underruns;
-        }
-
-        // 3) لا يوجد صوت معالج
-        if (m_cfg.fallback) {
-            passthrough();
-        } else {
+        // Preserve the dry input in the output buffer, then crossfade to wet audio.
+        // Blender runs on the APO processing thread and performs no allocation or I/O.
+        if (silent) {
             memset(outb, 0, (size_t)frames * ch * sizeof(float));
-            out->u32BufferFlags = BUFFER_VALID;
+        } else if (inb != outb) {
+            memcpy(outb, inb, (size_t)frames * ch * sizeof(float));
         }
+        m_blender.Process(outb, frames, ch, m_recvRing, true, tmp);
+        out->u32BufferFlags = (silent && !m_blender.touchedWet()) ? BUFFER_SILENT : BUFFER_VALID;
     }
 
 private:
@@ -564,8 +596,21 @@ private:
     void StartBridge() {
         StopBridge();
         LoadConfig(m_cfg);
+        wchar_t controlPath[MAX_PATH] = {};
+        DataPath(controlPath, MAX_PATH, L"control.ini");
+        m_userEnabled.store(GetPrivateProfileIntW(L"Control", L"Enabled", 1, controlPath) != 0,
+                            std::memory_order_release);
+        m_lastRxTick.store(0, std::memory_order_release);
         if (!m_cfg.enabled) {
+            m_latencyHns.store(0, std::memory_order_release);
             Log("Disabled in INI: pass-through");
+            WriteStatus();
+            return;
+        }
+        if (m_cfg.port < 1 || m_cfg.port > 65535 || !m_cfg.sendId[0] || !m_cfg.recvId[0] ||
+            strcmp(m_cfg.sendId, m_cfg.recvId) == 0) {
+            Log("Invalid bridge configuration: port=%d sendId='%s' receiveId='%s'",
+                m_cfg.port, m_cfg.sendId, m_cfg.recvId);
             return;
         }
         WSADATA wsa;
@@ -575,19 +620,28 @@ private:
             return;
         }
         m_wsa = true;
-        m_jitter = std::max<uint64_t>((uint64_t)m_rate * m_cfg.jitterMs / 1000, 2ull * m_maxFrames);
-        m_hi = m_jitter + m_rate / 10;  // الحد الأعلى: الحماية + 100ms
-        m_scratch.assign(std::max<size_t>(m_maxFrames, 16384), 0.f);
-        m_rs.assign(32768, 0.f);
-        m_rsPos = 0;
-        m_rsLast = 0;
+        const uint64_t requestedJitter = std::max<uint64_t>((uint64_t)m_rate * m_cfg.jitterMs / 1000, 2ull * m_maxFrames);
+        // Keep the target and high-water mark within the fixed SPSC ring capacity.
+        m_jitter = std::min<uint64_t>(requestedJitter, m_recvRing.capacity() / 2);
+        m_hi = std::min<uint64_t>(m_jitter + m_rate / 10, m_recvRing.capacity() - 1);
+        m_scratch.assign(16384, 0.f);
+        // A 4096-byte stereo/mono payload contains at most 1024 mono frames.
+        // The largest supported rate ratio is 384 kHz / 8 kHz = 48:1.
+        m_rs.assign(65536, 0.f);
+        m_resampler.Reset();
+        m_resamplerInputRate = 0;
         m_sendRing.reset();
         m_recvRing.reset();
-        m_primed = false;
+        m_blender.Configure(m_rate, m_jitter, m_hi, m_cfg.fallback,
+                            std::max<uint32_t>(1, m_rate / 200));
         m_pktRx = 0;
         m_pktTx = 0;
+        m_sendRingDrops = 0;
+        m_recvRingDrops = 0;
         m_underruns = 0;
         m_stop = false;
+        m_sendStartup.store(0, std::memory_order_release);
+        m_recvStartup.store(0, std::memory_order_release);
         m_sendEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         m_thSend = CreateThread(nullptr, 0, SendThunk, this, 0, nullptr);
         m_thRecv = CreateThread(nullptr, 0, RecvThunk, this, 0, nullptr);
@@ -601,14 +655,36 @@ private:
             Log("WARNING: SetThreadPriority(send) failed: %lu", GetLastError());
         if (!SetThreadPriority(m_thRecv, THREAD_PRIORITY_HIGHEST))
             Log("WARNING: SetThreadPriority(recv) failed: %lu", GetLastError());
+
+        // Do not advertise an active bridge until both worker sockets are ready.
+        // LockForProcess is a control-path callback, so a bounded startup wait is safe here.
+        const ULONGLONG deadline = GetTickCount64() + 1500;
+        while (GetTickCount64() < deadline &&
+               m_sendStartup.load(std::memory_order_acquire) == 0 &&
+               m_recvStartup.load(std::memory_order_acquire) == 0) Sleep(5);
+        while (GetTickCount64() < deadline &&
+               (m_sendStartup.load(std::memory_order_acquire) == 0 ||
+                m_recvStartup.load(std::memory_order_acquire) == 0)) Sleep(5);
+        const int sendState = m_sendStartup.load(std::memory_order_acquire);
+        const int recvState = m_recvStartup.load(std::memory_order_acquire);
+        if (sendState != 1 || recvState != 1) {
+            Log("Bridge startup degraded: sendState=%d recvState=%d; keeping safe pass-through", sendState, recvState);
+            StopBridge();
+            WriteStatus();
+            return;
+        }
+        m_latencyHns.store((HNSTIME)((m_jitter * 10000000ull) / m_rate), std::memory_order_release);
         m_active = true;
-        Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples",
-            m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter);
+        WriteStatus();
+        Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples latencyHns=%lld",
+            m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter,
+            (long long)m_latencyHns.load(std::memory_order_relaxed));
     }
 
     void StopBridge() {
         if (!m_thSend && !m_thRecv && !m_wsa) return;
         m_active = false;
+        m_latencyHns.store(0, std::memory_order_release);
         m_stop = true;
         if (m_sendEvt) SetEvent(m_sendEvt);
         if (m_thSend) {
@@ -629,7 +705,7 @@ private:
         }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u sendErrors=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load());
+        Log("Stopped: tx=%u rx=%u sendRingDrops=%llu recvRingDrops=%llu underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u nonLocal=%u", m_pktTx.load(), m_pktRx.load(), (unsigned long long)m_sendRingDrops.load(), (unsigned long long)m_recvRingDrops.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load(), m_nonLocalPackets.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -638,18 +714,23 @@ private:
     // ------------------------------------------------------------ خيط الإرسال
     void SendLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) { Log("send: socket failed %d", WSAGetLastError()); return; }
+        if (s == INVALID_SOCKET) { m_sendStartup.store(-1, std::memory_order_release); Log("send: socket failed %d", WSAGetLastError()); return; }
         Log("send: UDP socket created");
         BOOL on = TRUE;
-        setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on);
+        if (setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on) != 0) {
+            const int error = WSAGetLastError(); m_sendStartup.store(-1, std::memory_order_release);
+            Log("send: SO_BROADCAST failed %d", error); closesocket(s); return;
+        }
         sockaddr_in dst{};
         dst.sin_family = AF_INET;
         dst.sin_port = htons((u_short)m_cfg.port);
         if (inet_pton(AF_INET, m_cfg.bcast, &dst.sin_addr) != 1) {
+            m_sendStartup.store(-1, std::memory_order_release);
             Log("send: bad BroadcastAddress '%s'", m_cfg.bcast);
             closesocket(s);
             return;
         }
+        m_sendStartup.store(1, std::memory_order_release);
         uint8_t pkt[sizeof(ReaHdr) + 1200];
         ReaHdr* h = reinterpret_cast<ReaHdr*>(pkt);
         float samples[300];
@@ -679,94 +760,196 @@ private:
     // ------------------------------------------------------------ خيط الاستقبال
     void RecvLoop() {
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (s == INVALID_SOCKET) { Log("recv: socket failed %d", WSAGetLastError()); return; }
+        if (s == INVALID_SOCKET) { m_recvStartup.store(-1, std::memory_order_release); Log("recv: socket failed %d", WSAGetLastError()); return; }
         Log("recv: UDP socket created");
-        BOOL on = TRUE;
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof on);
+        // ReaStream's fixed UDP/58710 listener and MicBridge must both receive
+        // the same local-broadcast datagrams. Windows requires SO_REUSEADDR
+        // for the second bind; unicast fan-out is not guaranteed, so use broadcast.
+        BOOL reuse = TRUE;
+        if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof reuse) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: SO_REUSEADDR failed %d", error); closesocket(s); return;
+        }
         int rb = 1 << 20;
-        setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rb, sizeof rb);
+        if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rb, sizeof rb) != 0)
+            Log("recv: SO_RCVBUF tuning failed %d (continuing with system default)", WSAGetLastError());
         DWORD to = 100;
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof to);
+        if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof to) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: SO_RCVTIMEO failed %d", error); closesocket(s); return;
+        }
         sockaddr_in a{};
         a.sin_family = AF_INET;
         a.sin_port = htons((u_short)m_cfg.port);
-        if (inet_pton(AF_INET, m_cfg.bind, &a.sin_addr) != 1) a.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (inet_pton(AF_INET, m_cfg.bind, &a.sin_addr) != 1) {
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: invalid BindAddress '%s'", m_cfg.bind);
+            closesocket(s);
+            return;
+        }
         if (bind(s, (sockaddr*)&a, sizeof a) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
             Log("recv: bind %s:%d failed, error %d (المايك سيمرّ بدون معالجة)", m_cfg.bind, m_cfg.port,
-                WSAGetLastError());
+                error);
             closesocket(s);
             return;
         }
         Log("recv: listening on %s:%d", m_cfg.bind, m_cfg.port);
-        uint8_t pkt[4096];
-        float in[1024];
+        m_recvStartup.store(1, std::memory_order_release);
+        uint8_t pkt[mb::kHeaderSize + mb::kMaxRxBytes];
+        float in[mb::kMaxRxBytes / sizeof(float)];
+        uint8_t expectedId[32];
+        mb::MakeId(m_cfg.recvId, expectedId);
+        std::vector<DWORD> localAddresses;
+        const ULONG addressStatus = EnumerateLocalIPv4(localAddresses);
+        if (addressStatus != NO_ERROR)
+            Log("recv: GetAdaptersAddresses failed %lu; only loopback will be accepted", addressStatus);
+        else
+            Log("recv: enumerated %u local IPv4 addresses", (unsigned)localAddresses.size());
+        ULONGLONG nextControlPoll = 0;
+        ULONGLONG nextStatusWrite = 0;
         while (!m_stop) {
-            int n = recvfrom(s, (char*)pkt, sizeof pkt, 0, nullptr, nullptr);
+            const ULONGLONG now = GetTickCount64();
+            if (now >= nextControlPoll) {
+                wchar_t controlPath[MAX_PATH] = {};
+                DataPath(controlPath, MAX_PATH, L"control.ini");
+                const bool requestedEnabled = GetPrivateProfileIntW(L"Control", L"Enabled", 1, controlPath) != 0;
+                const bool previousEnabled = m_userEnabled.exchange(requestedEnabled, std::memory_order_acq_rel);
+                if (previousEnabled != requestedEnabled) {
+                    m_resetProcessRequested.store(true, std::memory_order_release);
+                    Log("UI control changed: Enabled=%d", requestedEnabled);
+                }
+                nextControlPoll = now + 250;
+            }
+            if (now >= nextStatusWrite) {
+                WriteStatus();
+                nextStatusWrite = now + 500;
+            }
+            if (m_resetRecvRequested.exchange(false, std::memory_order_acq_rel)) {
+                m_resampler.Reset();
+                m_resamplerInputRate = 0;
+            }
+            sockaddr_in sender{};
+            int senderLen = sizeof(sender);
+            int n = recvfrom(s, (char*)pkt, sizeof pkt, 0,
+                             (sockaddr*)&sender, &senderLen);
             if (n <= 0) {
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
                 continue;
             }
-            if (n < (int)sizeof(ReaHdr) || memcmp(pkt, "MRSR", 4) != 0) { ++m_badPackets; continue; }
-            const ReaHdr* h = reinterpret_cast<const ReaHdr*>(pkt);
-            if (strncmp(h->id, m_cfg.recvId, 32) != 0) { ++m_idMismatches; continue; }  // معرّف مختلف: نتجاهل
-            uint32_t chs = h->ch, sr = h->sr, bytes = h->bytes;
-            // The Windows capture endpoint is mono. ReaStream may return mono or
-            // stereo from Cantabile; reject wider layouts rather than guessing.
-            if ((chs != 1 && chs != 2) || sr < 8000 || sr > 384000 ||
-                bytes == 0 || (bytes % (sizeof(float) * chs)) != 0) {
+            // ReaStream's *local broadcast can originate from any local NIC address.
+            // Accept local interface addresses (including loopback), reject remote hosts.
+            if (!IsLocalIPv4(sender.sin_addr.s_addr, localAddresses)) {
+                ++m_nonLocalPackets;
+                continue;
+            }
+            if (n < (int)mb::kHeaderSize) { ++m_badPackets; continue; }
+            mb::Parsed parsed{};
+            const mb::Parse parse = mb::ParseAudio(pkt, (size_t)n, expectedId, parsed);
+            if (parse == mb::Parse::BadId) { ++m_idMismatches; continue; }
+            if (parse != mb::Parse::Ok || parsed.sizeFieldMismatch ||
+                (parsed.ch != 1 && parsed.ch != 2)) {
                 ++m_badPackets;
                 continue;
             }
-            if (bytes > sizeof in || sizeof(ReaHdr) + bytes != (size_t)n ||
-                h->size != (uint32_t)n || h->bytes != bytes) {
-                ++m_badPackets;
-                continue;
-            }
-
-            const uint32_t frames = bytes / sizeof(float) / chs;
+            const uint32_t chs = parsed.ch, sr = parsed.sr, frames = parsed.frames;
+            // The capture endpoint is mono; average mono/stereo ReaStream payloads.
+            // ParseAudio validates the 47-byte header, payload bounds and float alignment.
             if (frames == 0) continue;
 
             // ReaStream Float32 payload is planar: [all channel 0][all channel 1].
             // ExtractMono averages the channels into the mono bridge stream.
-            mb::ExtractMono(pkt + sizeof(ReaHdr), frames, chs, -1, in);
+            mb::ExtractMono(parsed.data, frames, chs, -1, in);
             ++m_pktRx;
+            m_lastRxTick.store(GetTickCount64(), std::memory_order_release);
+            if (!m_userEnabled.load(std::memory_order_acquire)) continue;
 
             if (sr == m_rate) {
-                m_recvRing.push(in, frames);
-            } else {  // تحويل معدل بسيط (خطي) بعد تحويل القنوات إلى Mono
-                double step = (double)sr / (double)m_rate;
-                size_t outN = 0;
-                double p = m_rsPos;
-                while (p < (double)frames && outN < m_rs.size()) {
-                    int idx = (int)p;
-                    double fr = p - idx;
-                    float x0 = (idx == 0) ? m_rsLast : in[idx - 1];
-                    float x1 = in[idx];
-                    m_rs[outN++] = (float)(x0 * (1.0 - fr) + x1 * fr);
-                    p += step;
+                m_resampler.Reset();
+                m_resamplerInputRate = 0;
+                const uint64_t dropped = m_recvRing.push(in, frames);
+                if (dropped) m_recvRingDrops.fetch_add(dropped, std::memory_order_relaxed);
+            } else {
+                if (m_resamplerInputRate != sr) {
+                    m_resampler.Reset();
+                    m_resamplerInputRate = sr;
                 }
-                m_rsPos = p - (double)frames;
-                m_rsLast = in[frames - 1];
-                m_recvRing.push(m_rs.data(), outN);
+                const double step = (double)sr / (double)m_rate;
+                const size_t outN = m_resampler.Process(in, frames, step, m_rs.data(), m_rs.size());
+                if (outN == m_rs.size()) ++m_resampleCapacityHits;
+                const uint64_t dropped = m_recvRing.push(m_rs.data(), outN);
+                if (dropped) m_recvRingDrops.fetch_add(dropped, std::memory_order_relaxed);
             }
         }
         closesocket(s);
     }
 
+
+    void WriteStatus() {
+        // StartBridge and RecvLoop may publish concurrently; serialize the shared temp-file replacement.
+        std::lock_guard<std::mutex> statusGuard(m_statusMutex);
+        wchar_t statusPath[MAX_PATH] = {}, tempPath[MAX_PATH] = {};
+        DataPath(statusPath, MAX_PATH, L"status.txt");
+        swprintf_s(tempPath, L"%s.%lu.%lu.tmp", statusPath, GetCurrentProcessId(), GetCurrentThreadId());
+        const bool configured = m_cfg.enabled;
+        const bool userEnabled = m_userEnabled.load(std::memory_order_acquire);
+        const bool active = m_active.load(std::memory_order_acquire);
+        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG lastRx = m_lastRxTick.load(std::memory_order_acquire);
+        const bool receiving = lastRx != 0 && now - lastRx < 1500;
+        const char* state = !configured ? "DISABLED" :
+            (!userEnabled ? "BYPASS" : (!active || !receiving ? "FALLBACK" : "PROCESSING"));
+        FILETIME ft{};
+        GetSystemTimeAsFileTime(&ft);
+        ULARGE_INTEGER stamp{};
+        stamp.LowPart = ft.dwLowDateTime;
+        stamp.HighPart = ft.dwHighDateTime;
+        char body[512] = {};
+        const int length = sprintf_s(body, sizeof(body),
+            "ts=%llu\nstate=%s\nbufMs=%.2f\nblockMs=%.2f\nrate=%u\nch=%u\ntx=%u\nrx=%u\nunderruns=%u\nbind=%d\n",
+            (unsigned long long)stamp.QuadPart, state,
+            m_rate ? (double)m_jitter * 1000.0 / m_rate : 0.0,
+            m_rate ? (double)m_maxFrames * 1000.0 / m_rate : 0.0,
+            m_rate, m_ch, m_pktTx.load(std::memory_order_relaxed),
+            m_pktRx.load(std::memory_order_relaxed), m_blender.underruns(),
+            m_recvStartup.load(std::memory_order_acquire) == 1 ? 1 : 0);
+        if (length <= 0) return;
+        HANDLE file = CreateFileW(tempPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        const BOOL ok = WriteFile(file, body, (DWORD)length, &written, nullptr);
+        FlushFileBuffers(file);
+        CloseHandle(file);
+        if (!ok || written != (DWORD)length) { DeleteFileW(tempPath); return; }
+        if (!MoveFileExW(tempPath, statusPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            DeleteFileW(tempPath);
+    }
+
     // ------------------------------------------------------------ الحالة
+    std::mutex m_statusMutex;
     std::atomic<long> m_ref{1};
     bool m_initialized = false;
     bool m_locked = false;
     Config m_cfg{};
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
-    std::atomic<bool> m_active{false}, m_stop{false};
+    std::atomic<bool> m_active{false}, m_stop{false}, m_userEnabled{true};
+    std::atomic<ULONGLONG> m_lastRxTick{0};
+    std::atomic<HNSTIME> m_latencyHns{0};
+    std::atomic<bool> m_resetProcessRequested{false}, m_resetRecvRequested{false};
+    std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
     bool m_wsa = false;
-    FloatRing m_sendRing, m_recvRing;
-    bool m_primed = false;
+    mb::SpscRing m_sendRing{1u << 16}, m_recvRing{1u << 16};
+    mb::Blender m_blender;
     uint64_t m_jitter = 0, m_hi = 0;
     std::vector<float> m_scratch, m_rs;
-    double m_rsPos = 0;
-    float m_rsLast = 0;
+    mb::LinearResampler m_resampler;
+    uint32_t m_resamplerInputRate = 0;
+    std::atomic<uint32_t> m_resampleCapacityHits{0}, m_nonLocalPackets{0};
+    std::atomic<uint64_t> m_sendRingDrops{0}, m_recvRingDrops{0};
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
     std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0}, m_sendErrors{0};
     std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
@@ -781,6 +964,7 @@ public:
         HRESULT hr = E_NOINTERFACE;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IClassFactory)) {
             *ppv = static_cast<IClassFactory*>(this);
+            AddRef();
             hr = S_OK;
         }
         wchar_t iidText[40] = {};
@@ -788,8 +972,16 @@ public:
         Log("Factory::QueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
         return hr;
     }
-    STDMETHOD_(ULONG, AddRef)() override { return 2; }
-    STDMETHOD_(ULONG, Release)() override { return 1; }
+    STDMETHOD_(ULONG, AddRef)() override {
+        const long refs = ++m_ref;
+        ++g_factoryRefs;
+        return static_cast<ULONG>(refs);
+    }
+    STDMETHOD_(ULONG, Release)() override {
+        const long refs = --m_ref;
+        --g_factoryRefs;
+        return static_cast<ULONG>(refs);
+    }
     STDMETHOD(CreateInstance)(IUnknown* outer, REFIID iid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
@@ -810,7 +1002,22 @@ public:
         o->Release();
         return hr;
     }
-    STDMETHOD(LockServer)(BOOL) override { return S_OK; }
+    STDMETHOD(LockServer)(BOOL lock) override {
+        if (lock) {
+            ++g_serverLocks;
+        } else {
+            long current = g_serverLocks.load();
+            while (current > 0 && !g_serverLocks.compare_exchange_weak(current, current - 1)) {}
+            if (current <= 0) {
+                Log("Factory::LockServer(FALSE) ignored: no matching server lock");
+                return E_UNEXPECTED;
+            }
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<long> m_ref{0};
 };
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
@@ -838,7 +1045,7 @@ extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, voi
     return hr;
 }
 
-extern "C" HRESULT __stdcall DllCanUnloadNow() { return g_objects.load() == 0 ? S_OK : S_FALSE; }
+extern "C" HRESULT __stdcall DllCanUnloadNow() { return (g_objects.load() == 0 && g_factoryRefs.load() == 0 && g_serverLocks.load() == 0) ? S_OK : S_FALSE; }
 
 BOOL APIENTRY DllMain(HMODULE h, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {

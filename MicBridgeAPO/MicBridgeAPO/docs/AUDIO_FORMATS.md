@@ -1,0 +1,41 @@
+# Audio format contract
+
+## Three different formats must not be conflated
+
+1. **Hardware/device format** — the AT2040USB format shown by Windows Sound Control Panel. The user currently sees 24-bit PCM here.
+2. **Audio Engine / APO connection format** — the format negotiated between the Windows Audio Engine and this APO. The APO accepts IEEE Float32 only.
+3. **ReaStream transport format** — the bridge's UDP payload is Float32. It is independent of the USB device's advertised PCM format.
+
+A 24-bit PCM device format does not, by itself, mean the APO receives 24-bit PCM buffers. In shared-mode audio, Windows can convert between standard PCM stream formats and the floating-point samples used internally by the audio engine. Microsoft's format-negotiation documentation describes the engine's proposed format for LFX; the actual format passed to this endpoint APO must still be confirmed from its own negotiation and LockForProcess diagnostics.
+
+## Current format validation
+
+The APO accepts plain IEEE_FLOAT or WAVE_FORMAT_EXTENSIBLE with IEEE_FLOAT subformat, 32 valid bits, 1–8 channels, sample rates from 8 kHz to 384 kHz, consistent block alignment and average byte rate, and a channel mask whose population matches the channel count when a mask is supplied. Input and output layouts must also agree on rate, channels, bit depth, block alignment, average byte rate, and channel mask.
+
+It does not reinterpret 24-bit PCM bytes as floats. Supporting PCM24 requires a real conversion path and matching output-format negotiation, not merely relaxing a bit-depth check.
+
+## ReaStream payload contract and limits
+
+- The current implementation parses a 47-byte header and a Float32 payload, with a receive payload ceiling of 4096 bytes.
+- Both the Cantabile ReaStream receiver and MicBridge receive on UDP/58710. The bridge therefore uses SO_REUSEADDR and requires local-broadcast transmission so the datagram can be fanned out; set the Cantabile ReaStream Send IP to `127.255.255.255` to match MicBridge.ini. Windows does not guarantee deterministic delivery for competing unicast sockets on a shared port. The receive path accepts packets sourced from any local IPv4 interface, including loopback, and rejects remote senders.
+- The Windows UDP shared-broadcast smoke test verifies fan-out only when both test sockets opt into SO_REUSEADDR; it does not establish which socket options the proprietary ReaStream build uses. The target probe must confirm both Cantabile and AudioDG own UDP/58710 while capture is active. Windows permits cross-account sharing only under specific socket-option conditions; Microsoft warns that SO_REUSEADDR can allow local port hijacking and shared-port delivery is not generally deterministic. The local-interface check is not process authentication, so treat this as a local-machine compatibility trade-off, not a security boundary.
+- It accepts mono or stereo return packets only; stereo is downmixed by averaging the two channels.
+- The implementation treats payloads as planar Float32. This remains an observed/inferred protocol assumption, not an official ReaStream specification. Validate it against the exact installed ReaStream version with captured mono and stereo packets before release.
+- Receive-side sample-rate conversion now uses the same stateful LinearResampler implementation exercised by portable tests. A sample-rate change resets its phase/history.
+- The APO output uses the tested Blender for a gradual dry/wet transition, underrun fallback, recovery, and queue-overrun control.
+- The bridge reports its configured jitter-buffer target as APO latency. Actual end-to-end network latency can vary and is not fully represented by this target.
+
+## EFX coexistence
+
+On Windows 10 version 1803 and later, the installer registers MicBridge in PKEY_CompositeFX_EndpointEffectClsid (property ID 15, REG_MULTI_SZ) and preserves the original composite list in a separate recovery record. It restores the original legacy PKEY_FX_EndpointEffectClsid value rather than replacing it with MicBridge. The uninstaller removes only MicBridge from the live list and retains other entries, including vendor APOs added after installation.
+
+This preserves the prior EFX CLSIDs in the registry, but it does not prove that Windows activates the complete chain or that the chosen order is appropriate for every Realtek APO. Verify actual graph activation and audio ordering on the target machine.
+
+## Required verification before release
+
+- Capture the APO's format-negotiation and LockForProcess logs on the target Windows 10 machine.
+- Confirm the negotiated input/output formats and frame counts on the target Audio Engine.
+- Capture actual ReaStream packets from the installed plugin version and verify header fields, planar/interleaved layout, mono/stereo, packet size, and rate changes.
+- Verify that Windows builds the intended composite EFX chain and that Realtek processing is preserved in the expected order.
+- Run `micbridge_udp_broadcast_share_smoke` on Windows and verify both ReaStream and MicBridge receive the same local-broadcast packet on UDP/58710.
+- Test startup, sustained processing, underrun, recovery, and application close/reopen behavior.
