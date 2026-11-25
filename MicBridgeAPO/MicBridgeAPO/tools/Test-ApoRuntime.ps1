@@ -93,7 +93,8 @@ $checks = [ordered]@{
     ApoProcessSummary = [bool]($newLog -match 'APOProcess summary:')
     SentRawPackets = ($txPackets -gt 0)
     ReceivedReaStreamPackets = ($rxPackets -gt 0)
-    NoRingOverflowDrops = ($sendRingDrops -eq 0 -and $recvRingDrops -eq 0)
+    StoppedSummaryAvailable = ($stoppedLine.Count -gt 0)
+    NoRingOverflowDrops = ($stoppedLine.Count -gt 0 -and $sendRingDrops -eq 0 -and $recvRingDrops -eq 0)
     DllObservedInAudiodg = ($moduleSamples.Count -gt 0)
 }
 $report = New-Object System.Collections.Generic.List[string]
