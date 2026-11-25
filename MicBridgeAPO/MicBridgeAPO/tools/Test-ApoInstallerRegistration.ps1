@@ -120,7 +120,7 @@ Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores t
 Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
 Assert-Contains $uninstaller 'Do not run a broad cleanup over every endpoint' 'Uninstaller avoids deleting pre-existing CLSID references on unrelated endpoints'
 Assert-Contains $uninstaller 'remainingReferences' 'Uninstaller blocks binary removal if dangling endpoint references cannot be made safe'
-Assert-Contains $uninstaller 'Write-JsonAtomic -Value $transactionState' 'Transaction snapshot uses atomic JSON persistence'
+Assert-Contains $installer 'Write-JsonAtomic -Value $transactionState' 'Transaction snapshot uses atomic JSON persistence'
 Assert-Contains $installer 'Write-JsonAtomic -Value ([pscustomobject]@{' 'Composite EFX snapshot uses atomic JSON persistence'
 
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
