@@ -4,14 +4,17 @@ param(
     [string]$DllSource  = (Join-Path $PSScriptRoot 'MicBridgeAPO.dll')
 )
 $ErrorActionPreference = 'Stop'
+Write-InstallLog 'INFO' "Installer started. DeviceName='$DeviceName'; DllSource='$DllSource'."
 
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
+    Write-InstallLog 'INFO' 'Requesting administrator elevation.'
     Start-Process powershell -Verb RunAs -ArgumentList $a
     exit
 }
+Write-InstallLog 'INFO' 'Installer running elevated.'
 
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
@@ -21,6 +24,18 @@ $ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
+$installLog = Join-Path $dataDir 'Install.log'
+$dllBackupPath = $null
+$dllReplacementStarted = $false
+function Write-InstallLog([string]$Level, [string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $installLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Install.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
+    }
+}
 $audioKey   = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
@@ -88,6 +103,15 @@ if (Test-Path -LiteralPath $backupFile) {
     if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
         throw "ملف النسخة الاحتياطية يخص جهازًا آخر ($($existingBackup.DeviceId)) وليس المايك الحالي ($($dev.Id)). لم يتم إجراء أي تغييرات. لا تحذف backup.json؛ أرسل هذه الرسالة للمراجعة."
     }
+    if ($existingBackup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
+        if (($existingBackup.CreatedFx -eq $true) -and ($null -eq $existingBackup.FxKeySddl)) {
+            $existingBackup | Add-Member -NotePropertyName PrevFxAssociation -NotePropertyValue $null
+            $existingBackup | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backupFile -Encoding UTF8
+            Write-InstallLog 'WARN' 'Legacy backup safely migrated: original backup proves FxProperties did not exist; original association was absent.'
+        } else {
+            throw "ملف backup.json قديم ولا يحتوي PrevFxAssociation، ولا توجد بيانات كافية لإثبات قيمتها الأصلية. أوقفت التثبيت دون تخمين أو تعديل النسخة الاحتياطية."
+        }
+    }
 }
 Write-Host "تم العثور على: $($dev.Names)  ($($dev.Id))"
 $devSub = "$capSub\$($dev.Id)"
@@ -116,23 +140,23 @@ if (-not (Test-Path $backupFile)) {
     $backup | ConvertTo-Json -Depth 5 | Set-Content $backupFile -Encoding UTF8
     Write-Host "حُفظت القيم والصلاحيات الأصلية في $backupFile"
 } else {
-    # The previous installer never wrote PKEY_FX_Association. Preserve its current value before adding ours.
     $backup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
-    if ($backup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
-        $existingAssociation = $null
-        $existingFxPath = "$capRoot\$($backup.DeviceId)\FxProperties"
-        if (Test-Path -LiteralPath $existingFxPath) {
-            $existingAssociation = (Get-ItemProperty -LiteralPath $existingFxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue
-        }
-        $backup | Add-Member -NotePropertyName PrevFxAssociation -NotePropertyValue $existingAssociation
-        $backup | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backupFile -Encoding UTF8
-        Write-Host 'تم تحديث النسخة الاحتياطية القديمة بحفظ قيمة FX Association السابقة.'
-    }
+    Write-InstallLog 'INFO' 'Existing backup validated and retained; registry state was not used to guess historical values.'
 }
 
 # ---- 4) الملفات
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-Copy-Item $DllSource (Join-Path $installDir 'MicBridgeAPO.dll') -Force
+$installedDll = Join-Path $installDir 'MicBridgeAPO.dll'
+if (Test-Path -LiteralPath $installedDll) {
+    $dllBackupDir = Join-Path $dataDir 'dll-backups'
+    New-Item -ItemType Directory -Force -Path $dllBackupDir | Out-Null
+    $dllBackupPath = Join-Path $dllBackupDir ("MicBridgeAPO-{0}.dll" -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    Copy-Item -LiteralPath $installedDll -Destination $dllBackupPath -ErrorAction Stop
+    Write-InstallLog 'INFO' "Previous DLL backed up to '$dllBackupPath'. SHA256=$((Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash)"
+}
+$dllReplacementStarted = $true
+Copy-Item -LiteralPath $DllSource -Destination $installedDll -Force -ErrorAction Stop
+Write-InstallLog 'INFO' "New DLL copied. SHA256=$((Get-FileHash -LiteralPath $installedDll -Algorithm SHA256).Hash)"
 foreach ($f in 'MicBridgeUI.ps1','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
 $ini = Join-Path $dataDir 'MicBridge.ini'
 if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot 'MicBridge.ini') $ini }
@@ -189,14 +213,28 @@ try {
 } catch { Write-Warning "لم يُنشأ اختصار سطح المكتب: $($_.Exception.Message)" }
 
 # ---- 9) إعادة تشغيل خدمة الصوت
+Write-InstallLog 'INFO' 'Restarting Audiosrv.'
 Restart-Service -Name Audiosrv -Force
+Write-InstallLog 'INFO' 'Installation completed successfully.'
 Write-Host ""
 Write-Host "تم التثبيت. أغلق Chrome وأي برنامج يستخدم المايك ثم افتحه من جديد."
 Write-Host "الواجهة: اختصار MicBridge على سطح المكتب."
-Write-Host "الإعدادات: $ini   |   السجل: $(Join-Path $dataDir 'MicBridge.log')"
+Write-Host "الإعدادات: $ini   |   سجل الصوت: $(Join-Path $dataDir 'MicBridge.log')"
+Write-Host "سجل التثبيت: $installLog"
 Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحدة."
 } catch {
+    $failure = $_
+    Write-InstallLog 'ERROR' "Installation failed: $($failure.Exception.ToString())"
+    Write-InstallLog 'ERROR' "Error position: $($failure.InvocationInfo.PositionMessage)"
+    if ($dllReplacementStarted -and $dllBackupPath -and (Test-Path -LiteralPath $dllBackupPath)) {
+        try {
+            Copy-Item -LiteralPath $dllBackupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
+            Write-InstallLog 'WARN' "Previous DLL restored from '$dllBackupPath'."
+        } catch { Write-InstallLog 'CRITICAL' "DLL restoration failed: $($_.Exception.ToString())" }
+    }
+    Write-InstallLog 'WARN' 'Registry/endpoint changes are not automatically rolled back; retain backup.json and request review.'
     Write-Host ""
-    Write-Host "فشل التثبيت: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Warning "قد تكون بعض خطوات التثبيت قد نُفذت قبل حدوث الخطأ. لا تشغّل uninstall.bat ولا تحذف backup.json الآن؛ أوقف الاستخدام وأرسل نص الخطأ كاملًا لمراجعة الحالة والتراجع بأمان."
+    Write-Host "فشل التثبيت: $($failure.Exception.Message)" -ForegroundColor Red
+    Write-Host "سجل التثبيت: $installLog" -ForegroundColor Yellow
+    Write-Warning "قد تكون بعض تغييرات Registry قد نُفذت. لا تشغّل uninstall.bat ولا تحذف backup.json؛ أرسل Install.log للمراجعة."
 }
