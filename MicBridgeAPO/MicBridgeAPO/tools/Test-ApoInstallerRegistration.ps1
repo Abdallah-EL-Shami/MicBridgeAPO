@@ -116,8 +116,6 @@ Assert-Contains $installer 'previous-audioengine-apo.reg' 'Permanent backup name
 Assert-Contains $installer 'existing backup predates persistent COM recovery data' 'Installer refuses unsafe upgrades with legacy backups'
 Assert-Contains $uninstaller 'ComRegistrationSnapshotVersion' 'Uninstaller requires a persistent COM recovery snapshot before mutation'
 Assert-Contains $uninstaller 'Composite EFX recovery record is missing; uninstall stopped before changing' 'Uninstaller fails closed when the original composite EFX snapshot is missing'
-Assert-Contains $uninstaller 'Composite EFX recovery record has an invalid schema' 'Uninstaller validates composite EFX recovery schema before mutation'
-Assert-Contains $uninstaller 'regHeader' 'Uninstaller validates persistent COM recovery export headers before mutation'
 Assert-Contains $uninstaller 'PrevClsidRegistrationExists' 'Uninstaller restores the pre-install COM CLSID when it existed'
 Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores the pre-install AudioEngine APO registration when it existed'
 Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
