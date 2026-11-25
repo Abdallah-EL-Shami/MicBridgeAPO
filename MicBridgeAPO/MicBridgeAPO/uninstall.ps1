@@ -81,6 +81,7 @@ if (Test-Path $backupFile) {
                 if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
                 else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
             } elseif (($b.CreatedFx -eq $true) -and ($null -eq $b.FxKeySddl)) {
+                # Legacy backup proves FxProperties did not exist before MicBridge's first install.
                 Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue
             } else {
                 Write-Warning 'Legacy backup does not prove the original FX association; leaving that property untouched.'
@@ -89,7 +90,7 @@ if (Test-Path $backupFile) {
 
         # The old installer may have created FxProperties. Delete it only if it is empty;
         # never recursively delete driver/vendor properties added later.
-        # Restore the pre-install composite endpoint-effect list exactly, preserving other APOs.
+        # Preserve the current vendor list while removing only this APO.
         # Remove only MicBridge from the live composite list; retain vendor entries added after installation.
         if (Test-Path -LiteralPath $compositeBackupFile) {
             $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
