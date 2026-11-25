@@ -10,10 +10,12 @@ if (-not $isAdmin) {
 
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
+$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
 $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
+$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $audioKey   = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
@@ -76,6 +78,20 @@ if (Test-Path $backupFile) {
 
         # The old installer may have created FxProperties. Delete it only if it is empty;
         # never recursively delete driver/vendor properties added later.
+        # Restore the pre-install composite endpoint-effect list exactly, preserving other APOs.
+        if (Test-Path -LiteralPath $compositeBackupFile) {
+            $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
+            if ([string]$compositeState.DeviceId -ne [string]$b.DeviceId) { throw 'Composite EFX backup endpoint mismatch; refusing to restore another device.' }
+            if ($compositeState.Exists) {
+                $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\\$($b.DeviceId)\\FxProperties", $true)
+                if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
+                try { $key.SetValue($fxCompositeValue, [string[]]@($compositeState.Value), [Microsoft.Win32.RegistryValueKind]::MultiString) }
+                finally { $key.Close() }
+            } else {
+                Remove-ItemProperty -LiteralPath $fxPath -Name $fxCompositeValue -ErrorAction SilentlyContinue
+            }
+        }
+
         if ($b.CreatedFx) {
             $relativeFx = "$capSub\$($b.DeviceId)\FxProperties"
             $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relativeFx)
