@@ -56,6 +56,11 @@ Assert-Contains $apoSource 'm_blender\.Process\(outb, frames, ch, m_recvRing, tr
 Assert-Contains $apoSource 'm_resampler\.Process\(in, frames, step, m_rs\.data\(\), m_rs\.size\(\)\)' 'UDP receive uses the tested stateful resampler'
 Assert-Contains $apoSource 'm_latencyHns\.store' 'APO reports its configured jitter-buffer latency'
 Assert-Contains $apoSource 'm_resetProcessRequested' 'APO Reset defers process state changes to the processing thread'
+Assert-Contains $apoSource 'SO_REUSEADDR' 'APO can share the fixed ReaStream broadcast port'
+Assert-Contains $apoSource 'INADDR_LOOPBACK' 'APO rejects non-loopback ReaStream senders'
+$cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
+Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
+
 
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
 Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
