@@ -39,6 +39,22 @@ function Write-Report([string]$Path, [string[]]$Lines) {
     $Lines | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Get-Udp58710Owners {
+    $owners = @()
+    try {
+        foreach ($endpoint in @(Get-NetUDPEndpoint -LocalPort 58710 -ErrorAction Stop)) {
+            $process = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue
+            $owners += [pscustomobject]@{
+                Address = $endpoint.LocalAddress
+                Port = $endpoint.LocalPort
+                PID = $endpoint.OwningProcess
+                Process = if ($process) { $process.ProcessName } else { '<exited>' }
+            }
+        }
+    } catch {}
+    return $owners
+}
+
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add("MicBridgeAPO read-only runtime probe")
 $lines.Add("Started: $(Get-Date -Format o)")
@@ -71,6 +87,9 @@ $lines.Add("AudioEngine FriendlyName: $(Read-RegValue "SOFTWARE\Classes\AudioEng
 $initialModules = @(Get-ApoModules)
 $lines.Add("Initial audiodg modules: $($initialModules.Count)")
 $before = if (Test-Path -LiteralPath $logPath) { (Get-Content -LiteralPath $logPath -Tail 400) } else { @() }
+$udpOwnersBefore = @(Get-Udp58710Owners)
+$lines.Add("UDP/58710 owners before capture: $($udpOwnersBefore.Count)")
+foreach ($owner in $udpOwnersBefore) { $lines.Add(("UDP before: {0}:{1} PID={2} Process={3}" -f $owner.Address,$owner.Port,$owner.PID,$owner.Process)) }
 $lines.Add("Log file present before test: $(Test-Path -LiteralPath $logPath)")
 Write-Report $outPath $lines.ToArray()
 
@@ -84,6 +103,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 1
 }
 $after = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath -Tail 800) } else { @() }
+$udpOwnersAfter = @(Get-Udp58710Owners)
 $newLog = @()
 if ($after.Count -gt 0) {
     $beforeSet = @{}
@@ -114,6 +134,7 @@ $checks = [ordered]@{
     NoRingOverflowDrops = ($stoppedLine.Count -gt 0 -and $sendRingDrops -eq 0 -and $recvRingDrops -eq 0)
     AudiodgSameUser = [bool]($audiodgOwners -contains $currentUser)
     CantabileSameUserAsAudiodg = [bool](@($audiodgOwners | Where-Object { $cantabileOwners -contains $_ }).Count -gt 0)
+    SharedUdpPortOwnedByCantabileAndAudioDG = ([bool](@($udpOwnersAfter | Where-Object { $_.Process -ieq 'Cantabile' }).Count -gt 0) -and [bool](@($udpOwnersAfter | Where-Object { $_.Process -ieq 'audiodg' }).Count -gt 0))
     DllObservedInAudiodg = ($moduleSamples.Count -gt 0)
 }
 $report = New-Object System.Collections.Generic.List[string]
@@ -124,6 +145,8 @@ $report.Add("TX packets: $txPackets")
 $report.Add("RX packets: $rxPackets")
 $report.Add("Send ring drops: $sendRingDrops")
 $report.Add("Receive ring drops: $recvRingDrops")
+$report.Add("UDP/58710 owners after capture: $($udpOwnersAfter.Count)")
+foreach ($owner in $udpOwnersAfter) { $report.Add(("UDP after: {0}:{1} PID={2} Process={3}" -f $owner.Address,$owner.Port,$owner.PID,$owner.Process)) }
 $report.Add('--- Runtime checkpoints ---')
 foreach ($entry in $checks.GetEnumerator()) { $report.Add(("{0}: {1}" -f $entry.Key, $entry.Value)) }
 $report.Add('--- Observed audiodg module samples ---')
