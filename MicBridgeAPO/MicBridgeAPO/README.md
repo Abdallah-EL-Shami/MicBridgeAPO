@@ -19,5 +19,8 @@
 - لا تستخدم عنوان Unicast. كل من ReaStream وMicBridge يستقبلان على UDP/58710 ويحتاجان نسخة من حزمة البث نفسها؛ عنوان البث المحلي المحدد يطابق `MicBridge.ini`.
 - الاختبار الآلي يتحقق من مشاركة المنفذ على Windows؛ يجب أيضًا التأكد من وصول الحزم إلى عدادي ReaStream وMicBridge على الجهاز الفعلي.
 
+## اختبار التشغيل على الجهاز
+من مجلد الحزمة بعد التثبيت، شغّل `powershell -ExecutionPolicy Bypass -File .\Test-ApoRuntime.ps1 -DurationSeconds 60`. عند الطلب ابدأ تسجيلًا فعليًا من AT2040USB ثم أوقفه؛ سيحفظ التقرير في `C:\ProgramData\MicBridgeAPO`. الاختبار للقراءة فقط.
+
 ## الإزالة
 انقر مرتين على uninstall.bat. يعيد القيم الأصلية ومالك المفتاح وصلاحياته (SDDL).
