@@ -29,4 +29,12 @@ Assert-Contains $installer '\[string\]\$existingBackup\.DeviceId\s+-ne\s+\[strin
 Assert-Contains $installer 'قد تكون بعض خطوات التثبيت قد نُفذت' 'Installer warns that a failed run may have made partial changes'
 Assert-NotContains $installer 'شغّل uninstall\.bat للتراجع' 'Installer does not recommend broad uninstall as automatic partial rollback'
 
+
+Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagnostic logging'
+Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
+Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
+Assert-Contains $installer 'Previous DLL restored' 'Installer attempts DLL restoration after failure'
+Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
+Assert-NotContains $installer 'existingAssociation = (Get-ItemProperty' 'Installer does not infer historical association from current registry state'
+
 Write-Host 'All installer registration static checks passed.'
