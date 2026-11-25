@@ -16,6 +16,8 @@ if (-not $isAdmin) {
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
+$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15' # PKEY_CompositeFX_EndpointEffectClsid (REG_MULTI_SZ)
+$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Association
 $ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
@@ -142,6 +144,31 @@ if (-not (Test-Path $backupFile)) {
     Write-InstallLog 'INFO' 'Existing backup validated and retained; registry state was not used to guess historical values.'
 }
 
+# Preserve the composite EFX list separately from the immutable first-install backup.
+# This value is REG_MULTI_SZ on Windows 10 1803+ and allows coexisting endpoint APOs.
+if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
+    $fxKey = $hklm.OpenSubKey($fxSub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [Microsoft.Win32.RegistryRights]::ReadKey)
+    $compositeExists = $false; $compositeKind = 'MultiString'; $compositeValue = @()
+    if ($fxKey) {
+        try {
+            if ($fxKey.GetValueNames() -contains $fxCompositeValue) {
+                $compositeExists = $true
+                $compositeKind = [string]$fxKey.GetValueKind($fxCompositeValue)
+                $compositeValue = @($fxKey.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+            }
+        } finally { $fxKey.Close() }
+    }
+    if (-not $compositeExists -and $backup.PrevEndpointEffect -and [string]$backup.PrevEndpointEffect -ne $clsid) {
+        $compositeValue = @([string]$backup.PrevEndpointEffect)
+    }
+    [pscustomobject]@{ DeviceId=$dev.Id; Exists=$compositeExists; Kind=$compositeKind; Value=$compositeValue } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $compositeBackupFile -Encoding UTF8
+    Write-InstallLog 'INFO' 'Captured original composite EFX state in a separate recovery record.'
+} else {
+    $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
+    if ([string]$compositeState.DeviceId -ne [string]$dev.Id) { throw 'Composite EFX recovery record belongs to a different endpoint; refusing installation.' }
+}
+
 # ---- 4) الملفات
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 $installedDll = Join-Path $installDir 'MicBridgeAPO.dll'
@@ -199,7 +226,20 @@ Grant-Key $devSub
 if (-not (Test-Path "$capRoot\$($dev.Id)\FxProperties")) { New-Item "$capRoot\$($dev.Id)\FxProperties" | Out-Null }
 Grant-Key $fxSub
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -Value $ksNodeTypeAny -Type String
-Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -Value $clsid -Type String
+
+# Restore the legacy single-CLSID property to its pre-MicBridge value, then register
+# MicBridge alongside the original EFX chain through the Windows 10 composite property.
+if ($backup.PrevEndpointEffect) {
+    Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -Value $backup.PrevEndpointEffect -Type String
+} else {
+    Remove-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -ErrorAction SilentlyContinue
+}
+$compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
+$efxList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+if (-not $efxList) { $efxList = @() }
+if ($efxList -notcontains $clsid) { $efxList += $clsid }
+Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxCompositeValue -Value ([string[]]$efxList) -Type MultiString
+Write-InstallLog 'INFO' ("Registered composite EFX list: {0}" -f ($efxList -join '; '))
 
 # ---- 8) اختصار الواجهة على سطح المكتب
 try {
