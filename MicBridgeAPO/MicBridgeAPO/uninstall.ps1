@@ -100,6 +100,9 @@ if (Test-Path $backupFile) {
             try {
                 $currentList = @()
                 if ($key.GetValueNames() -contains $fxCompositeValue) {
+                    if ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+                        throw 'Current composite EFX value is not REG_MULTI_SZ; refusing to alter it during uninstall.'
+                    }
                     $currentList = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
                 } elseif ($compositeState.Exists) {
                     $currentList = @($originalList)
