@@ -893,7 +893,7 @@ private:
         std::lock_guard<std::mutex> statusGuard(m_statusMutex);
         wchar_t statusPath[MAX_PATH] = {}, tempPath[MAX_PATH] = {};
         DataPath(statusPath, MAX_PATH, L"status.txt");
-        swprintf_s(tempPath, L"%s.tmp", statusPath);
+        swprintf_s(tempPath, L"%s.%lu.%lu.tmp", statusPath, GetCurrentProcessId(), GetCurrentThreadId());
         const bool configured = m_cfg.enabled;
         const bool userEnabled = m_userEnabled.load(std::memory_order_acquire);
         const bool active = m_active.load(std::memory_order_acquire);
