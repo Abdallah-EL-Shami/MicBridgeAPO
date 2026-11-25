@@ -17,6 +17,9 @@ jobs:
       - name: Check installer registration and rollback safety
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-ApoInstallerRegistration.ps1
+      - name: Test durable recovery journal interruption and resume
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRecoveryJournal.ps1
       - name: Stage complete install package
         shell: pwsh
         run: |
