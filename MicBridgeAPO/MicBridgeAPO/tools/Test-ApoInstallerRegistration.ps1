@@ -51,7 +51,7 @@ Assert-Contains $installer 'Type MultiString' 'Installer writes the composite EF
 Assert-Contains $installer 'Current composite EFX value has unexpected type' 'Installer refuses to overwrite a malformed composite EFX value'
 Assert-Contains $uninstaller 'malformed composite EFX' 'Uninstaller refuses to mutate a malformed composite EFX value'
 Assert-NotContains $installer 'Name \$fxValue -Value \$clsid' 'Installer does not overwrite the legacy single-APO EFX property'
-Assert-Contains $uninstaller 'retains vendor entries' 'Uninstaller preserves vendor EFX entries while removing MicBridge'
+Assert-Contains $uninstaller 'Never rewrite vendor entries' 'Uninstaller preserves vendor EFX entries while removing MicBridge'
 Assert-Contains $uninstaller '\$currentLegacy' 'Uninstaller does not overwrite a vendor-updated legacy EFX value'
 Assert-Contains $uninstaller '\$expectedAssociation' 'Uninstaller restores association only when it still matches MicBridge state'
 Assert-Contains $uninstaller 'RegistryValueKind]::MultiString' 'Uninstaller restores the composite property with REG_MULTI_SZ type'
