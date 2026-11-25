@@ -590,7 +590,8 @@ public:
                 tmp[i] = s / (float)ch;
             }
         }
-        m_sendRing.push(tmp, frames);
+        const uint64_t sendDropped = m_sendRing.push(tmp, frames);
+        if (sendDropped) m_sendRingDrops.fetch_add(sendDropped, std::memory_order_relaxed);
         SetEvent(m_sendEvt);
 
         // Preserve the dry input in the output buffer, then crossfade to wet audio.
@@ -612,6 +613,12 @@ private:
         if (!m_cfg.enabled) {
             m_latencyHns.store(0, std::memory_order_release);
             Log("Disabled in INI: pass-through");
+            return;
+        }
+        if (m_cfg.port < 1 || m_cfg.port > 65535 || !m_cfg.sendId[0] || !m_cfg.recvId[0] ||
+            strcmp(m_cfg.sendId, m_cfg.recvId) == 0) {
+            Log("Invalid bridge configuration: port=%d sendId='%s' receiveId='%s'",
+                m_cfg.port, m_cfg.sendId, m_cfg.recvId);
             return;
         }
         WSADATA wsa;
@@ -637,6 +644,8 @@ private:
                             std::max<uint32_t>(1, m_rate / 200));
         m_pktRx = 0;
         m_pktTx = 0;
+        m_sendRingDrops = 0;
+        m_recvRingDrops = 0;
         m_underruns = 0;
         m_stop = false;
         m_sendStartup.store(0, std::memory_order_release);
@@ -702,7 +711,7 @@ private:
         }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u nonLocal=%u", m_pktTx.load(), m_pktRx.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load(), m_nonLocalPackets.load());
+        Log("Stopped: tx=%u rx=%u sendRingDrops=%llu recvRingDrops=%llu underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u nonLocal=%u", m_pktTx.load(), m_pktRx.load(), (unsigned long long)m_sendRingDrops.load(), (unsigned long long)m_recvRingDrops.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load(), m_nonLocalPackets.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -847,7 +856,8 @@ private:
             if (sr == m_rate) {
                 m_resampler.Reset();
                 m_resamplerInputRate = 0;
-                m_recvRing.push(in, frames);
+                const uint64_t dropped = m_recvRing.push(in, frames);
+                if (dropped) m_recvRingDrops.fetch_add(dropped, std::memory_order_relaxed);
             } else {
                 if (m_resamplerInputRate != sr) {
                     m_resampler.Reset();
@@ -856,7 +866,8 @@ private:
                 const double step = (double)sr / (double)m_rate;
                 const size_t outN = m_resampler.Process(in, frames, step, m_rs.data(), m_rs.size());
                 if (outN == m_rs.size()) ++m_resampleCapacityHits;
-                m_recvRing.push(m_rs.data(), outN);
+                const uint64_t dropped = m_recvRing.push(m_rs.data(), outN);
+                if (dropped) m_recvRingDrops.fetch_add(dropped, std::memory_order_relaxed);
             }
         }
         closesocket(s);
@@ -880,6 +891,7 @@ private:
     mb::LinearResampler m_resampler;
     uint32_t m_resamplerInputRate = 0;
     std::atomic<uint32_t> m_resampleCapacityHits{0}, m_nonLocalPackets{0};
+    std::atomic<uint64_t> m_sendRingDrops{0}, m_recvRingDrops{0};
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
     std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0}, m_sendErrors{0};
     std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
