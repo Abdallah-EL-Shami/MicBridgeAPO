@@ -12,13 +12,13 @@ static bool SetBoolOption(SOCKET s, int option, BOOL value) {
                       reinterpret_cast<const char*>(&value), sizeof(value)) == 0;
 }
 
-static SOCKET CreateReceiver(u_short requestedPort, u_short& port) {
+static SOCKET CreateReceiver(u_short requestedPort, u_short& port, bool enableReuse) {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET) return INVALID_SOCKET;
 
     // ReaStream and MicBridge are independent receivers on UDP/58710.
     // The bridge sends local broadcast packets; both receivers must get a copy.
-    if (!SetBoolOption(s, SO_REUSEADDR, TRUE)) {
+    if (enableReuse && !SetBoolOption(s, SO_REUSEADDR, TRUE)) {
         closesocket(s);
         return INVALID_SOCKET;
     }
@@ -74,8 +74,10 @@ int main() {
     }
 
     u_short port = 0, secondPort = 0;
-    SOCKET first = CreateReceiver(0, port);
-    SOCKET second = CreateReceiver(port, secondPort);
+    // Model ReaStream as the first receiver with default socket options;
+    // MicBridge is the second receiver and explicitly requests SO_REUSEADDR.
+    SOCKET first = CreateReceiver(0, port, false);
+    SOCKET second = CreateReceiver(port, secondPort, true);
     SOCKET sender = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (first == INVALID_SOCKET || second == INVALID_SOCKET || sender == INVALID_SOCKET ||
         port == 0 || secondPort != port) {
@@ -121,6 +123,6 @@ int main() {
                     firstReceived ? 1 : 0, secondReceived ? 1 : 0, sent);
         return 1;
     }
-    std::puts("PASS: two SO_REUSEADDR UDP receivers both received the same local broadcast datagram");
+    std::puts("PASS: MicBridge SO_REUSEADDR receiver shared a port with a default UDP receiver and both got the broadcast");
     return 0;
 }
