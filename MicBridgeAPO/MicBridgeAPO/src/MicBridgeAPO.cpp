@@ -490,7 +490,7 @@ public:
         const WAVEFORMATEX* iw=ppIn[0]->pFormat->GetAudioFormat(); const WAVEFORMATEX* ow=ppOut[0]->pFormat->GetAudioFormat();
         UINT32 fi=ppIn[0]->u32MaxFrameCount, fo=ppOut[0]->u32MaxFrameCount;
         if (!iw || !ow || !IsFloat32(ppIn[0]->pFormat) || !IsFloat32(ppOut[0]->pFormat) ||
-            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fo<fi) {
+            iw->nSamplesPerSec!=ow->nSamplesPerSec || iw->nChannels!=ow->nChannels || iw->nChannels==0 || iw->nChannels>8 || fi==0 || fi>16384 || fo<fi || fo>16384) {
             Log("LockForProcess rejected: format/frame mismatch in=%u/%u/%u out=%u/%u/%u",iw?iw->nSamplesPerSec:0,iw?iw->nChannels:0,fi,ow?ow->nSamplesPerSec:0,ow?ow->nChannels:0,fo);
             return APOERR_FORMAT_NOT_SUPPORTED;
         }
@@ -584,9 +584,11 @@ private:
             return;
         }
         m_wsa = true;
-        m_jitter = std::max<uint64_t>((uint64_t)m_rate * m_cfg.jitterMs / 1000, 2ull * m_maxFrames);
-        m_hi = m_jitter + m_rate / 10;  // الحد الأعلى: الحماية + 100ms
-        m_scratch.assign(std::max<size_t>(m_maxFrames, 16384), 0.f);
+        const uint64_t requestedJitter = std::max<uint64_t>((uint64_t)m_rate * m_cfg.jitterMs / 1000, 2ull * m_maxFrames);
+        // Keep the target and high-water mark within the fixed SPSC ring capacity.
+        m_jitter = std::min<uint64_t>(requestedJitter, m_recvRing.capacity() / 2);
+        m_hi = std::min<uint64_t>(m_jitter + m_rate / 10, m_recvRing.capacity() - 1);
+        m_scratch.assign(16384, 0.f);
         // A 4096-byte stereo/mono payload contains at most 1024 mono frames.
         // The largest supported rate ratio is 384 kHz / 8 kHz = 48:1.
         m_rs.assign(65536, 0.f);
