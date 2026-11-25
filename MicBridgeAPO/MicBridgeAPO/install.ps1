@@ -25,6 +25,7 @@ $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
 $installLog = Join-Path $dataDir 'Install.log'
 $dllBackupPath = $null
+$dllBackupHash = $null
 $dllReplacementStarted = $false
 function Write-InstallLog([string]$Level, [string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
@@ -228,24 +229,24 @@ $controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath 
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
 $transactionState = [pscustomobject]@{
     DeviceId = $dev.Id
-    AudioProtected = Get-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG'
-    FxEffect = Get-RegistryValueSnapshot $fxNowSub $fxValue
-    FxAssociation = Get-RegistryValueSnapshot $fxNowSub $fxAssociationValue
-    FxComposite = Get-RegistryValueSnapshot $fxNowSub $fxCompositeValue
-    DevSddl = Get-Sddl $devSub
-    FxSddl = Get-Sddl $fxSub
-    FxKeyExisted = Test-Path -LiteralPath "$capRoot\$($dev.Id)\FxProperties"
+    AudioProtected = (Get-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG')
+    FxEffect = (Get-RegistryValueSnapshot $fxNowSub $fxValue)
+    FxAssociation = (Get-RegistryValueSnapshot $fxNowSub $fxAssociationValue)
+    FxComposite = (Get-RegistryValueSnapshot $fxNowSub $fxCompositeValue)
+    DevSddl = (Get-Sddl $devSub)
+    FxSddl = (Get-Sddl $fxSub)
+    FxKeyExisted = (Test-Path -LiteralPath "$capRoot\$($dev.Id)\FxProperties")
     ClsidRegExisted = $clsidRegExisted
     ApoRegExisted = $apoRegExisted
-    DllExisted = Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll')
-    IniExisted = Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini')
-    ControlExisted = Test-Path -LiteralPath (Join-Path $dataDir 'control.ini')
+    DllExisted = (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))
+    IniExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))
+    ControlExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'control.ini'))
     DataDirSddl = $dataDirSddl
     ControlSddl = $controlSddl
     InstallFiles = $installFilesBackup
     ShortcutExisted = $shortcutExisted
     ShortcutBackup = $shortcutBackup
-    InstallDirExisted = Test-Path -LiteralPath $installDir
+    InstallDirExisted = (Test-Path -LiteralPath $installDir)
 }
 $transactionState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $transactionStateFile -Encoding UTF8
 
@@ -257,7 +258,8 @@ if (Test-Path -LiteralPath $installedDll) {
     New-Item -ItemType Directory -Force -Path $dllBackupDir | Out-Null
     $dllBackupPath = Join-Path $dllBackupDir ("MicBridgeAPO-{0}.dll" -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     Copy-Item -LiteralPath $installedDll -Destination $dllBackupPath -ErrorAction Stop
-    Write-InstallLog 'INFO' "Previous DLL backed up to '$dllBackupPath'. SHA256=$((Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash)"
+    $dllBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
+    Write-InstallLog 'INFO' "Previous DLL backed up to '$dllBackupPath'. SHA256=$dllBackupHash"
 }
 $dllReplacementStarted = $true
 Copy-Item -LiteralPath $DllSource -Destination $installedDll -Force -ErrorAction Stop
@@ -353,8 +355,10 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     $failure = $_
     Write-InstallLog 'ERROR' "Installation failed: $($failure.Exception.ToString())"
     Write-InstallLog 'ERROR' "Error position: $($failure.InvocationInfo.PositionMessage)"
-    if ($dllReplacementStarted -and $dllBackupPath -and (Test-Path -LiteralPath $dllBackupPath)) {
+    if ($dllReplacementStarted -and $dllBackupPath -and $dllBackupHash -and (Test-Path -LiteralPath $dllBackupPath)) {
         try {
+            $actualBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
+            if ($actualBackupHash -ne $dllBackupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
             Copy-Item -LiteralPath $dllBackupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
             Write-InstallLog 'WARN' "Previous DLL restored from '$dllBackupPath'."
         } catch { Write-InstallLog 'CRITICAL' "DLL restoration failed: $($_.Exception.ToString())" }
