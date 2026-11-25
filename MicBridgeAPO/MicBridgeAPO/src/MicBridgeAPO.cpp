@@ -402,11 +402,10 @@ public:
 
     // IAudioProcessingObject (كانت في الفئة الأساسية، ننفذها بأنفسنا)
     STDMETHOD(Reset)() override {
-        // Reset is non-real-time. Do not reset SPSC indices while worker threads may
-        // still be active; the next LockForProcess performs a full bridge reset.
-        m_blender.Reset();
-        m_resampler.Reset();
-        m_resamplerInputRate = 0;
+        // Defer state changes to each owning thread: Reset may race with APOProcess
+        // and the UDP receive worker. No shared SPSC indices are reset here.
+        m_resetProcessRequested.store(true, std::memory_order_release);
+        m_resetRecvRequested.store(true, std::memory_order_release);
         return S_OK;
     }
     STDMETHOD(GetLatency)(HNSTIME* pTime) override {
@@ -524,6 +523,10 @@ public:
         float* outb = reinterpret_cast<float*>(out->pBuffer);
         const bool silent = (in->u32BufferFlags == BUFFER_SILENT);
         if (silent) ++m_silentCalls;
+        if (m_resetProcessRequested.exchange(false, std::memory_order_acq_rel)) {
+            m_blender.Reset();
+            m_recvRing.skip(m_recvRing.available());
+        }
 
         out->u32ValidFrameCount = frames;
         out->u32BufferFlags = in->u32BufferFlags;
@@ -750,6 +753,10 @@ private:
         uint8_t expectedId[32];
         mb::MakeId(m_cfg.recvId, expectedId);
         while (!m_stop) {
+            if (m_resetRecvRequested.exchange(false, std::memory_order_acq_rel)) {
+                m_resampler.Reset();
+                m_resamplerInputRate = 0;
+            }
             int n = recvfrom(s, (char*)pkt, sizeof pkt, 0, nullptr, nullptr);
             if (n <= 0) {
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
@@ -800,6 +807,7 @@ private:
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
     std::atomic<bool> m_active{false}, m_stop{false};
     std::atomic<HNSTIME> m_latencyHns{0};
+    std::atomic<bool> m_resetProcessRequested{false}, m_resetRecvRequested{false};
     std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
     bool m_wsa = false;
     mb::SpscRing m_sendRing{1u << 16}, m_recvRing{1u << 16};
