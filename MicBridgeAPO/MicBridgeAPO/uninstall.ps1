@@ -365,22 +365,6 @@ if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
     Remove-Item -Recurse -Force $installDir -ErrorAction Stop
 }
 Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
- } | ForEach-Object { $_.Substring(1, $_.Length - 2) })
-        if ($sections.Count -eq 0 -or $sections -notcontains $expectedRoot) {
-            throw "COM recovery file '$($item.Name)' does not contain its expected registry root; uninstall stopped before changes."
-        }
-        foreach ($section in $sections) {
-            if (-not [string]::Equals($section, $expectedRoot, [StringComparison]::OrdinalIgnoreCase) -and
-                -not $section.StartsWith($expectedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                throw "COM recovery file '$($item.Name)' contains an unexpected registry tree; uninstall stopped before changes."
-            }
-        }
-    }
-}
-
-if ([string]::IsNullOrWhiteSpace([string]$preflightBackup.DevKeySddl)) {
-    throw 'backup.json has no endpoint ACL snapshot; uninstall stopped before changes to avoid guessing original permissions.'
-}
 if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
     throw 'Composite EFX recovery record is missing; uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
 }
