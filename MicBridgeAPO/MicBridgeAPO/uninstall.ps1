@@ -371,7 +371,7 @@ if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
 } elseif (Test-Path -LiteralPath $installDir) {
     Remove-Item -Recurse -Force $installDir -ErrorAction Stop
 }
-Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
 } finally {
     if ($operationLock) { $operationLock.Dispose() }
 }
+Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
