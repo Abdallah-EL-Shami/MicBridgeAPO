@@ -177,10 +177,10 @@ if (-not (Test-Path $backupFile)) {
     # These files survive successful installation and are consumed by the uninstaller.
     $comBackupDir = Join-Path $dataDir 'com-registration-backup'
     New-Item -ItemType Directory -Force -Path $comBackupDir | Out-Null
-    $comClsidPath = "HKLM\\SOFTWARE\\Classes\\CLSID\\$clsid"
-    $comApoPath = "HKLM\\SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid"
-    $prevClsidRegistrationExists = Test-Path -LiteralPath "HKLM:\\SOFTWARE\\Classes\\CLSID\\$clsid"
-    $prevApoRegistrationExists = Test-Path -LiteralPath "HKLM:\\SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid"
+    $comClsidPath = "HKLM\SOFTWARE\Classes\CLSID\$clsid"
+    $comApoPath = "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+    $prevClsidRegistrationExists = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+    $prevApoRegistrationExists = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
     $prevClsidRegistrationFile = Join-Path $comBackupDir 'previous-clsid.reg'
     $prevApoRegistrationFile = Join-Path $comBackupDir 'previous-audioengine-apo.reg'
     if ($prevClsidRegistrationExists) { & reg.exe export $comClsidPath $prevClsidRegistrationFile /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not persist the original COM CLSID registration.' } }
