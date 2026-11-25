@@ -92,7 +92,7 @@ function Restore-RegistryValueSnapshot([string]$sub, [string]$name, $snapshot) {
         $key = $hklm.CreateSubKey($sub)
         if (-not $key) { throw "تعذر إنشاء/فتح مفتاح Registry: $sub" }
         try {
-            $kind = [Microsoft.Win32.RegistryValueKind]::$($snapshot.Kind)
+            $kind = [System.Enum]::Parse([Microsoft.Win32.RegistryValueKind], [string]$snapshot.Kind)
             $value = $snapshot.Value
             if ($kind -eq [Microsoft.Win32.RegistryValueKind]::MultiString) { $value = [string[]]@($value) }
             $key.SetValue($name, $value, $kind)
@@ -203,12 +203,12 @@ New-Item -ItemType Directory -Force -Path $transactionDir | Out-Null
 $transactionStateFile = Join-Path $transactionDir 'state.json'
 $clsidRegBackup = Join-Path $transactionDir 'clsid.reg'
 $apoRegBackup = Join-Path $transactionDir 'audioengine-apo.reg'
-$clsidRegExisted = Test-Path -LiteralPath "HKLM:\\SOFTWARE\\Classes\\CLSID\\$clsid"
-$apoRegExisted = Test-Path -LiteralPath "HKLM:\\SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid"
-if ($clsidRegExisted) { & reg.exe export "HKLM\\SOFTWARE\\Classes\\CLSID\\$clsid" $clsidRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing COM CLSID registration.' } }
-if ($apoRegExisted) { & reg.exe export "HKLM\\SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid" $apoRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing AudioEngine APO registration.' } }
-$audioSub = 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Audio'
-$fxNowSub = "$capSub\\$($dev.Id)\\FxProperties"
+$clsidRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+$apoRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+if ($clsidRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\CLSID\$clsid" $clsidRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing COM CLSID registration.' } }
+if ($apoRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" $apoRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing AudioEngine APO registration.' } }
+$audioSub = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
+$fxNowSub = "$capSub\$($dev.Id)\FxProperties"
 $transactionState = [pscustomobject]@{
     DeviceId = $dev.Id
     AudioProtected = Get-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG'
@@ -217,7 +217,7 @@ $transactionState = [pscustomobject]@{
     FxComposite = Get-RegistryValueSnapshot $fxNowSub $fxCompositeValue
     DevSddl = Get-Sddl $devSub
     FxSddl = Get-Sddl $fxSub
-    FxKeyExisted = Test-Path -LiteralPath "$capRoot\\$($dev.Id)\\FxProperties"
+    FxKeyExisted = Test-Path -LiteralPath "$capRoot\$($dev.Id)\FxProperties"
     ClsidRegExisted = $clsidRegExisted
     ApoRegExisted = $apoRegExisted
     DllExisted = Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll')
@@ -332,22 +332,22 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     if ($transactionStateFile -and (Test-Path -LiteralPath $transactionStateFile)) {
         try {
             $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
-            $fxNowSub = "$capSub\\$($tx.DeviceId)\\FxProperties"
+            $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
             Restore-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected
             Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
             Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
             Restore-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite
-            if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\\$($tx.DeviceId)\\FxProperties")) { Restore-Sddl "$capSub\\$($tx.DeviceId)\\FxProperties" $tx.FxSddl }
-            if ($tx.DevSddl) { Restore-Sddl "$capSub\\$($tx.DeviceId)" $tx.DevSddl }
+            if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) { Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" $tx.FxSddl }
+            if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" $tx.DevSddl }
             if (-not $tx.FxKeyExisted) {
-                $fxNowPath = "$capRoot\\$($tx.DeviceId)\\FxProperties"
+                $fxNowPath = "$capRoot\$($tx.DeviceId)\FxProperties"
                 if (Test-Path -LiteralPath $fxNowPath) {
-                    $fxKey = $hklm.OpenSubKey("$capSub\\$($tx.DeviceId)\\FxProperties")
+                    $fxKey = $hklm.OpenSubKey("$capSub\$($tx.DeviceId)\FxProperties")
                     if ($fxKey) { $empty = ($fxKey.GetValueNames().Count -eq 0 -and $fxKey.GetSubKeyNames().Count -eq 0); $fxKey.Close(); if ($empty) { Remove-Item -LiteralPath $fxNowPath -Force } }
                 }
             }
-            $clsidPath = "HKLM:\\SOFTWARE\\Classes\\CLSID\\$clsid"
-            $apoPath = "HKLM:\\SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid"
+            $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+            $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
             Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $apoPath -Recurse -Force -ErrorAction SilentlyContinue
             if ($tx.ClsidRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'clsid.reg'))) { & reg.exe import (Join-Path $transactionDir 'clsid.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior COM CLSID registration.' } }
@@ -361,7 +361,7 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             Write-Warning "تعذر إكمال التراجع التلقائي: $($_.Exception.Message). احتفظ بمجلد المعاملة وbackup.json."
         }
     }
-    Write-InstallLog 'WARN' 'Registry/endpoint changes are not automatically rolled back; retain backup.json and request review.'
+    Write-InstallLog 'WARN' 'If transaction rollback reported CRITICAL, retain the transaction snapshot and backup.json for manual recovery.'
     Write-Host ""
     Write-Host "فشل التثبيت: $($failure.Exception.Message)" -ForegroundColor Red
     Write-Host "سجل التثبيت: $installLog" -ForegroundColor Yellow
