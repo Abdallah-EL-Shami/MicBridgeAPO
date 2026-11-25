@@ -99,16 +99,17 @@ if ($preflightComposite.PSObject.Properties.Name -notcontains 'Exists' -or
     ($preflightComposite.Value -isnot [array])) {
     throw 'Composite EFX recovery record has an invalid schema; uninstall stopped before changes.'
 }
-foreach ($registration in @(
-    [pscustomobject]@{ Exists = [bool]$preflightBackup.PrevClsidRegistrationExists; Path = [string]$preflightBackup.PrevClsidRegistrationFile },
-    [pscustomobject]@{ Exists = [bool]$preflightBackup.PrevApoRegistrationExists; Path = [string]$preflightBackup.PrevApoRegistrationFile }
+foreach ($entry in @(
+    @($preflightBackup.PrevClsidRegistrationExists, $preflightBackup.PrevClsidRegistrationFile),
+    @($preflightBackup.PrevApoRegistrationExists, $preflightBackup.PrevApoRegistrationFile)
 )) {
-    if ($registration.Exists) {
-        if ([string]::IsNullOrWhiteSpace($registration.Path) -or -not (Test-Path -LiteralPath $registration.Path)) {
+    if ($entry[0]) {
+        $regFile = [string]$entry[1]
+        if ([string]::IsNullOrWhiteSpace($regFile) -or -not (Test-Path -LiteralPath $regFile)) {
             throw 'A required persistent COM recovery file is missing; uninstall stopped before changes.'
         }
-        $regHeader = Get-Content -LiteralPath $registration.Path -TotalCount 1 -ErrorAction Stop
-        if ([string]$regHeader -notmatch '^Windows Registry Editor Version 5\.00$') {
+        $regHeader = Get-Content -LiteralPath $regFile -TotalCount 1 -ErrorAction Stop
+        if ($regHeader -ne 'Windows Registry Editor Version 5.00') {
             throw 'A required persistent COM recovery file is invalid; uninstall stopped before changes.'
         }
     }
