@@ -51,7 +51,8 @@ $lines.Add("Composite EFX CLSIDs: $(Read-RegValue $fxSub '{D04E05A6-594B-4fb6-A8
 $lines.Add("FX Association: $(Read-RegValue $fxSub '{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},0')")
 $lines.Add("COM DLL: $(Read-RegValue "SOFTWARE\Classes\CLSID\$clsid\InprocServer32" '')")
 $lines.Add("AudioEngine FriendlyName: $(Read-RegValue "SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" 'FriendlyName')")
-$lines.Add("Initial audiodg modules: $(@(Get-ApoModules).Count)")
+$initialModules = @(Get-ApoModules)
+$lines.Add("Initial audiodg modules: $($initialModules.Count)")
 $before = if (Test-Path -LiteralPath $logPath) { (Get-Content -LiteralPath $logPath -Tail 400) } else { @() }
 $lines.Add("Log file present before test: $(Test-Path -LiteralPath $logPath)")
 Write-Report $outPath $lines.ToArray()
@@ -72,6 +73,12 @@ if ($after.Count -gt 0) {
     foreach ($line in $before) { $beforeSet[$line] = $true }
     foreach ($line in $after) { if (-not $beforeSet.ContainsKey($line)) { $newLog += $line } }
 }
+$stoppedLine = @($newLog | Where-Object { $_ -match 'Stopped: tx=\\d+ rx=\\d+' } | Select-Object -Last 1)
+$txPackets = 0; $rxPackets = 0
+if ($stoppedLine.Count -gt 0 -and $stoppedLine[0] -match 'Stopped: tx=(\\d+) rx=(\\d+)') {
+    $txPackets = [int]$Matches[1]
+    $rxPackets = [int]$Matches[2]
+}
 $checks = [ordered]@{
     DllGetClassObject = [bool]($newLog -match 'DllGetClassObject entry')
     FactoryCreateInstance = [bool]($newLog -match 'ClassFactory::CreateInstance requested')
@@ -80,12 +87,16 @@ $checks = [ordered]@{
     LockForProcess = [bool]($newLog -match 'LockForProcess entered')
     UdpBridgeStarted = [bool]($newLog -match 'Started: rate=')
     ApoProcessSummary = [bool]($newLog -match 'APOProcess summary:')
+    SentRawPackets = ($txPackets -gt 0)
+    ReceivedReaStreamPackets = ($rxPackets -gt 0)
     DllObservedInAudiodg = ($moduleSamples.Count -gt 0)
 }
 $report = New-Object System.Collections.Generic.List[string]
 $report.Add('')
 $report.Add("Finished: $(Get-Date -Format o)")
 $report.Add("DurationSeconds: $DurationSeconds")
+$report.Add("TX packets: $txPackets")
+$report.Add("RX packets: $rxPackets")
 $report.Add('--- Runtime checkpoints ---')
 foreach ($entry in $checks.GetEnumerator()) { $report.Add(("{0}: {1}" -f $entry.Key, $entry.Value)) }
 $report.Add('--- Observed audiodg module samples ---')
