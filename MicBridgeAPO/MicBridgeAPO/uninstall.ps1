@@ -8,6 +8,13 @@ if (-not $isAdmin) {
     exit
 }
 
+# Serialize the complete preflight/restoration/COM/file-removal operation.
+$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
+Import-Module -Name $recoveryModule -Force -ErrorAction Stop
+$operationLockPath = Join-Path (Join-Path $env:ProgramData 'MicBridgeAPO') 'operation'
+$operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+try {
+
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
 $fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
@@ -365,3 +372,6 @@ if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
     Remove-Item -Recurse -Force $installDir -ErrorAction Stop
 }
 Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
+} finally {
+    if ($operationLock) { $operationLock.Dispose() }
+}
