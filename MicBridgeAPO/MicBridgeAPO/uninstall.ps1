@@ -274,6 +274,27 @@ if (Test-Path -LiteralPath $compositeBackupFile) {
     }
 }
 
+# Read-only global preflight: validate every endpoint value before restoring any state.
+$preflightCaptureRoot = $hklm.OpenSubKey($capSub, $false)
+if (-not $preflightCaptureRoot) { throw 'Cannot enumerate capture endpoints; uninstall stopped before changes.' }
+try { $preflightEndpointIds = @($preflightCaptureRoot.GetSubKeyNames()) }
+finally { $preflightCaptureRoot.Close() }
+foreach ($endpointId in $preflightEndpointIds) {
+    $key = $hklm.OpenSubKey("$capSub\$endpointId\FxProperties", $false)
+    if (-not $key) { continue }
+    try {
+        $names = @($key.GetValueNames())
+        if (($names -contains $fxCompositeValue) -and
+            ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString)) {
+            throw "Endpoint '$endpointId' has malformed Composite EFX; uninstall stopped before changes."
+        }
+        if (($names -contains $fxValue) -and
+            ($key.GetValueKind($fxValue) -ne [Microsoft.Win32.RegistryValueKind]::String)) {
+            throw "Endpoint '$endpointId' has malformed legacy EFX; uninstall stopped before changes."
+        }
+    } finally { $key.Close() }
+}
+
 if (Test-Path $backupFile) {
     $b = Get-Content $backupFile -Raw | ConvertFrom-Json
     $devSub = "$capSub\$($b.DeviceId)"
