@@ -248,6 +248,9 @@ $transactionState = [pscustomobject]@{
     ShortcutBackup = $shortcutBackup
     InstallDirExisted = (Test-Path -LiteralPath $installDir)
 }
+if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxComposite.Kind -ne 'MultiString') {
+    throw "Current composite EFX value has unexpected type '$($transactionState.FxComposite.Kind)'; refusing to overwrite it."
+}
 $transactionState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $transactionStateFile -Encoding UTF8
 
 # ---- 4) الملفات
