@@ -16,6 +16,8 @@
 ## Cantabile
 - ReaStream Receive بالمعرّف APO_MIC_RAW في أول السلسلة.
 - ReaStream Send بالمعرّف APO_MIC_FX في آخرها (Mono). وضع الشبكة: Local broadcast.
+- استخدم Local broadcast في الإرسال؛ لا تستخدم عنوان Unicast. كل من ReaStream وMicBridge يستقبلان على UDP/58710 ويحتاجان نسخة من حزمة البث نفسها.
+- الاختبار الآلي يتحقق من مشاركة المنفذ على Windows؛ يجب أيضًا التأكد من وصول الحزم إلى عدادي ReaStream وMicBridge على الجهاز الفعلي.
 
 ## الإزالة
 انقر مرتين على uninstall.bat. يعيد القيم الأصلية ومالك المفتاح وصلاحياته (SDDL).
