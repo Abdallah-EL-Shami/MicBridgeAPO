@@ -479,9 +479,10 @@ public:
     STDMETHOD(UnlockForProcess)(void) override {
         if (!m_locked) { Log("UnlockForProcess while not locked"); return S_OK; }
         StopBridge();
-        Log("APOProcess summary: calls=%llu frames=%llu silentCalls=%llu invalidCalls=%llu underruns=%u",
+        Log("APOProcess summary: calls=%llu frames=%llu silentCalls=%llu invalidCalls=%llu underruns=%u overruns=%u primings=%u",
             (unsigned long long)m_processCalls.load(), (unsigned long long)m_processFrames.load(),
-            (unsigned long long)m_silentCalls.load(), (unsigned long long)m_invalidCalls.load(), m_underruns.load());
+            (unsigned long long)m_silentCalls.load(), (unsigned long long)m_invalidCalls.load(),
+            m_blender.underruns(), m_blender.overruns(), m_blender.primings());
         m_locked=false; Log("UnlockForProcess succeeded"); return S_OK;
     }
 
@@ -529,36 +530,15 @@ public:
         m_sendRing.push(tmp, frames);
         SetEvent(m_sendEvt);
 
-        // 2) استقبال الصوت المعالج
-        uint64_t avail = m_recvRing.available();
-        if (!m_primed && avail >= m_jitter) m_primed = true;
-        if (m_primed) {
-            if (avail > m_hi) {  // انجراف الساعات: نعيد التأخير إلى الحد الطبيعي
-                m_recvRing.skip(avail - m_jitter);
-                avail = m_recvRing.available();
-            }
-            if (avail >= frames) {
-                m_recvRing.pop(tmp, frames);
-                if (ch == 1) {
-                    memcpy(outb, tmp, frames * sizeof(float));
-                } else {
-                    for (UINT32 i = 0; i < frames; ++i)
-                        for (uint32_t c = 0; c < ch; ++c) outb[i * ch + c] = tmp[i];
-                }
-                out->u32BufferFlags = BUFFER_VALID;
-                return;
-            }
-            m_primed = false;  // نقص بيانات: نرجع للاحتياط حتى يمتلئ المخزن من جديد
-            ++m_underruns;
-        }
-
-        // 3) لا يوجد صوت معالج
-        if (m_cfg.fallback) {
-            passthrough();
-        } else {
+        // Preserve the dry input in the output buffer, then crossfade to wet audio.
+        // Blender runs on the APO processing thread and performs no allocation or I/O.
+        if (silent) {
             memset(outb, 0, (size_t)frames * ch * sizeof(float));
-            out->u32BufferFlags = BUFFER_VALID;
+        } else if (inb != outb) {
+            memcpy(outb, inb, (size_t)frames * ch * sizeof(float));
         }
+        m_blender.Process(outb, frames, ch, m_recvRing, true, tmp);
+        out->u32BufferFlags = (silent && !m_blender.touchedWet()) ? BUFFER_SILENT : BUFFER_VALID;
     }
 
 private:
@@ -580,12 +560,15 @@ private:
         m_jitter = std::max<uint64_t>((uint64_t)m_rate * m_cfg.jitterMs / 1000, 2ull * m_maxFrames);
         m_hi = m_jitter + m_rate / 10;  // الحد الأعلى: الحماية + 100ms
         m_scratch.assign(std::max<size_t>(m_maxFrames, 16384), 0.f);
-        m_rs.assign(32768, 0.f);
-        m_rsPos = 0;
-        m_rsLast = 0;
+        // A 4096-byte stereo/mono payload contains at most 1024 mono frames.
+        // The largest supported rate ratio is 384 kHz / 8 kHz = 48:1.
+        m_rs.assign(65536, 0.f);
+        m_resampler.Reset();
+        m_resamplerInputRate = 0;
         m_sendRing.reset();
         m_recvRing.reset();
-        m_primed = false;
+        m_blender.Configure(m_rate, m_jitter, m_hi, m_cfg.fallback,
+                            std::max<uint32_t>(1, m_rate / 200));
         m_pktRx = 0;
         m_pktTx = 0;
         m_underruns = 0;
@@ -650,7 +633,7 @@ private:
         }
         if (m_sendEvt) { CloseHandle(m_sendEvt); m_sendEvt = nullptr; }
         if (m_wsa) { WSACleanup(); m_wsa = false; }
-        Log("Stopped: tx=%u rx=%u underruns=%u sendErrors=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_underruns.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load());
+        Log("Stopped: tx=%u rx=%u underruns=%u overruns=%u resampleCapacityHits=%u sendErrors=%u malformed=%u idMismatch=%u", m_pktTx.load(), m_pktRx.load(), m_blender.underruns(), m_blender.overruns(), m_resampleCapacityHits.load(), m_sendErrors.load(), m_badPackets.load(), m_idMismatches.load());
     }
 
     static DWORD WINAPI SendThunk(LPVOID p) { static_cast<MicBridgeAPO*>(p)->SendLoop(); return 0; }
@@ -707,12 +690,15 @@ private:
         SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (s == INVALID_SOCKET) { m_recvStartup.store(-1, std::memory_order_release); Log("recv: socket failed %d", WSAGetLastError()); return; }
         Log("recv: UDP socket created");
-        BOOL on = TRUE;
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof on);
         int rb = 1 << 20;
-        setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rb, sizeof rb);
+        if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rb, sizeof rb) != 0)
+            Log("recv: SO_RCVBUF tuning failed %d (continuing with system default)", WSAGetLastError());
         DWORD to = 100;
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof to);
+        if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof to) != 0) {
+            const int error = WSAGetLastError();
+            m_recvStartup.store(-1, std::memory_order_release);
+            Log("recv: SO_RCVTIMEO failed %d", error); closesocket(s); return;
+        }
         sockaddr_in a{};
         a.sin_family = AF_INET;
         a.sin_port = htons((u_short)m_cfg.port);
@@ -732,55 +718,47 @@ private:
         }
         Log("recv: listening on %s:%d", m_cfg.bind, m_cfg.port);
         m_recvStartup.store(1, std::memory_order_release);
-        uint8_t pkt[4096];
-        float in[1024];
+        uint8_t pkt[mb::kHeaderSize + mb::kMaxRxBytes];
+        float in[mb::kMaxRxBytes / sizeof(float)];
+        uint8_t expectedId[32];
+        mb::MakeId(m_cfg.recvId, expectedId);
         while (!m_stop) {
             int n = recvfrom(s, (char*)pkt, sizeof pkt, 0, nullptr, nullptr);
             if (n <= 0) {
                 if (WSAGetLastError() != WSAETIMEDOUT && !m_stop) Sleep(10);
                 continue;
             }
-            if (n < (int)sizeof(ReaHdr) || memcmp(pkt, "MRSR", 4) != 0) { ++m_badPackets; continue; }
-            const ReaHdr* h = reinterpret_cast<const ReaHdr*>(pkt);
-            if (strncmp(h->id, m_cfg.recvId, 32) != 0) { ++m_idMismatches; continue; }  // معرّف مختلف: نتجاهل
-            uint32_t chs = h->ch, sr = h->sr, bytes = h->bytes;
-            // The Windows capture endpoint is mono. ReaStream may return mono or
-            // stereo from Cantabile; reject wider layouts rather than guessing.
-            if ((chs != 1 && chs != 2) || sr < 8000 || sr > 384000 ||
-                bytes == 0 || (bytes % (sizeof(float) * chs)) != 0) {
+            if (n < (int)mb::kHeaderSize) { ++m_badPackets; continue; }
+            mb::Parsed parsed{};
+            const mb::Parse parse = mb::ParseAudio(pkt, (size_t)n, expectedId, parsed);
+            if (parse == mb::Parse::BadId) { ++m_idMismatches; continue; }
+            if (parse != mb::Parse::Ok || parsed.sizeFieldMismatch ||
+                (parsed.ch != 1 && parsed.ch != 2)) {
                 ++m_badPackets;
                 continue;
             }
-            if (bytes > sizeof in || sizeof(ReaHdr) + bytes != (size_t)n ||
-                h->size != (uint32_t)n || h->bytes != bytes) {
-                ++m_badPackets;
-                continue;
-            }
-
-            const uint32_t frames = bytes / sizeof(float) / chs;
+            const uint32_t chs = parsed.ch, sr = parsed.sr, frames = parsed.frames;
+            // The capture endpoint is mono; average mono/stereo ReaStream payloads.
+            // ParseAudio validates the 47-byte header, payload bounds and float alignment.
             if (frames == 0) continue;
 
             // ReaStream Float32 payload is planar: [all channel 0][all channel 1].
             // ExtractMono averages the channels into the mono bridge stream.
-            mb::ExtractMono(pkt + sizeof(ReaHdr), frames, chs, -1, in);
+            mb::ExtractMono(parsed.data, frames, chs, -1, in);
             ++m_pktRx;
 
             if (sr == m_rate) {
+                m_resampler.Reset();
+                m_resamplerInputRate = 0;
                 m_recvRing.push(in, frames);
-            } else {  // تحويل معدل بسيط (خطي) بعد تحويل القنوات إلى Mono
-                double step = (double)sr / (double)m_rate;
-                size_t outN = 0;
-                double p = m_rsPos;
-                while (p < (double)frames && outN < m_rs.size()) {
-                    int idx = (int)p;
-                    double fr = p - idx;
-                    float x0 = (idx == 0) ? m_rsLast : in[idx - 1];
-                    float x1 = in[idx];
-                    m_rs[outN++] = (float)(x0 * (1.0 - fr) + x1 * fr);
-                    p += step;
+            } else {
+                if (m_resamplerInputRate != sr) {
+                    m_resampler.Reset();
+                    m_resamplerInputRate = sr;
                 }
-                m_rsPos = p - (double)frames;
-                m_rsLast = in[frames - 1];
+                const double step = (double)sr / (double)m_rate;
+                const size_t outN = m_resampler.Process(in, frames, step, m_rs.data(), m_rs.size());
+                if (outN == m_rs.size()) ++m_resampleCapacityHits;
                 m_recvRing.push(m_rs.data(), outN);
             }
         }
@@ -796,12 +774,13 @@ private:
     std::atomic<bool> m_active{false}, m_stop{false};
     std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
     bool m_wsa = false;
-    FloatRing m_sendRing, m_recvRing;
-    bool m_primed = false;
+    mb::SpscRing m_sendRing{1u << 16}, m_recvRing{1u << 16};
+    mb::Blender m_blender;
     uint64_t m_jitter = 0, m_hi = 0;
     std::vector<float> m_scratch, m_rs;
-    double m_rsPos = 0;
-    float m_rsLast = 0;
+    mb::LinearResampler m_resampler;
+    uint32_t m_resamplerInputRate = 0;
+    std::atomic<uint32_t> m_resampleCapacityHits{0};
     HANDLE m_sendEvt = nullptr, m_thSend = nullptr, m_thRecv = nullptr;
     std::atomic<uint32_t> m_pktRx{0}, m_pktTx{0}, m_underruns{0}, m_badPackets{0}, m_idMismatches{0}, m_sendErrors{0};
     std::atomic<uint64_t> m_processCalls{0}, m_processFrames{0}, m_silentCalls{0}, m_invalidCalls{0};
