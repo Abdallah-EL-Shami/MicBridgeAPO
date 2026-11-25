@@ -162,6 +162,23 @@ static bool ReadRegDword(HKEY root, const wchar_t* subKey, const wchar_t* valueN
     DWORD bytes = sizeof(DWORD), type = 0;
     return RegGetValueW(root, subKey, valueName, RRF_RT_REG_DWORD, &type, value, &bytes) == ERROR_SUCCESS;
 }
+static bool ReadRegMultiStringContains(HKEY root, const wchar_t* subKey,
+                                      const wchar_t* valueName, const wchar_t* expected) {
+    DWORD bytes = 0, type = 0;
+    LONG rc = RegGetValueW(root, subKey, valueName, RRF_RT_REG_MULTI_SZ, &type, nullptr, &bytes);
+    if (rc != ERROR_SUCCESS && rc != ERROR_MORE_DATA) return false;
+    if (type != REG_MULTI_SZ || bytes < 2 * sizeof(wchar_t)) return false;
+
+    std::vector<wchar_t> values(bytes / sizeof(wchar_t) + 2, L'\0');
+    rc = RegGetValueW(root, subKey, valueName, RRF_RT_REG_MULTI_SZ,
+                      &type, values.data(), &bytes);
+    if (rc != ERROR_SUCCESS || type != REG_MULTI_SZ) return false;
+
+    for (const wchar_t* item = values.data(); *item; item += wcslen(item) + 1) {
+        if (_wcsicmp(item, expected) == 0) return true;
+    }
+    return false;
+}
 static void RunStartupDiagnostics() {
     wchar_t process[MAX_PATH] = L"<unknown>";
     GetModuleFileNameW(nullptr, process, MAX_PATH);
@@ -225,7 +242,12 @@ static void RunStartupDiagnostics() {
             swprintf_s(fxKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s\\FxProperties", endpoint);
             const bool effectOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
                 L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},7", effect, 128);
-            if (effectOk && _wcsicmp(effect, L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}") == 0) {
+            const bool legacyMatch = effectOk &&
+                _wcsicmp(effect, L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}") == 0;
+            const bool compositeMatch = ReadRegMultiStringContains(HKEY_LOCAL_MACHINE, fxKey,
+                L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},15",
+                L"{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}");
+            if (legacyMatch || compositeMatch) {
                 DWORD state = 0;
                 wchar_t stateKey[512];
                 swprintf_s(stateKey, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture\\%s", endpoint);
@@ -233,8 +255,9 @@ static void RunStartupDiagnostics() {
                 const bool assocOk = ReadRegString(HKEY_LOCAL_MACHINE, fxKey,
                     L"{D04E05A6-594B-4FB6-A80D-01AF5EED7D1D},0", association, 128);
                 ++matched;
-                Log("APO endpoint match #%u: id=%ls DeviceState=%lu(present=%d) Association=%ls(present=%d)",
-                    matched, endpoint, state, stateOk, assocOk ? association : L"<missing>", assocOk);
+                Log("APO endpoint match #%u: id=%ls DeviceState=%lu(present=%d) LegacyEFX=%ls(present=%d) CompositeEFXMatch=%d Association=%ls(present=%d)",
+                    matched, endpoint, state, stateOk, effectOk ? effect : L"<missing>", effectOk,
+                    compositeMatch, assocOk ? association : L"<missing>", assocOk);
             }
         }
         RegCloseKey(capture);
