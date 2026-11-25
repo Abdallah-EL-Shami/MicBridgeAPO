@@ -322,21 +322,37 @@ static const APO_REG_PROPERTIES* RegProps() {
 static bool IsFloat32(IAudioMediaType* t) {
     if (!t) return false;
     const WAVEFORMATEX* w = t->GetAudioFormat();
-    if (!w || w->wBitsPerSample != 32) return false;
-    if (w->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
+    if (!w || w->wBitsPerSample != 32 || w->nChannels == 0 || w->nChannels > 8 ||
+        w->nSamplesPerSec < mb::kMinRate || w->nSamplesPerSec > mb::kMaxRate ||
+        w->nBlockAlign != w->nChannels * sizeof(float) ||
+        w->nAvgBytesPerSec != w->nSamplesPerSec * w->nBlockAlign) return false;
+    if (w->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return w->cbSize == 0;
     if (w->wFormatTag == WAVE_FORMAT_EXTENSIBLE && w->cbSize >= 22) {
         static const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
         const WAVEFORMATEXTENSIBLE* e = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(w);
-        return IsEqualGUID(e->SubFormat, kFloat) != 0;
+        if (!IsEqualGUID(e->SubFormat, kFloat) || e->Samples.wValidBitsPerSample != 32) return false;
+        if (e->dwChannelMask) {
+            DWORD mask = e->dwChannelMask; UINT32 count = 0;
+            while (mask) { count += (mask & 1u); mask >>= 1; }
+            if (count != w->nChannels) return false;
+        }
+        return true;
     }
     return false;
+}
+static DWORD ChannelMask(IAudioMediaType* t) {
+    const WAVEFORMATEX* w = t ? t->GetAudioFormat() : nullptr;
+    if (w && w->wFormatTag == WAVE_FORMAT_EXTENSIBLE && w->cbSize >= 22)
+        return reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(w)->dwChannelMask;
+    return 0;
 }
 static bool SameLayout(IAudioMediaType* a, IAudioMediaType* b) {
     if (!a || !b) return false;
     const WAVEFORMATEX* x = a->GetAudioFormat();
     const WAVEFORMATEX* y = b->GetAudioFormat();
     return x && y && x->nSamplesPerSec == y->nSamplesPerSec && x->nChannels == y->nChannels &&
-           x->wBitsPerSample == y->wBitsPerSample;
+           x->wBitsPerSample == y->wBitsPerSample && x->nBlockAlign == y->nBlockAlign &&
+           x->nAvgBytesPerSec == y->nAvgBytesPerSec && ChannelMask(a) == ChannelMask(b);
 }
 static void LogMediaType(const char* stage, IAudioMediaType* type, HRESULT hr) {
     const WAVEFORMATEX* wf = type ? type->GetAudioFormat() : nullptr;
@@ -385,10 +401,17 @@ public:
     }
 
     // IAudioProcessingObject (كانت في الفئة الأساسية، ننفذها بأنفسنا)
-    STDMETHOD(Reset)() override { return S_OK; }
+    STDMETHOD(Reset)() override {
+        // Reset is non-real-time. Do not reset SPSC indices while worker threads may
+        // still be active; the next LockForProcess performs a full bridge reset.
+        m_blender.Reset();
+        m_resampler.Reset();
+        m_resamplerInputRate = 0;
+        return S_OK;
+    }
     STDMETHOD(GetLatency)(HNSTIME* pTime) override {
         if (!pTime) return E_POINTER;
-        *pTime = 0;
+        *pTime = m_latencyHns.load(std::memory_order_acquire);
         return S_OK;
     }
     STDMETHOD(GetRegistrationProperties)(APO_REG_PROPERTIES** ppRegProps) override {
@@ -547,6 +570,7 @@ private:
         StopBridge();
         LoadConfig(m_cfg);
         if (!m_cfg.enabled) {
+            m_latencyHns.store(0, std::memory_order_release);
             Log("Disabled in INI: pass-through");
             return;
         }
@@ -605,14 +629,17 @@ private:
             StopBridge();
             return;
         }
+        m_latencyHns.store((HNSTIME)((m_jitter * 10000000ull) / m_rate), std::memory_order_release);
         m_active = true;
-        Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples",
-            m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter);
+        Log("Started: rate=%u ch=%u maxFrames=%u send='%s' recv='%s' port=%d jitter=%llu samples latencyHns=%lld",
+            m_rate, m_ch, m_maxFrames, m_cfg.sendId, m_cfg.recvId, m_cfg.port, (unsigned long long)m_jitter,
+            (long long)m_latencyHns.load(std::memory_order_relaxed));
     }
 
     void StopBridge() {
         if (!m_thSend && !m_thRecv && !m_wsa) return;
         m_active = false;
+        m_latencyHns.store(0, std::memory_order_release);
         m_stop = true;
         if (m_sendEvt) SetEvent(m_sendEvt);
         if (m_thSend) {
@@ -772,6 +799,7 @@ private:
     Config m_cfg{};
     uint32_t m_rate = 48000, m_ch = 1, m_maxFrames = 0;
     std::atomic<bool> m_active{false}, m_stop{false};
+    std::atomic<HNSTIME> m_latencyHns{0};
     std::atomic<int> m_sendStartup{0}, m_recvStartup{0}; // 0=pending, 1=ready, -1=failed
     bool m_wsa = false;
     mb::SpscRing m_sendRing{1u << 16}, m_recvRing{1u << 16};
