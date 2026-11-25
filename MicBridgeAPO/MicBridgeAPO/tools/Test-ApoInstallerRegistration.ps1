@@ -33,6 +33,8 @@ Assert-Contains $installer 'قد تكون بعض تغييرات Registry قد ن
 Assert-NotContains $installer 'شغّل uninstall\.bat للتراجع' 'Installer does not recommend broad uninstall as automatic partial rollback'
 
 
+Assert-Contains $installer "'MicBridgeUI.bat'" 'Installer backs up and restores the UI launcher transactionally'
+Assert-Contains $installer "foreach (\$f in 'MicBridgeUI.ps1','MicBridgeUI.bat'" 'Installer copies the UI launcher into Program Files'
 Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagnostic logging'
 Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
