@@ -64,16 +64,32 @@ function New-MBRecoveryJournal {
 function Read-MBRecoveryJournal {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Recovery journal is missing: $Path" }
-    try { $j = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
-    catch { throw "Recovery journal is unreadable: $($_.Exception.Message)" }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Recovery journal is missing: $Path"
+    }
+    try {
+        $j = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Recovery journal is unreadable: $($_.Exception.Message)"
+    }
     $parsedDeviceId = [guid]::Empty
     if ($j.SchemaVersion -ne 1 -or $j.Operation -notin @('InstallRollback','Uninstall') -or
         -not [guid]::TryParse([string]$j.DeviceId,[ref]$parsedDeviceId)) {
         throw 'Recovery journal schema or identity is invalid; refusing recovery.'
     }
-    if (-not $j.Steps -or @($j.Steps | Where-Object { $_.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}
-        throw 'Recovery journal contains invalid step data; refusing recovery.'
+    if ($null -eq $j.Steps -or @($j.Steps).Count -eq 0) {
+        throw 'Recovery journal has no steps; refusing recovery.'
+    }
+    foreach ($entry in @($j.Steps)) {
+        if ($entry.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' -or
+            $entry.State -notin @('Pending','Running','Completed') -or
+            [int]$entry.Attempts -lt 0) {
+            throw 'Recovery journal contains invalid step data; refusing recovery.'
+        }
+    }
+    $ids = @($j.Steps | ForEach-Object { [string]$_.Id })
+    if (@($ids | Select-Object -Unique).Count -ne $ids.Count) {
+        throw 'Recovery journal contains duplicate step IDs; refusing recovery.'
     }
     return $j
 }
@@ -87,87 +103,42 @@ function Invoke-MBRecoveryStep {
         [Parameter(Mandatory)][scriptblock]$Verify
     )
     $j = Read-MBRecoveryJournal -Path $Path
-    $step = @($j.Steps | Where-Object { $_.Id -eq $StepId })
-    if ($step.Count -ne 1) { throw "Recovery step '$StepId' is not uniquely defined in the journal." }
-    $step = $step[0]
+    $stepMatches = @($j.Steps | Where-Object { $_.Id -eq $StepId })
+    if ($stepMatches.Count -ne 1) {
+        throw "Recovery step '$StepId' is not uniquely defined in the journal."
+    }
+    $step = $stepMatches[0]
     if ($step.State -eq 'Completed') {
-        if (-not (& $Verify)) { throw "Completed recovery step '$StepId' no longer satisfies its postcondition." }
+        if (-not (& $Verify)) {
+            throw "Completed recovery step '$StepId' no longer satisfies its postcondition."
+        }
         return
     }
-    # A Running step is deliberately replayable. Callers must supply idempotent actions.
+    # A Running step is replayable. Callers must provide idempotent actions and a reliable postcondition.
     if (& $Verify) {
-        $step.State='Completed'
-        $step.LastError=$null
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
+        $step.State = 'Completed'
+        $step.LastError = $null
+        $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
         Write-MBRecoveryJsonAtomic -Path $Path -Value $j
         return
     }
-    $step.State='Running'
-    $step.Attempts=[int]$step.Attempts + 1
-    $step.LastError=$null
-    $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
+    $step.State = 'Running'
+    $step.Attempts = [int]$step.Attempts + 1
+    $step.LastError = $null
+    $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
     Write-MBRecoveryJsonAtomic -Path $Path -Value $j
     try {
         & $Action
-        if (-not (& $Verify)) { throw "Postcondition failed for recovery step '$StepId'." }
-        $step.State='Completed'
-        $step.LastError=$null
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
+        if (-not (& $Verify)) {
+            throw "Postcondition failed for recovery step '$StepId'."
+        }
+        $step.State = 'Completed'
+        $step.LastError = $null
+        $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
         Write-MBRecoveryJsonAtomic -Path $Path -Value $j
     } catch {
-        $step.LastError=$_.Exception.Message
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
-        try { Write-MBRecoveryJsonAtomic -Path $Path -Value $j } catch { }
-        throw
-    }
-}
-
-Export-ModuleMember -Function New-MBRecoveryJournal,Read-MBRecoveryJournal,Invoke-MBRecoveryStep -or $_.State -notin @('Pending','Running','Completed') }).Count -gt 0 -or
-        @($j.Steps | Select-Object -ExpandProperty Id -Unique).Count -ne @($j.Steps).Count) {
-        throw 'Recovery journal contains invalid step data; refusing recovery.'
-    }
-    return $j
-}
-
-function Invoke-MBRecoveryStep {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$StepId,
-        [Parameter(Mandatory)][scriptblock]$Action,
-        [Parameter(Mandatory)][scriptblock]$Verify
-    )
-    $j = Read-MBRecoveryJournal -Path $Path
-    $step = @($j.Steps | Where-Object { $_.Id -eq $StepId })
-    if ($step.Count -ne 1) { throw "Recovery step '$StepId' is not uniquely defined in the journal." }
-    $step = $step[0]
-    if ($step.State -eq 'Completed') {
-        if (-not (& $Verify)) { throw "Completed recovery step '$StepId' no longer satisfies its postcondition." }
-        return
-    }
-    # A Running step is deliberately replayable. Callers must supply idempotent actions.
-    if (& $Verify) {
-        $step.State='Completed'
-        $step.LastError=$null
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
-        Write-MBRecoveryJsonAtomic -Path $Path -Value $j
-        return
-    }
-    $step.State='Running'
-    $step.Attempts=[int]$step.Attempts + 1
-    $step.LastError=$null
-    $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
-    Write-MBRecoveryJsonAtomic -Path $Path -Value $j
-    try {
-        & $Action
-        if (-not (& $Verify)) { throw "Postcondition failed for recovery step '$StepId'." }
-        $step.State='Completed'
-        $step.LastError=$null
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
-        Write-MBRecoveryJsonAtomic -Path $Path -Value $j
-    } catch {
-        $step.LastError=$_.Exception.Message
-        $j.UpdatedUtc=[DateTime]::UtcNow.ToString('o')
+        $step.LastError = $_.Exception.Message
+        $j.UpdatedUtc = [DateTime]::UtcNow.ToString('o')
         try { Write-MBRecoveryJsonAtomic -Path $Path -Value $j } catch { }
         throw
     }
