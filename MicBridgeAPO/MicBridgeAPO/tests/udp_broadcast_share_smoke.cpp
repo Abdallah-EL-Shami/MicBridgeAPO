@@ -12,7 +12,7 @@ static bool SetBoolOption(SOCKET s, int option, BOOL value) {
                       reinterpret_cast<const char*>(&value), sizeof(value)) == 0;
 }
 
-static SOCKET CreateReceiver(u_short& port) {
+static SOCKET CreateReceiver(u_short requestedPort, u_short& port) {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET) return INVALID_SOCKET;
 
@@ -33,7 +33,7 @@ static SOCKET CreateReceiver(u_short& port) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = 0;
+    addr.sin_port = htons(requestedPort);
     if (bind(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
         closesocket(s);
         return INVALID_SOCKET;
@@ -74,8 +74,8 @@ int main() {
     }
 
     u_short port = 0, secondPort = 0;
-    SOCKET first = CreateReceiver(port);
-    SOCKET second = CreateReceiver(secondPort);
+    SOCKET first = CreateReceiver(0, port);
+    SOCKET second = CreateReceiver(port, secondPort);
     SOCKET sender = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (first == INVALID_SOCKET || second == INVALID_SOCKET || sender == INVALID_SOCKET ||
         port == 0 || secondPort != port) {
