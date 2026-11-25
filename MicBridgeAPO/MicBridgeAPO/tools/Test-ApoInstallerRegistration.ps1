@@ -58,6 +58,17 @@ Assert-Contains $uninstaller 'RegistryValueKind]::MultiString' 'Uninstaller rest
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$apoRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if AudioEngine registration removal fails'
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if COM registration removal fails'
 
+$uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
+$uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
+Assert-Contains $uiSource "Join-Path \$env:ProgramData 'MicBridgeAPO'" 'UI uses the shared ProgramData directory'
+Assert-Contains $uiSource "Join-Path \$dir 'control.ini'" 'UI writes the runtime control file'
+Assert-Contains $uiSource "Join-Path \$dir 'status.txt'" 'UI reads the runtime status file'
+Assert-Contains $uiSource 'function Set-Enabled' 'UI exposes a control-file writer'
+Assert-Contains $uiSource 'Add_Click' 'UI toggle button has a click handler'
+Assert-Contains $uiSource 'ShowDialog' 'UI creates and displays a WinForms window'
+Assert-Contains $uiLauncher 'ExecutionPolicy Bypass' 'UI launcher permits the packaged PowerShell script'
+Assert-Contains $uiLauncher 'MicBridgeUI.ps1' 'UI launcher targets the adjacent UI script'
+
 $apoSource = Get-Content -LiteralPath (Join-Path $root 'src/MicBridgeAPO.cpp') -Raw
 Assert-Contains $apoSource 'm_blender\.Process\(outb, frames, ch, m_recvRing, true, tmp\)' 'APOProcess uses the tested crossfade blender'
 Assert-Contains $apoSource 'm_resampler\.Process\(in, frames, step, m_rs\.data\(\), m_rs\.size\(\)\)' 'UDP receive uses the tested stateful resampler'
@@ -67,6 +78,12 @@ Assert-Contains $apoSource 'SO_REUSEADDR' 'APO can share the fixed ReaStream bro
 Assert-Contains $apoSource 'IsLocalIPv4' 'APO accepts only packets sourced from local interfaces'
 Assert-Contains $apoSource 'ReadRegMultiStringContains' 'APO startup diagnostics inspect the composite EFX registration list'
 Assert-Contains $apoSource 'CompositeEFXMatch' 'APO startup diagnostics report composite EFX endpoint matches'
+Assert-Contains $apoSource 'control.ini' 'APO reads the UI runtime control file'
+Assert-Contains $apoSource 'GetPrivateProfileIntW\(L"Control", L"Enabled"' 'APO polls the UI Enabled switch'
+Assert-Contains $apoSource 'm_userEnabled\.load' 'APO bypasses processing when the UI disables the bridge'
+Assert-Contains $apoSource 'void WriteStatus\(\)' 'APO publishes runtime status for the UI'
+Assert-Contains $apoSource 'status\.txt' 'APO writes the UI status file'
+Assert-Contains $apoSource 'GetSystemTimeAsFileTime' 'APO status timestamp uses Windows FILETIME'
 Assert-Contains $apoSource 'Invalid bridge configuration' 'APO rejects invalid UDP ports and identical stream identifiers'
 Assert-Contains $apoSource 'm_sendRingDrops.fetch_add' 'APO counts samples dropped by the transmit ring'
 Assert-Contains $apoSource 'm_recvRingDrops.fetch_add' 'APO counts samples dropped by the receive ring'
@@ -117,7 +134,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
