@@ -282,44 +282,6 @@ static void LoadConfig(Config& c) {
     if (c.jitterMs > 500) c.jitterMs = 500;
 }
 
-// ---------------------------------------------------------------- Ring buffer (منتج واحد / مستهلك واحد)
-class FloatRing {
-public:
-    static constexpr uint64_t N = 1u << 16;  // 65536 عينة
-    FloatRing() : buf(N) {}
-    uint64_t available() const { return head.load(std::memory_order_acquire) - tail.load(std::memory_order_acquire); }
-    void push(const float* s, uint64_t n) {  // المنتج فقط
-        uint64_t h = head.load(std::memory_order_relaxed);
-        uint64_t t = tail.load(std::memory_order_acquire);
-        uint64_t freeSpace = N - (h - t);
-        if (n > freeSpace) n = freeSpace;  // الامتلاء: نتجاهل الأحدث
-        for (uint64_t i = 0; i < n; ++i) buf[(h + i) & (N - 1)] = s[i];
-        head.store(h + n, std::memory_order_release);
-    }
-    uint64_t pop(float* d, uint64_t n) {  // المستهلك فقط
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        uint64_t a = head.load(std::memory_order_acquire) - t;
-        if (n > a) n = a;
-        for (uint64_t i = 0; i < n; ++i) d[i] = buf[(t + i) & (N - 1)];
-        tail.store(t + n, std::memory_order_release);
-        return n;
-    }
-    void skip(uint64_t n) {  // المستهلك فقط
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        uint64_t a = head.load(std::memory_order_acquire) - t;
-        if (n > a) n = a;
-        tail.store(t + n, std::memory_order_release);
-    }
-    void reset() {  // فقط والخيوط متوقفة
-        head.store(0);
-        tail.store(0);
-    }
-
-private:
-    std::vector<float> buf;
-    std::atomic<uint64_t> head{0}, tail{0};
-};
-
 #pragma pack(push, 1)
 struct ReaHdr {
     char magic[4];
