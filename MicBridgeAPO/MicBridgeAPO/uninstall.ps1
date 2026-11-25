@@ -271,7 +271,7 @@ $cleanupRoot = $hklm.OpenSubKey($capSub, $false)
 if (-not $cleanupRoot) { throw 'Cannot enumerate capture endpoints; refusing COM/DLL removal.' }
 try { $cleanupIds = @($cleanupRoot.GetSubKeyNames()) } finally { $cleanupRoot.Close() }
 foreach ($endpointId in $cleanupIds) {
-    $key = $hklm.OpenSubKey("$capSub\\$endpointId\\FxProperties", $false)
+    $key = $hklm.OpenSubKey("$capSub\$endpointId\FxProperties", $false)
     if (-not $key) { continue }
     try {
         $names = @($key.GetValueNames())
