@@ -4,18 +4,15 @@ param(
     [string]$DllSource  = (Join-Path $PSScriptRoot 'MicBridgeAPO.dll')
 )
 $ErrorActionPreference = 'Stop'
-Write-InstallLog 'INFO' "Installer started. DeviceName='$DeviceName'; DllSource='$DllSource'."
 
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
-    Write-InstallLog 'INFO' 'Requesting administrator elevation.'
     Start-Process powershell -Verb RunAs -ArgumentList $a
     exit
 }
-Write-InstallLog 'INFO' 'Installer running elevated.'
-
+ 
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
@@ -36,6 +33,7 @@ function Write-InstallLog([string]$Level, [string]$Message) {
         try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Install.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
     }
 }
+Write-InstallLog 'INFO' "Installer started with administrative privileges. DeviceName='$DeviceName'; DllSource='$DllSource'."
 $audioKey   = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
