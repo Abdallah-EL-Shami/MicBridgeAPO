@@ -1,6 +1,6 @@
 ﻿# إزالة MicBridge APO وإرجاع كل ما غيّره التثبيت، بما فيه مالك المفتاح وصلاحياته.
 param()
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -115,7 +115,10 @@ if (Test-Path $backupFile) {
         if ($b.FxKeySddl -and (Test-Path $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
         Restore-Sddl $devSub $b.DevKeySddl
         Write-Host 'أُعيد مالك المفتاح وصلاحياته كما كانت.'
-    } catch { Write-Warning "تعذر إرجاع الصلاحيات الأصلية: $($_.Exception.Message)" }
+    } catch {
+        Write-Warning "تعذر إرجاع الصلاحيات الأصلية: $($_.Exception.Message)"
+        throw 'Uninstall stopped before COM/DLL removal because endpoint ACL restoration failed. Keep backup.json and retry after resolving the permission error.'
+    }
 } else { Write-Warning 'لم أجد backup.json، سأزيل التسجيل فقط.' }
 
 Remove-Item -Recurse -Force "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" -ErrorAction SilentlyContinue
