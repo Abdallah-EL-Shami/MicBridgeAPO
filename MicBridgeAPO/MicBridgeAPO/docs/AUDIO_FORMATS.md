@@ -3,31 +3,36 @@
 ## Three different formats must not be conflated
 
 1. **Hardware/device format** — the AT2040USB format shown by Windows Sound Control Panel. The user currently sees 24-bit PCM here.
-2. **Audio Engine / APO connection format** — the format negotiated between the Windows Audio Engine and this APO. The APO currently accepts IEEE Float32 only.
+2. **Audio Engine / APO connection format** — the format negotiated between the Windows Audio Engine and this APO. The APO accepts IEEE Float32 only.
 3. **ReaStream transport format** — the bridge's UDP payload is Float32. It is independent of the USB device's advertised PCM format.
 
-A 24-bit PCM device format does not, by itself, mean the APO receives 24-bit PCM buffers. In shared-mode audio, Windows can convert between standard PCM stream formats and the floating-point samples used internally by the audio engine. Microsoft's APO format-negotiation documentation says the engine initially proposes its default Float32-based format to the LFX APO. The actual format passed to this endpoint APO must nevertheless be confirmed from its own IsInputFormatSupported / IsOutputFormatSupported diagnostics and LockForProcess log.
+A 24-bit PCM device format does not, by itself, mean the APO receives 24-bit PCM buffers. In shared-mode audio, Windows can convert between standard PCM stream formats and the floating-point samples used internally by the audio engine. Microsoft's format-negotiation documentation describes the engine's proposed format for LFX; the actual format passed to this endpoint APO must still be confirmed from its own negotiation and LockForProcess diagnostics.
 
-References:
-- https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/format-negotiation
-- https://learn.microsoft.com/en-us/windows/win32/api/audioenginebaseapo/nf-audioenginebaseapo-iaudioprocessingobject-isinputformatsupported
-- https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-formats
+## Current format validation
 
-## Current implementation decision
+The APO accepts plain IEEE_FLOAT or WAVE_FORMAT_EXTENSIBLE with IEEE_FLOAT subformat, 32 valid bits, 1–8 channels, sample rates from 8 kHz to 384 kHz, consistent block alignment and average byte rate, and a channel mask whose population matches the channel count when a mask is supplied. Input and output layouts must also agree on rate, channels, bit depth, block alignment, average byte rate, and channel mask.
 
-The APO deliberately accepts IEEE Float32 (plain IEEE_FLOAT or WAVE_FORMAT_EXTENSIBLE with IEEE_FLOAT subformat). It does not reinterpret 24-bit PCM bytes as floats. This is intentional: a PCM24 buffer has a different sample representation, alignment, and valid-bit contract. Supporting it would require a real conversion path and matching output-format negotiation, not merely changing the bit-depth check.
+It does not reinterpret 24-bit PCM bytes as floats. Supporting PCM24 requires a real conversion path and matching output-format negotiation, not merely relaxing a bit-depth check.
 
-If Windows actually negotiates PCM24 at this APO's input or output, the current APO will return APOERR_FORMAT_NOT_SUPPORTED and the diagnostic log should show the format tag, sample rate, channel count, bit depth, block alignment, and extra-format size. In that case, the fix is to negotiate a supported Float32 pair (returning a valid suggested format where appropriate) or implement a tested PCM24-to-float conversion path. Do not infer the APO connection format from the Control Panel display.
+## ReaStream payload contract and limits
 
-## Channel policy
+- The current implementation parses a 47-byte header and a Float32 payload, with a receive payload ceiling of 4096 bytes.
+- It accepts mono or stereo return packets only; stereo is downmixed by averaging the two channels.
+- The implementation treats payloads as planar Float32. This remains an observed/inferred protocol assumption, not an official ReaStream specification. Validate it against the exact installed ReaStream version with captured mono and stereo packets before release.
+- Receive-side sample-rate conversion now uses the same stateful LinearResampler implementation exercised by portable tests. A sample-rate change resets its phase/history.
+- The APO output uses the tested Blender for a gradual dry/wet transition, underrun fallback, recovery, and queue-overrun control.
+- The bridge reports its configured jitter-buffer target as APO latency. Actual end-to-end network latency can vary and is not fully represented by this target.
 
-- The intended microphone input is mono.
-- The APO currently accepts 1–8 Float32 channels at the connection boundary, while the ReaStream return path is converted to mono and copied to each APO output channel.
-- ReaStream payload layout is treated as planar Float32. Stereo downmix is arithmetic mean: 0.5 × (L + R).
-- ReaStream packet compatibility (including maximum packet size and actual channel layout emitted by the installed ReaStream version) remains a separate integration test; the 47-byte header observation alone does not prove all payload behavior.
+## EFX coexistence
+
+On Windows 10 version 1803 and later, the installer registers MicBridge in PKEY_CompositeFX_EndpointEffectClsid (property ID 15, REG_MULTI_SZ) and preserves the original composite list in a separate recovery record. It restores the original legacy PKEY_FX_EndpointEffectClsid value rather than replacing it with MicBridge. The uninstaller restores the original composite list.
+
+This preserves the prior EFX CLSIDs in the registry, but it does not prove that Windows activates the complete chain or that the chosen order is appropriate for every Realtek APO. Verify actual graph activation and audio ordering on the target machine.
 
 ## Required verification before release
 
 - Capture the APO's format-negotiation and LockForProcess logs on the target Windows 10 machine.
-- Confirm that the negotiated APO input/output formats are Float32 and that input/output channel count, sample rate, block alignment, and frame counts agree.
-- If the APO receives PCM24, do not install a build that merely relaxes IsFloat32; implement and test a proper conversion path first.
+- Confirm the negotiated input/output formats and frame counts on the target Audio Engine.
+- Capture actual ReaStream packets from the installed plugin version and verify header fields, planar/interleaved layout, mono/stereo, packet size, and rate changes.
+- Verify that Windows builds the intended composite EFX chain and that Realtek processing is preserved in the expected order.
+- Test startup, sustained processing, underrun, recovery, and application close/reopen behavior.
