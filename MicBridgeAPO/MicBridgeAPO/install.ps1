@@ -529,6 +529,11 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect)) { return $false }
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation)) { return $false }
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite)) { return $false }
+                $fxKeyPath = "$capRoot\$($tx.DeviceId)\FxProperties"
+                if (-not [bool]$tx.FxKeyExisted -and (Test-Path -LiteralPath $fxKeyPath)) { return $false }
+                if ([bool]$tx.IniExisted -ne [bool](Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))) { return $false }
+                if ([bool]$tx.ControlExisted -ne [bool](Test-Path -LiteralPath $controlPath)) { return $false }
+                if (-not [bool]$tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) { return $false }
                 if ($tx.DevSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)") -ne [string]$tx.DevSddl) { return $false }
                 if ($tx.FxSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)\FxProperties") -ne [string]$tx.FxSddl) { return $false }
                 $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
