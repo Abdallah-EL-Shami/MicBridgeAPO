@@ -136,7 +136,7 @@ function Invoke-MBInstallRollbackRecovery([string]$JournalPath, [string]$Transac
     $transactionStateFile = Join-Path $TransactionDir 'state.json'
     if (-not (Test-Path -LiteralPath $transactionStateFile -PathType Leaf)) { throw "Install rollback snapshot is missing: $transactionStateFile" }
     $tx = Get-Content -LiteralPath $transactionStateFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    if ([string]$tx.DeviceId -notmatch '^\\{?[0-9a-fA-F-]{36}\\}?) { throw 'Install rollback snapshot has an invalid endpoint identity.' }
+    if ([string]$tx.DeviceId -notmatch '^\{?[0-9a-fA-F-]{36}\}?$') { throw 'Install rollback snapshot has an invalid endpoint identity.' }
     $rollbackDeviceId = [guid]$tx.DeviceId
     $rollbackStepIds = @('RestorePreviousInstallState')
     $journal = Read-MBRecoveryJournal -Path $JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds
@@ -152,7 +152,7 @@ function Invoke-MBInstallRollbackRecovery([string]$JournalPath, [string]$Transac
     $dllBackupPath = [string]$tx.DllBackupPath
     $dllBackupHash = [string]$tx.DllBackupHash
     if ($dllReplacementStarted -and [bool]$tx.DllExisted) {
-        if ([string]::IsNullOrWhiteSpace($dllBackupPath) -or $dllBackupHash -notmatch '^[A-Fa-f0-9]{64}
+        if ([string]::IsNullOrWhiteSpace($dllBackupPath) -or $dllBackupHash -notmatch '^[A-Fa-f0-9]{64}$') {
             throw 'The interrupted transaction does not contain a verifiable previous-DLL backup reference.'
         }
         $expectedBackupRoot = [IO.Path]::GetFullPath((Join-Path $dataDir 'dll-backups') + [IO.Path]::DirectorySeparatorChar)
