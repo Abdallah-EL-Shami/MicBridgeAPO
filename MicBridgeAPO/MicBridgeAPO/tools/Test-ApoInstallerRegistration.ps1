@@ -233,7 +233,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1','tools/MicBridge.LegacyInstallAudit.psm1','tools/Test-MBLegacyInstallationAudit.ps1','tools/MicBridge.ComRegistrationRollback.psm1','tools/MicBridge.ComRegistrationExecutor.psm1','tools/Test-MBComRegistrationRollback.ps1','tools/MicBridge.RollbackExecutor.psm1','tools/Test-MBRollbackExecutor.ps1','tools/MicBridge.InstallFileRollback.psm1','tools/MicBridge.InstallFileExecutor.psm1','tools/Test-MBInstallFileRollback.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1','tools/MicBridge.LegacyInstallAudit.psm1','tools/Test-MBLegacyInstallationAudit.ps1','tools/MicBridge.ComRegistrationRollback.psm1','tools/MicBridge.ComRegistrationExecutor.psm1','tools/Test-MBComRegistrationRollback.ps1','tools/MicBridge.RollbackExecutor.psm1','tools/Test-MBRollbackExecutor.ps1','tools/MicBridge.InstallFileRollback.psm1','tools/MicBridge.InstallFileExecutor.psm1','tools/Test-MBInstallFileRollback.ps1','tools/MicBridge.InstallMetadataRollback.psm1','tools/MicBridge.MetadataExecutor.psm1','tools/Test-MBInstallMetadataRollback.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -299,3 +299,8 @@ if ($uninstallAuditPosition -lt 0 -or $uninstallJournalPosition -lt 0 -or $unins
 Assert-Contains $installer 'InstalledSha256' 'Installer records the exact package support-file hashes for safe rollback ownership checks'
 Assert-Contains $workflow 'MicBridge.InstallFileRollback.psm1' 'Build package stages the support-file rollback action module'
 Assert-Contains $workflow 'MicBridge.InstallFileExecutor.psm1' 'Build package stages the durable support-file recovery executor'
+
+Assert-Contains $installer 'IniOriginalSha256' 'Installer records original config-file hashes before changing ProgramData'
+Assert-Contains $installer 'ShortcutNewSha256' 'Installer persists the shortcut ownership hash before publishing the shortcut'
+Assert-Contains $workflow 'MicBridge.InstallMetadataRollback.psm1' 'Build package stages metadata rollback actions'
+Assert-Contains $workflow 'MicBridge.MetadataExecutor.psm1' 'Build package stages durable metadata recovery executor'
