@@ -79,6 +79,26 @@ Status: design only; not an implementation or release-readiness claim.
    and saved configuration/ACL state. A mismatch leaves the journal pending
    and the installer fail-closed.
 
+
+## Partial implementation added after this design
+
+- `tools/MicBridge.RollbackExecutor.psm1` now exposes
+  `Invoke-MBInstallDllRecovery`. It acquires the install/uninstall operation
+  lock, validates the existing transaction snapshot and legacy journal, binds
+  a separate `dll-recovery.json` journal to the original transaction ID, then
+  runs the existing hash-checked DLL restore action and verifier.
+- `tools/Test-MBRollbackExecutor.ps1` creates a temporary transaction fixture
+  and checks DLL restoration, journal identity, idempotent re-entry, and that
+  the original grouped `RestorePreviousInstallState` step remains pending.
+- Windows CI runs this test.
+- This is deliberately a **DLL-only component executor**, not full transaction
+  recovery. It does not restore endpoint values/ACL, COM, support files,
+  configuration, shortcut, or directory ACLs; it does not mark the main
+  transaction complete; it is not called automatically at installer startup;
+  and it is not included in the install package. The fail-closed startup guard
+  remains mandatory. Do not use this component as a reason to install or
+  manually alter a live transaction until its Windows CI test is green.
+
 ## Test requirements
 
 - Unit tests for malformed/missing state, wrong endpoint GUID, path traversal,
