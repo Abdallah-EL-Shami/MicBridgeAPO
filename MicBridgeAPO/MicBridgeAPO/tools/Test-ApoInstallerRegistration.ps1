@@ -38,6 +38,22 @@ Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagno
 Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
 Assert-Contains $installer 'Previous DLL restored' 'Installer attempts DLL restoration after failure'
+Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
+Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
+Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
+Assert-Contains $installer 'DLL rollback backup path is missing or outside the protected backup directory' 'Rollback rejects DLL backups outside its dedicated directory'
+Assert-Contains $installer 'Restored DLL hash does not match the durable pre-install backup hash' 'Rollback verifies the restored DLL bytes against the durable snapshot'
+Assert-Contains $installer '\$backupHash\s*=\s*\(Get-FileHash\s+-LiteralPath\s+\$backupPath' 'Installer records SHA-256 for each existing UI and uninstaller file snapshot'
+Assert-Contains $installer 'ShortcutBackupSha256\s*=\s*\$shortcutBackupSha256' 'Installer records the original desktop shortcut hash'
+Assert-Contains $installer 'Get-FileHash\s+-LiteralPath\s+\$target\s+-Algorithm SHA256' 'Rollback verifies restored UI and uninstaller file contents'
+Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$dataDir' 'Rollback verifies restored ProgramData directory ACL'
+Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$controlPath' 'Rollback verifies restored control file ACL'
+Assert-Contains $installer 'ShortcutBackupSha256' 'Rollback verifies restored desktop shortcut contents'
+Assert-Contains $installer 'DllOriginalSha256\s*=\s*if \(Test-Path' 'Installer snapshots the original installed DLL hash before any replacement'
+Assert-Contains $installer 'if \(-not \[bool\]\$tx\.FxKeyExisted -and \(Test-Path' 'Rollback verifies that a newly-created endpoint FxProperties key was removed'
+Assert-Contains $installer '\$tx\.IniExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original INI file existence'
+Assert-Contains $installer '\$tx\.ControlExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original control file existence'
+Assert-Contains $installer '\$tx\.InstallDirExisted -and \(Test-Path' 'Rollback verifies cleanup of an install directory created by the failed attempt'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
@@ -95,8 +111,13 @@ Assert-Contains $uninstaller 'matchesBaseline' 'Uninstaller restores original co
 Assert-Contains $uninstaller 'backup.json is missing' 'Uninstaller fails closed when the recovery backup is missing'
 Assert-Contains $uninstaller 'preflightIds' 'Uninstaller validates all capture endpoint value types before registry changes'
 Assert-Contains $uninstaller 'cleanupIds' 'Uninstaller scans all capture endpoints for stale MicBridge references'
-Assert-Contains $uninstaller 'PrevDisableProtectedAudioDG' 'Uninstaller restores the Windows audio security setting only from a recorded snapshot'
-Assert-Contains $uninstaller 'leaving the current Windows audio security setting unchanged' 'Uninstaller does not guess a missing legacy audio security snapshot'
+Assert-Contains $installer 'Windows AudioDG protection setting left unchanged' 'Installer leaves Windows AudioDG protection unchanged'
+Assert-NotContains $installer 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Installer never changes DisableProtectedAudioDG'
+Assert-NotContains $installer 'PrevDisableProtectedAudioDG' 'New backups never record the legacy AudioDG value'
+Assert-NotContains $uninstaller 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never writes a legacy AudioDG value'
+Assert-NotContains $uninstaller 'Remove-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never deletes the Windows AudioDG setting'
+Assert-Contains $uninstaller 'legacy backup data is not a trustworthy snapshot' 'Uninstaller explicitly ignores the untrusted legacy AudioDG backup'
+
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
@@ -134,6 +155,14 @@ Assert-Contains $uninstaller 'if \(\$preflightBackup\.PrevApoRegistrationExists\
 Assert-Contains $uninstaller 'PrevClsidRegistrationExists' 'Uninstaller restores the pre-install COM CLSID when it existed'
 Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores the pre-install AudioEngine APO registration when it existed'
 Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
+Assert-Contains $uninstaller 'uninstall-cleanup-recovery.json' 'Uninstaller keeps file/service cleanup in a separate durable journal'
+Assert-Contains $uninstaller "@\('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory'\)" 'Uninstaller declares independent shortcut, service, and directory cleanup steps'
+Assert-Contains $uninstaller "StepId 'RemoveDesktopShortcut'" 'Uninstaller journals desktop shortcut removal'
+Assert-Contains $uninstaller "StepId 'RestartAudioService'" 'Uninstaller journals audio service restart'
+Assert-Contains $uninstaller "StepId 'RemoveInstallDirectory'" 'Uninstaller journals install directory removal'
+Assert-Contains $uninstaller 'serviceRestartMarker' 'Uninstaller persists evidence that the audio service restart completed'
+Assert-Contains $uninstaller 'Get-Service -Name Audiosrv' 'Uninstaller verifies the audio service is running after restart'
+Assert-Contains $uninstaller 'preserveInstallDirectory' 'Uninstaller preserves files when original COM registrations may reference the installed DLL'
 Assert-Contains $uninstaller 'Do not run a broad cleanup over every endpoint' 'Uninstaller avoids deleting pre-existing CLSID references on unrelated endpoints'
 Assert-Contains $uninstaller 'remainingReferences' 'Uninstaller blocks binary removal if dangling endpoint references cannot be made safe'
 Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\$transactionState\s+-Path\s+\$transactionStateFile' 'Transaction snapshot uses atomic JSON persistence'
@@ -142,6 +171,14 @@ Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{'
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
 Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
+Assert-Contains $installer 'MicBridge.InstallRollbackValidation.psm1' 'Installer loads the rollback snapshot validator before recovery mutations'
+Assert-Contains $installer 'Test-MBInstallRollbackSnapshot' 'Installer validates the durable transaction snapshot before rollback'
+Assert-Contains $installer 'no rollback mutations were attempted' 'Installer fails closed when rollback snapshot validation fails'
+Assert-Contains $installer 'ClsidRegBackup' 'Transaction snapshot records the previous CLSID export path'
+Assert-Contains $installer 'ClsidRegSha256' 'Transaction snapshot records the previous CLSID export hash'
+Assert-Contains $installer 'ApoRegBackup' 'Transaction snapshot records the previous AudioEngine export path'
+Assert-Contains $installer 'ApoRegSha256' 'Transaction snapshot records the previous AudioEngine export hash'
+Assert-Contains $installer 'Test-MBRegistryExportSnapshot' 'Rollback verifies restored COM registry contents against the saved export hashes'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
@@ -168,7 +205,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -193,3 +230,7 @@ if ($completionIndex -lt 0 -or $uninstaller.Substring($completionIndex + $comple
 Write-Host 'PASS: No executable content follows the uninstall completion message'
 
 Write-Host 'All installer registration static checks passed.'
+
+Assert-Contains $installer 'TransactionId = \[string\]\$rollbackJournal\.TransactionId' 'Installer binds the durable snapshot to its rollback journal transaction identity'
+Assert-Contains $installer 'snapshotTransactionId\.ToString\(''D''\) -ne \[string\]\$candidateState\.TransactionId' 'Installer rejects interrupted journals paired with a different transaction snapshot'
+Assert-Contains $installer 'Rollback journal and snapshot belong to different transactions' 'Installer checks journal/snapshot transaction identity before rollback mutations'

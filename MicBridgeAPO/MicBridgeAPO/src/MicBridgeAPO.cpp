@@ -210,7 +210,7 @@ static void RunStartupDiagnostics() {
 
     DWORD protectedDg = 0;
     const bool protectedOk = ReadRegDword(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Audio",
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Audio",
         L"DisableProtectedAudioDG", &protectedDg);
     Log("DisableProtectedAudioDG: present=%d value=%lu", protectedOk, protectedDg);
 
