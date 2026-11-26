@@ -501,6 +501,7 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -Exp
 
 $serviceRestartMarker = "$cleanupJournal.service-restarted"
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    Remove-Item -LiteralPath $serviceRestartMarker -Force -ErrorAction SilentlyContinue
     Restart-Service -Name Audiosrv -Force -ErrorAction Stop
     Start-Sleep -Seconds 2
     [IO.File]::WriteAllText($serviceRestartMarker,[DateTime]::UtcNow.ToString('o'),(New-Object Text.UTF8Encoding($false)))
