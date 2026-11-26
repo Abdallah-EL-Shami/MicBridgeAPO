@@ -35,6 +35,9 @@ jobs:
       - name: Test read-only legacy cleanup preflight revalidation (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupPreflight.ps1
+      - name: Test signed legacy cleanup approval evidence (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyApprovalSignature.ps1
       - name: Test installer legacy audit gates (static, no system mutation)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerLegacyGate.ps1
