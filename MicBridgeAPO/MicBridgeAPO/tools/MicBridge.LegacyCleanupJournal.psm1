@@ -76,7 +76,10 @@ function New-MBLegacyCleanupJournal {
             Classification=$identityFields.Classification; ProposedAction=$identityFields.ProposedAction; Sha256=$identityFields.Sha256
             Status='Planned'; Reviewer=$null; DecisionUtc=$null }
     }
+    if ([string]::IsNullOrWhiteSpace([string]$Plan.InstallDirectory)) { throw 'Plan must carry its audited install directory.' }
     $payload = [pscustomobject][ordered]@{ SchemaVersion=1; Purpose='ReviewOnly'; CreatedUtc=[DateTime]::UtcNow.ToString('o')
+        InstallDirectory=[IO.Path]::GetFullPath([string]$Plan.InstallDirectory)
+        CanProceedToCleanupReview=($Plan.CanProceedToCleanupReview -eq $true)
         CleanupExecutionAllowed=$false; InstallAllowed=$false; Entries=@($entries) }
     Write-MBLegacyCleanupJournalPayload -Payload $payload -Path $Path
     Get-MBLegacyCleanupJournal -Path $Path
@@ -93,20 +96,39 @@ function Set-MBLegacyCleanupReviewDecision {
     $entry = $matches[0]
     if ($entry.Status -ne 'Planned') { throw 'Only Planned entries can receive a review decision.' }
     if ($Approve) {
+        if ($payload.CanProceedToCleanupReview -ne $true) { throw 'Unresolved audit blockers prevent review approval.' }
         if ($entry.ProposedAction -ne 'CandidateForReviewedRemoval' -or $entry.Kind -ne 'File' -or
             $entry.Classification -ne 'MicBridgeBinaryCandidate' -or
             [IO.Path]::GetFileName([string]$entry.Path) -ine 'MicBridgeAPO.dll' -or
-            [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+            [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}
+    $entry.Status = if ($Approve) { 'ReviewApproved' } else { 'Blocked' }
+    $entry.Reviewer = $Reviewer.Trim()
+    $entry.DecisionUtc = [DateTime]::UtcNow.ToString('o')
+    Write-MBLegacyCleanupJournalPayload -Payload $payload -Path $Path
+    Get-MBLegacyCleanupJournal -Path $Path
+}
+
+Export-ModuleMember -Function New-MBLegacyCleanupJournal,Get-MBLegacyCleanupJournal,Set-MBLegacyCleanupReviewDecision
+) {
             throw 'Approval is restricted to a hash-verified product DLL candidate; registrations and unknown files remain blocked.'
         }
+        $rootPath = [IO.Path]::GetFullPath([string]$payload.InstallDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
         $candidatePath = [IO.Path]::GetFullPath([string]$entry.Path)
+        $rootPrefix = $rootPath + [IO.Path]::DirectorySeparatorChar
+        if (-not $candidatePath.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate is outside the audited MicBridge install directory.' }
         if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw 'Candidate file is missing; review cannot proceed.' }
         $candidate = Get-Item -LiteralPath $candidatePath -Force -ErrorAction Stop
         if (($candidate.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Candidate file is a reparse point; review is blocked.' }
-        $actualHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256 -ErrorAction Stop).Hash
-        if (-not $actualHash.Equals([string]$entry.Sha256,[StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Candidate content changed since audit; review is blocked.'
+        $walk = Split-Path -Parent $candidatePath
+        while ($walk -and $walk.StartsWith($rootPath,[StringComparison]::OrdinalIgnoreCase)) {
+            $directory = Get-Item -LiteralPath $walk -Force -ErrorAction Stop
+            if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Candidate path contains a reparse-point directory; review is blocked.' }
+            if ($walk.Equals($rootPath,[StringComparison]::OrdinalIgnoreCase)) { break }
+            $walk = Split-Path -Parent $walk
         }
+        if (-not $walk -or -not $walk.Equals($rootPath,[StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate path could not be safely resolved beneath the audited install directory.' }
+        $actualHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not $actualHash.Equals([string]$entry.Sha256,[StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate content changed since audit; review is blocked.' }
     }
     $entry.Status = if ($Approve) { 'ReviewApproved' } else { 'Blocked' }
     $entry.Reviewer = $Reviewer.Trim()
