@@ -283,6 +283,14 @@ function Test-MBInstallRollbackSnapshot {
                 continue
             }
             Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+            $expectedRegistryRoot = if ($com.Name -eq 'CLSID') {
+                'HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+            } else {
+                'HKEY_LOCAL_MACHINE\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+            }
+            if (-not (Test-MBRegistryExportBounds -SnapshotPath $com.Path -ExpectedRegistryRoot $expectedRegistryRoot)) {
+                [void]$errors.Add("$($com.Name) COM export has an invalid header, missing fixed root, or keys outside the MicBridge registration.")
+            }
             if (Test-Path -LiteralPath $com.Path -PathType Leaf) {
                 $item = Get-Item -LiteralPath $com.Path -Force
                 if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
