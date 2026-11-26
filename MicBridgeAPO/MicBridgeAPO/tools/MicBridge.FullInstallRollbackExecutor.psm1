@@ -175,7 +175,7 @@ function Invoke-MBInstallFullRollback {
 
         $completed=Read-MBRecoveryJournal -Path $journalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds $stepIds
         if(@($completed.Steps | Where-Object State -ne 'Completed').Count -gt 0) { throw 'Full rollback journal did not reach Completed for every main step.' }
-        return [pscustomobject]@{Success=$true;TransactionId=[string]$completed.TransactionId;JournalPath=$journalPath;CompletedSteps=@($completed.Steps.StepId)}
+        return [pscustomobject]@{Success=$true;TransactionId=[string]$completed.TransactionId;JournalPath=$journalPath;CompletedSteps=@($completed.Steps.Id)}
     } finally {
         if($lock) { $lock.Dispose() }
     }
