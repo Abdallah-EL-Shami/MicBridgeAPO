@@ -235,6 +235,19 @@ release did not already leave incorrect changes behind.
   PowerShell process after the Registry side effect and proves a new process
   completes the Running journal without repeating the import. These tests passed
   in Windows CI run 924.
+- Added `MicBridge.InstallFileRollback.psm1` and
+  `MicBridge.InstallFileExecutor.psm1`. They restore the four fixed installer
+  support files using transaction-owned backups and both original/package SHA-256
+  values; they refuse reparse paths and unexpected third-party edits. A separate
+  component journal makes restoration idempotent and keeps the grouped main
+  transaction step pending.
+- The installer now records the exact package hash for each support file before
+  publishing the update. Tests cover restoration, idempotence, removal of files
+  absent before installation, backup tampering, preservation of externally
+  modified files, and fresh-process executor re-entry. Windows CI run 948 passed
+  these tests and the existing COM/DLL/endpoint/ACL suites.
+- The support-file executor is not yet called by startup recovery or the
+  installer failure handler.
 - The COM executor is still not called by `install.ps1` or startup recovery and
   is not staged into the installer package. The main grouped
   `RestorePreviousInstallState` step is therefore not yet fully replayable
