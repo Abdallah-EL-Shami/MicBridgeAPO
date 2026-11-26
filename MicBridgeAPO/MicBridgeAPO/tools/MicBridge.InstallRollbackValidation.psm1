@@ -80,7 +80,7 @@ function Test-MBInstallRollbackSnapshot {
     )
     $errors = New-Object 'System.Collections.Generic.List[string]'
     $required = @(
-        'DeviceId','FxEffect','FxAssociation','FxComposite','DevSddl','FxSddl',
+        'DeviceId','TransactionId','FxEffect','FxAssociation','FxComposite','DevSddl','FxSddl',
         'FxKeyExisted','ClsidRegExisted','ApoRegExisted','DllExisted',
         'DllOriginalSha256','ClsidRegExisted','ClsidRegBackup','ClsidRegSha256','ApoRegExisted','ApoRegBackup','ApoRegSha256','IniExisted','ControlExisted','DataDirSddl',
         'ControlSddl','InstallFiles','ShortcutExisted','ShortcutBackup',
@@ -98,6 +98,10 @@ function Test-MBInstallRollbackSnapshot {
     $parsedDevice = [guid]::Empty
     if (-not [guid]::TryParse([string]$State.DeviceId,[ref]$parsedDevice) -or $parsedDevice -ne $ExpectedDeviceId) {
         [void]$errors.Add('Snapshot device identity does not match the journal device identity.')
+    }
+    $parsedTransaction = [guid]::Empty
+    if (-not [guid]::TryParse([string]$State.TransactionId,[ref]$parsedTransaction)) {
+        [void]$errors.Add('Snapshot transaction identity is missing or invalid.')
     }
     foreach ($name in @('FxKeyExisted','ClsidRegExisted','ApoRegExisted','DllExisted','IniExisted','ControlExisted','ShortcutExisted','InstallDirExisted')) {
         if ($State.$name -isnot [bool]) { [void]$errors.Add("Snapshot field '$name' must be Boolean.") }
