@@ -38,6 +38,9 @@ jobs:
       - name: Test signed legacy cleanup approval evidence (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyApprovalSignature.ps1
+      - name: Test exclusive legacy file handle lease (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyFileHandleLease.ps1
       - name: Test installer legacy audit gates (static, no system mutation)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerLegacyGate.ps1
