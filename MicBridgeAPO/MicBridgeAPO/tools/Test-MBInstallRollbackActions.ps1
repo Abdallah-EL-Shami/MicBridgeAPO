@@ -119,7 +119,67 @@ try {
     if ($rollbackModuleText -notmatch '\[IO\.File\]::Replace\(\$stagedPath,\$InstalledDllPath,\$replacementBackupPath\)') { throw 'FAIL: File.Replace must use a non-empty replacement backup path' }
     if ($rollbackModuleText -match '\[IO\.File\]::Replace\([^\r\n]*,\$null') { throw 'FAIL: File.Replace contains a null backup path' }
 
-    Write-Host 'PASS: DLL rollback restore, postcondition verification, idempotent replay, tamper rejection, new-file removal, untouched-file verification, and path confinement'
+    # Exercise a real process death after the DLL restore side effect but
+    # before Invoke-MBRecoveryStep can persist Completed. A fresh process must
+    # recognize the restored hash and must not invoke the restore action again.
+    $recoveryModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
+    Import-Module $recoveryModule -Force
+    $crashInstalled = Join-Path $installRoot 'crash-resume.dll'
+    $crashBackup = Join-Path $backupRoot 'crash-resume-original.dll'
+    [IO.File]::WriteAllBytes($crashBackup,$originalBytes)
+    [IO.File]::WriteAllBytes($crashInstalled,$newBytes)
+    $crashOriginalHash = (Get-FileHash -LiteralPath $crashBackup -Algorithm SHA256).Hash
+    $crashNewHash = (Get-FileHash -LiteralPath $crashInstalled -Algorithm SHA256).Hash
+    $crashJournal = Join-Path $root 'dll-crash-resume.json'
+    $crashDevice = [guid]::NewGuid()
+    New-MBRecoveryJournal -Path $crashJournal -Operation InstallRollback -DeviceId $crashDevice -StepIds @('RestoreDll') | Out-Null
+    $childScript = Join-Path $root 'dll-crash-child.ps1'
+    $childSource = @'
+param([string]$RecoveryModule,[string]$DllModule,[string]$Journal,[string]$Installed,[string]$Backup,[string]$BackupRoot,[string]$InstallRoot,[string]$OriginalHash,[string]$NewHash,[string]$Device)
+$ErrorActionPreference = 'Stop'
+Import-Module $RecoveryModule -Force
+Import-Module $DllModule -Force
+$argsForRestore = @{
+    InstalledDllPath=$Installed; DllExisted=$true; ReplacementStarted=$true
+    OriginalSha256=$OriginalHash; BackupPath=$Backup; BackupSha256=$OriginalHash
+    BackupRoot=$BackupRoot; NewDllSha256=$NewHash; InstallRoot=$InstallRoot
+}
+$action = {
+    Restore-MBDllSnapshot @argsForRestore | Out-Null
+    [Environment]::FailFast('Injected process death after DLL rollback side effect')
+}.GetNewClosure()
+$verify = { Test-MBDllSnapshotRestored @argsForRestore }.GetNewClosure()
+Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreDll') -Action $action -Verify $verify
+'@
+    [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $childProcess = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @(
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
+        $recoveryModule,(Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'),
+        $crashJournal,$crashInstalled,$crashBackup,$backupRoot,$installRoot,
+        $crashOriginalHash,$crashNewHash,$crashDevice.ToString('D')
+    ) -Wait -PassThru
+    if ($childProcess.ExitCode -eq 0) { throw 'FAIL: DLL rollback crash-injection child exited successfully' }
+    $interrupted = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll')
+    if ($interrupted.Steps[0].State -ne 'Running' -or
+        -not (Test-MBDllSnapshotRestored @{
+            InstalledDllPath=$crashInstalled; DllExisted=$true; ReplacementStarted=$true
+            OriginalSha256=$crashOriginalHash; BackupPath=$crashBackup; BackupSha256=$crashOriginalHash
+            BackupRoot=$backupRoot; NewDllSha256=$crashNewHash; InstallRoot=$installRoot
+        })) {
+        throw 'FAIL: process interruption did not leave a Running journal with a verified restored DLL'
+    }
+    $resumeArgs = @{
+        InstalledDllPath=$crashInstalled; DllExisted=$true; ReplacementStarted=$true
+        OriginalSha256=$crashOriginalHash; BackupPath=$crashBackup; BackupSha256=$crashOriginalHash
+        BackupRoot=$backupRoot; NewDllSha256=$crashNewHash; InstallRoot=$installRoot
+    }
+    Invoke-MBRecoveryStep -Path $crashJournal -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll') -Action { throw 'DLL restore action repeated after fresh-process recovery' } -Verify { Test-MBDllSnapshotRestored @resumeArgs }
+    $resumed = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll')
+    if ($resumed.Steps[0].State -ne 'Completed' -or $resumed.Steps[0].Attempts -ne 1) {
+        throw 'FAIL: fresh-process DLL recovery did not complete without repeating its external restore action'
+    }
+
+    Write-Host 'PASS: DLL rollback restore, postcondition verification, fresh-process crash recovery and idempotent replay, tamper rejection, new-file removal, untouched-file verification, and path confinement'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
