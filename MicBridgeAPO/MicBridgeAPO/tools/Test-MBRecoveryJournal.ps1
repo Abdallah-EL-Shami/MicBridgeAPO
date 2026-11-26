@@ -308,6 +308,52 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId $StepId -ExpectedOperation Unin
         Write-Host "PASS: hard interruption/resume after $cleanupMode external effect"
     }
 
+    # Declared prerequisites suppress dependent mutations after a prerequisite fails.
+    $dependencyPath = Join-Path $tempRoot 'dependency-plan.json'
+    $dependencySteps = @('RestoreRegistry','RestoreAcl','VerifyState')
+    New-MBRecoveryJournal -Path $dependencyPath -Operation Uninstall -DeviceId $device -StepIds $dependencySteps | Out-Null
+    $dependencyState = Join-Path $tempRoot 'dependency-state'
+    New-Item -ItemType Directory -Path $dependencyState | Out-Null
+    $dependencyActions = @{
+        RestoreRegistry = { throw 'injected registry restore failure' }
+        RestoreAcl = { [IO.File]::WriteAllText((Join-Path $dependencyState 'acl'),'changed') }
+        VerifyState = { [IO.File]::WriteAllText((Join-Path $dependencyState 'verified'),'yes') }
+    }
+    $dependencyVerifiers = @{
+        RestoreRegistry = { Test-Path (Join-Path $dependencyState 'registry') }
+        RestoreAcl = { Test-Path (Join-Path $dependencyState 'acl') }
+        VerifyState = { Test-Path (Join-Path $dependencyState 'verified') }
+    }
+    $dependencyFailed = $false
+    try {
+        Invoke-MBRecoveryPlan -Path $dependencyPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $dependencySteps -Actions $dependencyActions -Verifiers $dependencyVerifiers -Dependencies @{ RestoreAcl=@('RestoreRegistry'); VerifyState=@('RestoreAcl') }
+    } catch { if ($_.Exception.Message -like '*RestoreRegistry*') { $dependencyFailed = $true } else { throw } }
+    if (-not $dependencyFailed) { throw 'FAIL: prerequisite failure was not reported' }
+    if ((Test-Path (Join-Path $dependencyState 'acl')) -or (Test-Path (Join-Path $dependencyState 'verified'))) {
+        throw 'FAIL: dependent recovery action ran after its prerequisite failed'
+    }
+    $dependencyJournal = Read-MBRecoveryJournal -Path $dependencyPath
+    if (@($dependencyJournal.Steps | Where-Object { $_.State -eq 'Completed' }).Count -ne 0) {
+        throw 'FAIL: dependent plan incorrectly marked a step completed'
+    }
+
+    # The installer may hand its already-held operation lock to the plan.
+    # The plan must neither reacquire nor dispose a lock owned by its caller.
+    $heldPlanPath = Join-Path $tempRoot 'held-plan.json'
+    New-MBRecoveryJournal -Path $heldPlanPath -Operation Uninstall -DeviceId $device -StepIds @('HeldLockStep') | Out-Null
+    $callerLock = Enter-MBRecoveryOperationLock -Path $heldPlanPath
+    try {
+        $heldActionRan = $false
+        $heldActions = @{ HeldLockStep = { $script:heldActionRan=$true } }
+        $heldVerifiers = @{ HeldLockStep = { $script:heldActionRan } }
+        Invoke-MBRecoveryPlan -Path $heldPlanPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('HeldLockStep') -Actions $heldActions -Verifiers $heldVerifiers -OperationLock $callerLock | Out-Null
+        if (-not $heldActionRan) { throw 'FAIL: plan did not execute under caller-held operation lock' }
+        $stillExclusive = $false
+        try { Enter-MBRecoveryOperationLock -Path $heldPlanPath | Out-Null }
+        catch { if ($_.Exception.Message -like '*Another MicBridge*') { $stillExclusive = $true } else { throw } }
+        if (-not $stillExclusive) { throw 'FAIL: plan disposed an operation lock owned by its caller' }
+    } finally { $callerLock.Dispose() }
+
     Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and identity binding, exclusive locking, and fail-closed validation'
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
