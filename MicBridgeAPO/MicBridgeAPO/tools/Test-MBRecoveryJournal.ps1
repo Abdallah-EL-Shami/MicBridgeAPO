@@ -255,6 +255,59 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
         throw 'FAIL: resumed plan did not complete every step'
     }
 
+    # Crash-injection coverage for the three non-registry uninstall cleanup operations.
+    # Each child dies after its external effect but before the journal can mark Completed.
+    $cleanupChildPath = Join-Path $tempRoot 'cleanup-crash-child.ps1'
+    $cleanupChildSource = @'
+param([string]$ModulePath,[string]$JournalPath,[string]$StatePath,[string]$StepId,[string]$Mode,[string]$DeviceId)
+$ErrorActionPreference = 'Stop'
+Import-Module -Name $ModulePath -Force
+$action = {
+    switch ($Mode) {
+        'RemoveDesktopShortcut' { Remove-Item -LiteralPath $StatePath -Force -ErrorAction Stop }
+        'RestartAudioService' { [IO.File]::WriteAllText($StatePath,'restarted') }
+        'RemoveInstallDirectory' { Remove-Item -LiteralPath $StatePath -Recurse -Force -ErrorAction Stop }
+    }
+    [Environment]::FailFast("Injected uninstall cleanup interruption: $Mode")
+}
+$verify = {
+    switch ($Mode) {
+        'RemoveDesktopShortcut' { -not (Test-Path -LiteralPath $StatePath) }
+        'RestartAudioService' { (Test-Path -LiteralPath $StatePath -PathType Leaf) -and ([IO.File]::ReadAllText($StatePath) -eq 'restarted') }
+        'RemoveInstallDirectory' { -not (Test-Path -LiteralPath $StatePath) }
+    }
+}
+Invoke-MBRecoveryStep -Path $JournalPath -StepId $StepId -ExpectedOperation Uninstall -ExpectedDeviceId ([guid]$DeviceId) -ExpectedStepIds @($StepId) -Action $action -Verify $verify
+'@
+    [IO.File]::WriteAllText($cleanupChildPath,$cleanupChildSource,(New-Object Text.UTF8Encoding($false)))
+    foreach ($cleanupMode in @('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory')) {
+        $cleanupStatePath = Join-Path $tempRoot ($cleanupMode + '.state')
+        if ($cleanupMode -eq 'RemoveInstallDirectory') {
+            New-Item -ItemType Directory -Path $cleanupStatePath | Out-Null
+            [IO.File]::WriteAllText((Join-Path $cleanupStatePath 'payload.txt'),'owned')
+        } else {
+            [IO.File]::WriteAllText($cleanupStatePath,'original')
+        }
+        $cleanupJournalPath = Join-Path $tempRoot ($cleanupMode + '.json')
+        New-MBRecoveryJournal -Path $cleanupJournalPath -Operation Uninstall -DeviceId $device -StepIds @($cleanupMode) | Out-Null
+        $child = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$cleanupChildPath,$modulePath,$cleanupJournalPath,$cleanupStatePath,$cleanupMode,$cleanupMode,$device.ToString()) -Wait -PassThru
+        if ($child.ExitCode -eq 0) { throw "FAIL: $cleanupMode crash child exited successfully" }
+        $crashedJournal = Read-MBRecoveryJournal -Path $cleanupJournalPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @($cleanupMode)
+        if ($crashedJournal.Steps[0].State -ne 'Running') { throw "FAIL: $cleanupMode interruption did not persist Running state" }
+        $resumeAction = { throw "Action must not repeat after $cleanupMode effect was observed" }
+        $resumeVerify = switch ($cleanupMode) {
+            'RemoveDesktopShortcut' { { -not (Test-Path -LiteralPath $cleanupStatePath) } }
+            'RestartAudioService' { { (Test-Path -LiteralPath $cleanupStatePath -PathType Leaf) -and ([IO.File]::ReadAllText($cleanupStatePath) -eq 'restarted') } }
+            'RemoveInstallDirectory' { { -not (Test-Path -LiteralPath $cleanupStatePath) } }
+        }
+        Invoke-MBRecoveryStep -Path $cleanupJournalPath -StepId $cleanupMode -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @($cleanupMode) -Action $resumeAction -Verify $resumeVerify
+        $resumedJournal = Read-MBRecoveryJournal -Path $cleanupJournalPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @($cleanupMode)
+        if ($resumedJournal.Steps[0].State -ne 'Completed' -or $resumedJournal.Steps[0].Attempts -ne 1) {
+            throw "FAIL: $cleanupMode was not resumed without repeating its completed external effect"
+        }
+        Write-Host "PASS: hard interruption/resume after $cleanupMode external effect"
+    }
+
     Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and identity binding, exclusive locking, and fail-closed validation'
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
