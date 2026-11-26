@@ -134,7 +134,7 @@ function Open-MBLegacyExclusiveFileLease {
         [Parameter(Mandatory)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedSha256,
         [string]$ExpectedFileIdentity
     )
-    if (-not [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'Exclusive file-handle validation is supported only on Windows.'
     }
     $lease = [MicBridge.LegacyFileHandleLease.LeaseFactory]::OpenExclusiveRegularFile(
