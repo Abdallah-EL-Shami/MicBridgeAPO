@@ -54,11 +54,22 @@ try {
         DllExisted=$false
         ReplacementStarted=$true
         BackupRoot=$backupRoot
+        NewDllSha256=(Get-FileHash -LiteralPath $newInstallDll -Algorithm SHA256).Hash
         InstallRoot=$installRoot
     }
     Restore-MBDllSnapshot @removeArgs | Out-Null
     if (Test-Path -LiteralPath $newInstallDll) { throw 'FAIL: newly-created DLL remained after rollback' }
     Restore-MBDllSnapshot @removeArgs | Out-Null
+
+    # A different file appearing at the destination is not owned by this transaction.
+    [IO.File]::WriteAllBytes($newInstallDll,[byte[]](21,22,23))
+    $foreignHash = (Get-FileHash -LiteralPath $newInstallDll -Algorithm SHA256).Hash
+    $foreignRejected = $false
+    try { Restore-MBDllSnapshot @removeArgs | Out-Null } catch { $foreignRejected = $_.Exception.Message -match 'unowned file' }
+    if (-not $foreignRejected -or (Get-FileHash -LiteralPath $newInstallDll -Algorithm SHA256).Hash -ne $foreignHash) {
+        throw 'FAIL: rollback removed or changed a destination not owned by this transaction'
+    }
+    Remove-Item -LiteralPath $newInstallDll -Force
     $outsideFile = Join-Path $root 'unrelated.dll'
     [IO.File]::WriteAllBytes($outsideFile,$newBytes)
     $outsideRejected = $false
