@@ -151,6 +151,9 @@ function Restore-MBComRegistrySnapshot {
     }
 
     if($existed) {
+        # reg.exe import merges values; remove only the exact fixed, ownership-verified
+        # product key first so values introduced by the failed attempt cannot survive.
+        if(Test-Path -LiteralPath $psPath) { Remove-Item -LiteralPath $psPath -Recurse -Force -ErrorAction Stop }
         & reg.exe import $backupFull | Out-Null
         if($LASTEXITCODE -ne 0) { throw "$Target COM snapshot import failed." }
     } elseif(Test-Path -LiteralPath $psPath) {
