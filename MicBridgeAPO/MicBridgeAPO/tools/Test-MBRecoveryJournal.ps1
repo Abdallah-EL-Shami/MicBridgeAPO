@@ -54,6 +54,18 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
         throw 'FAIL: stable .previous file is not a valid snapshot of this transaction'
     }
 
+    # Corrupt the active journal and verify that the independently validated
+    # last-known-good snapshot is restored without losing transaction identity.
+    $fallbackPath = Join-Path $tempRoot 'fallback.json'
+    $fallbackJournal = New-MBRecoveryJournal -Path $fallbackPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreOne') 
+    Invoke-MBRecoveryStep -Path $fallbackPath -StepId 'RestoreOne' -Action { [IO.File]::WriteAllText((Join-Path $tempRoot 'fallback-effect'),'ok') } -Verify { Test-Path (Join-Path $tempRoot 'fallback-effect') }
+    [IO.File]::WriteAllText($fallbackPath,'{corrupted')
+    $recovered = Read-MBRecoveryJournal -Path $fallbackPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('RestoreOne')
+    if ($recovered.TransactionId -ne $fallbackJournal.TransactionId) { throw 'FAIL: fallback journal identity was not preserved' }
+    $restoredPrimary = Get-Content -LiteralPath $fallbackPath -Raw | ConvertFrom-Json
+    if ($restoredPrimary.TransactionId -ne $fallbackJournal.TransactionId) { throw 'FAIL: validated fallback was not restored to the primary journal path' }
+    if (-not (Get-ChildItem -LiteralPath $tempRoot -Filter 'fallback.json.corrupt.*' -File)) { throw 'FAIL: corrupt primary journal was not preserved for diagnosis' }
+
     # Idempotent retry after an action failed before its effect.
     $retryPath = Join-Path $tempRoot 'retry.json'
     New-MBRecoveryJournal -Path $retryPath -Operation InstallRollback -DeviceId $device -StepIds @('RestoreFiles') | Out-Null
