@@ -50,6 +50,7 @@ function Test-MBDllSnapshotRestored {
         [string]$BackupPath,
         [string]$BackupSha256,
         [string]$BackupRoot,
+        [string]$NewDllSha256,
         [Parameter(Mandatory)][string]$InstallRoot
     )
     if (-not (Test-MBPathWithinDirectory -Candidate $InstalledDllPath -Root $InstallRoot) -or
@@ -85,9 +86,60 @@ function Restore-MBDllSnapshot {
     }
     if (-not $DllExisted) {
         if (Test-Path -LiteralPath $InstalledDllPath) {
+            if ($NewDllSha256 -notmatch '^[A-Fa-f0-9]{64}
+    if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Original DLL SHA-256 is missing or malformed.' }
+    if (Test-MBDllSnapshotRestored @PSBoundParameters) { return $true }
+    if ($BackupSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
+        -not [string]::Equals($BackupSha256,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL backup hash does not match the recorded original DLL snapshot.'
+    }
+    if ([string]::IsNullOrWhiteSpace($BackupRoot) -or [string]::IsNullOrWhiteSpace($BackupPath) -or
+        -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot) -or
+        -not (Test-MBNoReparsePath -Path $BackupPath -StopAt $BackupRoot)) {
+        throw 'DLL rollback backup path is missing, traverses a reparse point, or escapes the protected backup directory.'
+    }
+    if (-not (Test-Path -LiteralPath $BackupRoot -PathType Container) -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) { throw 'DLL rollback backup is missing.' }
+    $backupItem = Get-Item -LiteralPath $BackupPath -Force -ErrorAction Stop
+    if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'DLL rollback backup must not be a reparse point.' }
+    $actualBackupHash = (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($actualBackupHash,$BackupSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL rollback backup hash mismatch; refusing to restore an unverified binary.'
+    }
+    if (-not (Test-MBNoReparsePath -Path $BackupRoot -StopAt $BackupRoot)) { throw 'DLL backup root must not be a reparse point.' }
+    # Stage beside the destination, verify completely, then replace atomically.
+    # If Windows has the installed image mapped/locked, File.Replace fails closed.
+    $stagedPath = Join-Path (Split-Path -Parent $InstalledDllPath) ('.MicBridgeAPO.rollback.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        Copy-Item -LiteralPath $BackupPath -Destination $stagedPath -ErrorAction Stop
+        $stagedHash = (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($stagedHash,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Staged rollback DLL hash does not match the durable original snapshot.'
+        }
+        if (Test-Path -LiteralPath $InstalledDllPath -PathType Leaf) {
+            [IO.File]::Replace($stagedPath,$InstalledDllPath,$null,$true)
+        } else {
+            [IO.File]::Move($stagedPath,$InstalledDllPath)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $stagedPath) { Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue }
+    }
+    if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) {
+        throw 'Restored DLL hash does not match the durable pre-transaction snapshot.'
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBDllSnapshotRestored,Restore-MBDllSnapshot
+) {
+                throw 'New DLL SHA-256 is missing or malformed; refusing to remove an unowned destination.'
+            }
             $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.PSIsContainer) {
                 throw 'Refusing to remove a reparse point or non-file at the installed DLL destination.'
+            }
+            $destinationHash = (Get-FileHash -LiteralPath $InstalledDllPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if (-not [string]::Equals($destinationHash,$NewDllSha256,[StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Installed DLL does not match this transaction new-file hash; refusing to delete an unowned file.'
             }
             Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
         }
