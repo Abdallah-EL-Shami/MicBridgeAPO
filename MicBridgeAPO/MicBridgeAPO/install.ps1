@@ -140,7 +140,7 @@ function Test-RegistryTreeSnapshot([string]$sub, [bool]$ExpectedExists, [string]
     if ($ExpectedHash.Length -ne 64 -or $ExpectedHash -notmatch '^[A-Fa-f0-9]+$') { return $false }
     $tempExport = Join-Path $env:TEMP ('MicBridge-RegistryVerify-' + [guid]::NewGuid().ToString('N') + '.reg')
     try {
-        & reg.exe export ('HKLM\\' + $sub) $tempExport /y | Out-Null
+        & reg.exe export ('HKLM\' + $sub) $tempExport /y | Out-Null
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExport -PathType Leaf)) { return $false }
         $actualHash = (Get-FileHash -LiteralPath $tempExport -Algorithm SHA256 -ErrorAction Stop).Hash
         return [string]::Equals($actualHash,$ExpectedHash,[StringComparison]::OrdinalIgnoreCase)
