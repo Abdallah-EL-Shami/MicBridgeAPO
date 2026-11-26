@@ -55,8 +55,15 @@ try {
     New-MBRecoveryJournal -Path $journal -Operation InstallRollback -DeviceId $device -StepIds @('RestoreEndpointAcl') | Out-Null
     $child = Join-Path $root 'acl-crash-child.ps1'
     $childSource = @'
-param([string]$Module,[string]$Journal,[string]$SubKey,[string]$Sddl,[string]$Device)
+param([string]$ConfigPath)
 $ErrorActionPreference = 'Stop'
+if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw 'Crash test configuration file is missing.' }
+$config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+$Module = [string]$config.Module
+$Journal = [string]$config.Journal
+$SubKey = [string]$config.SubKey
+$Sddl = [string]$config.Sddl
+$Device = [string]$config.Device
 Import-Module $Module -Force
 Import-Module (Join-Path (Split-Path -Parent $Module) 'MicBridge.RecoveryJournal.psm1') -Force
 $action = { Restore-MBRegistryAclSddl -Hive HKCU -SubKeyPath $SubKey -Sddl $Sddl; [Environment]::FailFast('Injected crash after ACL restore') }.GetNewClosure()
@@ -66,8 +73,17 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointAcl' -ExpectedOpera
     [IO.File]::WriteAllText($child,$childSource,(New-Object Text.UTF8Encoding($false)))
     $childStdout = Join-Path $root 'acl-child.stdout.txt'
     $childStderr = Join-Path $root 'acl-child.stderr.txt'
+    $configPath = Join-Path $root 'acl-crash-config.json'
+    $config = [ordered]@{
+        Module = $module
+        Journal = $journal
+        SubKey = $subKey
+        Sddl = $originalSddl
+        Device = $device.ToString('D')
+    }
+    [IO.File]::WriteAllText($configPath,($config | ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
     $process = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
-        '-NoProfile','-ExecutionPolicy','Bypass','-File',$child,$module,$journal,$subKey,$originalSddl,$device.ToString('D')
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',$child,$configPath
     ) -Wait -PassThru -RedirectStandardOutput $childStdout -RedirectStandardError $childStderr
     if ($process.ExitCode -eq 0) { throw 'Crash-injection child exited successfully.' }
     $interrupted = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointAcl')
