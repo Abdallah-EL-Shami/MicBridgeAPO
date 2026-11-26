@@ -43,7 +43,8 @@ function New-MBRecoveryJournal {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][ValidateSet('InstallRollback','Uninstall')][string]$Operation,
         [Parameter(Mandatory)][guid]$DeviceId,
-        [Parameter(Mandatory)][string[]]$StepIds
+        [Parameter(Mandatory)][string[]]$StepIds,
+        [guid]$TransactionId = [guid]::Empty
     )
     if (Test-Path -LiteralPath $Path) { throw "Recovery journal already exists: $Path" }
     if (-not $StepIds -or @($StepIds | Select-Object -Unique).Count -ne $StepIds.Count) {
@@ -57,7 +58,7 @@ function New-MBRecoveryJournal {
     $now = [DateTime]::UtcNow.ToString('o')
     $journal = [pscustomobject]@{
         SchemaVersion=1
-        TransactionId=[guid]::NewGuid().ToString('D')
+        TransactionId=$(if ($TransactionId -eq [guid]::Empty) { [guid]::NewGuid().ToString('D') } else { $TransactionId.ToString('D') })
         Operation=$Operation
         DeviceId=$DeviceId.ToString('D')
         CreatedUtc=$now
