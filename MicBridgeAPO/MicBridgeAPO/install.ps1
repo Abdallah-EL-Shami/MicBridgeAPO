@@ -13,37 +13,8 @@ if (-not $isAdmin) {
     exit
 }
 
-# Serialize the complete installer/rollback operation.
-$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
-Import-Module -Name $recoveryModule -Force -ErrorAction Stop
-$operationLockPath = Join-Path (Join-Path $env:ProgramData 'MicBridgeAPO') 'operation'
-$operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
-
- 
-$clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
-$iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
-$fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
-$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15' # PKEY_CompositeFX_EndpointEffectClsid (REG_MULTI_SZ)
-$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Association
-$ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
-$installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
-$dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
-$installLog = Join-Path $dataDir 'Install.log'
-$recoveryLog = Join-Path $dataDir 'Recovery.log'
-$upgradeLog = Join-Path $dataDir 'Upgrade.log'
-function Write-RecoveryLog([string]$Level,[string]$Message) {
-    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
-    try {
-        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
-        Add-Content -LiteralPath $recoveryLog -Value $line -Encoding UTF8 -ErrorAction Stop
-    } catch {
-        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Recovery.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
-    }
-}
-Write-Host "سجل التثبيت: $installLog"
-Write-Host "سجل الاستعادة: $recoveryLog"
-Write-Host "سجل فحص الترقية: $upgradeLog"
-
+# Establish operation-specific diagnostics before acquiring locks or running preflight.
+try {
 # Fail closed when a prior install rollback was interrupted. Until the full
 # replay handler is available, never start a new transaction over uncertain state.
 if (Test-Path -LiteralPath $dataDir -PathType Container) {
@@ -112,9 +83,13 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         Write-Host "Recovered the interrupted MicBridge installation transaction before starting a new installation."
     }
 }
+} catch {
+    Write-EarlyInstallLog 'ERROR' "Install preflight stopped before a new install transaction began. $($_.Exception.ToString())"
+    Write-RecoveryLog 'ERROR' "Pre-install recovery/rollback preflight failed; new installation did not start. $($_.Exception.ToString())"
+    throw
+}
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $backupFile = Join-Path $dataDir 'backup.json'
-$installLog = Join-Path $dataDir 'Install.log'
 $dllBackupPath = $null
 $dllBackupHash = $null
 $dllReplacementStarted = $false
