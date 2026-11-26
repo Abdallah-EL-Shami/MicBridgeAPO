@@ -168,13 +168,17 @@ namespace MicBridge.LegacyFileHandleLease {
             string fullCandidate = Path.GetFullPath(candidatePath);
             string fullRoot = Path.GetFullPath(installRoot);
             DirectoryPinSet pins = new DirectoryPinSet();
+            DirectoryPinSet rootPins = null;
+            DirectoryPinSet parentPins = null;
             SafeFileHandle file = null;
             try {
-                DirectoryPinSet rootPins = PinDirectoryChain(fullRoot);
-                DirectoryPinSet parentPins = PinDirectoryChain(Path.GetDirectoryName(fullCandidate));
+                rootPins = PinDirectoryChain(fullRoot);
+                parentPins = PinDirectoryChain(Path.GetDirectoryName(fullCandidate));
                 // Transfer both chains into one owner without releasing their handles.
                 pins.AddRange(rootPins);
                 pins.AddRange(parentPins);
+                rootPins.Dispose(); rootPins = null;
+                parentPins.Dispose(); parentPins = null;
                 string rootFinal;
                 using (SafeFileHandle root = Native.CreateFile(fullRoot, 0x80, FILE_SHARE_READ, IntPtr.Zero,
                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
@@ -213,6 +217,8 @@ namespace MicBridge.LegacyFileHandleLease {
                 } catch { lease.Dispose(); throw; }
             } finally {
                 if (file != null) file.Dispose();
+                if (rootPins != null) rootPins.Dispose();
+                if (parentPins != null) parentPins.Dispose();
                 if (pins != null) pins.Dispose();
             }
         }
