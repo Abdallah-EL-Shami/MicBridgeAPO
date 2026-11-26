@@ -149,6 +149,28 @@ function Read-MBRecoveryJournal {
             if ([string]$ExpectedStepIds[$i] -ne $ids[$i]) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
         }
     }
+    if ($usedPrevious) {
+        # The primary was absent: restore the validated fallback before returning
+        # so subsequent updates can use the normal atomic-replace path.
+        $directory = Split-Path -Parent $Path
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.restore.tmp')
+        $bytes = [IO.File]::ReadAllBytes($sourcePath)
+        $restore = $null
+        try {
+            $restore = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
+            $restore.Write($bytes,0,$bytes.Length)
+            $restore.Flush($true)
+            $restore.Dispose()
+            $restore = $null
+            [IO.File]::Move($temp,$Path)
+        } finally {
+            if ($restore) { $restore.Dispose() }
+            if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        }
+    }
     return $j
 }
 
