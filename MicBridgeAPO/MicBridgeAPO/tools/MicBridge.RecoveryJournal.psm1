@@ -14,7 +14,8 @@ function Write-MBRecoveryJsonAtomic {
     $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json)
     $stream = $null
     try {
-        $stream = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        # WriteThrough reduces exposure to OS cache loss; Flush(true) requests a durable file flush.
+        $stream = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
         $stream.Write($bytes,0,$bytes.Length)
         $stream.Flush($true)
         $stream.Dispose()
