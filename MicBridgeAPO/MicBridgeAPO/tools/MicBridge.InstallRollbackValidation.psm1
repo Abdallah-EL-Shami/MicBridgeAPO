@@ -118,6 +118,20 @@ function Test-MBInstallRollbackSnapshot {
         [Parameter(Mandatory)][guid]$ExpectedDeviceId
     )
     $errors = New-Object 'System.Collections.Generic.List[string]'
+    # Validate the transaction/data roots themselves even when this snapshot
+    # contains no existing files (and therefore no individual backup paths).
+    foreach ($rootSpec in @(
+        [pscustomobject]@{ Path=$TransactionDirectory; Label='Transaction directory' },
+        [pscustomobject]@{ Path=$DataDirectory; Label='ProgramData directory' }
+    )) {
+        if (-not (Test-Path -LiteralPath $rootSpec.Path -PathType Container) -or
+            -not (Test-MBNoReparsePath -Path $rootSpec.Path -StopAt $rootSpec.Path)) {
+            [void]$errors.Add("$($rootSpec.Label) is missing or traverses a reparse point.")
+        }
+    }
+    if ($errors.Count -gt 0) {
+        return [pscustomobject]@{ IsValid=$false; Errors=@($errors); ReplaySafe=$false }
+    }
     $required = @(
         'DeviceId','TransactionId','FxEffect','FxAssociation','FxComposite','DevSddl','FxSddl',
         'FxKeyExisted','ClsidRegExisted','ApoRegExisted','DllExisted',
