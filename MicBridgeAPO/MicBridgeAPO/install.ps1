@@ -380,6 +380,8 @@ if (Test-Path -LiteralPath $installedDll) {
 $stagedDll = Join-Path $installDir ('.MicBridgeAPO.install.' + [guid]::NewGuid().ToString('N') + '.tmp')
 try {
     Copy-Item -LiteralPath $DllSource -Destination $stagedDll -ErrorAction Stop
+    $stageStream = [IO.File]::Open($stagedDll,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
+    try { $stageStream.Flush($true) } finally { $stageStream.Dispose() }
     $stagedDllHash = (Get-FileHash -LiteralPath $stagedDll -Algorithm SHA256 -ErrorAction Stop).Hash
     if (-not [string]::Equals($stagedDllHash,$dllSourceHash,[StringComparison]::OrdinalIgnoreCase)) {
         throw 'Staged DLL hash differs from the verified package source.'
@@ -388,7 +390,7 @@ try {
     $transactionState.DllReplacementStarted = $true
     Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
     if (Test-Path -LiteralPath $installedDll -PathType Leaf) {
-        [IO.File]::Replace($stagedDll,$installedDll,$null,$true)
+        [IO.File]::Replace($stagedDll,$installedDll,$null,$false)
     } elseif (Test-Path -LiteralPath $installedDll) {
         throw 'Installed DLL destination changed to a non-file before publish.'
     } else {
