@@ -160,6 +160,36 @@ function Invoke-MBInstallRollbackRecovery([string]$JournalPath, [string]$Transac
         $actualHash = (Get-FileHash -LiteralPath $actualBackupPath -Algorithm SHA256 -ErrorAction Stop).Hash
         if (-not [string]::Equals($actualHash,$dllBackupHash,[StringComparison]::OrdinalIgnoreCase)) { throw 'The previous-DLL backup hash does not match the transaction snapshot.' }
     }
+    $transactionRoot = [IO.Path]::GetFullPath($TransactionDir.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar)
+    foreach ($registryBackup in @(
+        [pscustomobject]@{ Exists=[bool]$tx.ClsidRegExisted; Name='clsid.reg'; Hash=[string]$tx.ClsidRegBackupHash },
+        [pscustomobject]@{ Exists=[bool]$tx.ApoRegExisted; Name='audioengine-apo.reg'; Hash=[string]$tx.ApoRegBackupHash }
+    )) {
+        if ($registryBackup.Exists) {
+            $registryPath = Join-Path $TransactionDir $registryBackup.Name
+            if ($registryBackup.Hash -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $registryPath -PathType Leaf)) { throw "Registry recovery snapshot is missing or has no valid hash: $($registryBackup.Name)" }
+            $registryHash = (Get-FileHash -LiteralPath $registryPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if (-not [string]::Equals($registryHash,$registryBackup.Hash,[StringComparison]::OrdinalIgnoreCase)) { throw "Registry recovery snapshot hash mismatch: $($registryBackup.Name)" }
+        }
+    }
+    $allowedInstallFiles = @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')
+    $installFilesRoot = [IO.Path]::GetFullPath((Join-Path $TransactionDir 'install-files') + [IO.Path]::DirectorySeparatorChar)
+    foreach ($fileState in @($tx.InstallFiles)) {
+        if ($fileState.Existed) {
+            if ([string]$fileState.Name -notin $allowedInstallFiles -or [string]$fileState.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Install-file recovery snapshot metadata is invalid.' }
+            $backupFullPath = [IO.Path]::GetFullPath([string]$fileState.Backup)
+            if (-not $backupFullPath.StartsWith($installFilesRoot,[StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $backupFullPath -PathType Leaf)) { throw "Install-file recovery snapshot is missing or outside its transaction directory: $($fileState.Name)" }
+            $fileHash = (Get-FileHash -LiteralPath $backupFullPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if (-not [string]::Equals($fileHash,[string]$fileState.Sha256,[StringComparison]::OrdinalIgnoreCase)) { throw "Install-file recovery snapshot hash mismatch: $($fileState.Name)" }
+        }
+    }
+    if ($tx.ShortcutExisted) {
+        $shortcutBackupFullPath = [IO.Path]::GetFullPath([string]$tx.ShortcutBackup)
+        if (-not $shortcutBackupFullPath.StartsWith($transactionRoot,[StringComparison]::OrdinalIgnoreCase) -or [string]$tx.ShortcutBackupHash -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $shortcutBackupFullPath -PathType Leaf)) { throw 'Shortcut recovery snapshot is missing or outside its transaction directory.' }
+        $shortcutHash = (Get-FileHash -LiteralPath $shortcutBackupFullPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($shortcutHash,[string]$tx.ShortcutBackupHash,[StringComparison]::OrdinalIgnoreCase)) { throw 'Shortcut recovery snapshot hash mismatch.' }
+    }
+
     Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
 
                         if ($dllReplacementStarted -and $tx.DllExisted) {
