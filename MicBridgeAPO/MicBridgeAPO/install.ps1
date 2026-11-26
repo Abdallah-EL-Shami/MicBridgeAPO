@@ -551,6 +551,12 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
                 if ((Test-Path -LiteralPath $clsidPath) -ne [bool]$tx.ClsidRegExisted) { return $false }
                 if ((Test-Path -LiteralPath $apoPath) -ne [bool]$tx.ApoRegExisted) { return $false }
+                if ([bool]$tx.ClsidRegExisted) {
+                    if (-not (Test-MBRegistryExportSnapshot -RegistryPath "HKLM\SOFTWARE\Classes\CLSID\$clsid" -ExpectedSha256 ([string]$tx.ClsidRegSha256) -TemporaryDirectory $transactionDir)) { return $false }
+                }
+                if ([bool]$tx.ApoRegExisted) {
+                    if (-not (Test-MBRegistryExportSnapshot -RegistryPath "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" -ExpectedSha256 ([string]$tx.ApoRegSha256) -TemporaryDirectory $transactionDir)) { return $false }
+                }
                 $installedDllPath = Join-Path $installDir 'MicBridgeAPO.dll'
                 if ([bool]$tx.DllExisted) {
                     if (-not (Test-Path -LiteralPath $installedDllPath -PathType Leaf)) { return $false }
