@@ -201,7 +201,7 @@ Assert-Contains $installer 'ClsidRegBackup' 'Transaction snapshot records the pr
 Assert-Contains $installer 'ClsidRegSha256' 'Transaction snapshot records the previous CLSID export hash'
 Assert-Contains $installer 'ApoRegBackup' 'Transaction snapshot records the previous AudioEngine export path'
 Assert-Contains $installer 'ApoRegSha256' 'Transaction snapshot records the previous AudioEngine export hash'
-Assert-Contains $installer 'Test-MBRegistryExportSnapshot' 'Rollback verifies restored COM registry contents against the saved export hashes'
+Assert-Contains $fullExecutor 'Test-MBComRegistrySnapshotRestored' 'Full rollback verifies restored COM registry contents against the saved export hashes'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
