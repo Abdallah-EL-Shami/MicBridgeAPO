@@ -198,6 +198,8 @@ if (-not (Test-Path $backupFile)) {
         PrevApoRegistrationExists = $prevApoRegistrationExists
         PrevClsidRegistrationFile = $prevClsidRegistrationFile
         PrevApoRegistrationFile = $prevApoRegistrationFile
+        PrevClsidRegistrationSha256 = if ($prevClsidRegistrationExists) { (Get-FileHash -LiteralPath $prevClsidRegistrationFile -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
+        PrevApoRegistrationSha256 = if ($prevApoRegistrationExists) { (Get-FileHash -LiteralPath $prevApoRegistrationFile -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
         DeviceId = $dev.Id; PrevDisableProtectedAudioDG = $prevDis; PrevEndpointEffect = $prevFx
         PrevFxAssociation = if ($fxExists) { (Get-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue } else { $null }
         DevKeySddl = $devSddl; FxKeySddl = $fxSddl; CreatedFx = (-not $fxExists)

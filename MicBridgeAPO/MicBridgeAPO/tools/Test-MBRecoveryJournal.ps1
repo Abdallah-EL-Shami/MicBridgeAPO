@@ -56,6 +56,98 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     $retryStep = @($retryJournal.Steps | Where-Object Id -eq 'RestoreFiles')[0]
     if ($retryStep.State -ne 'Completed' -or $retryStep.Attempts -ne 2) { throw 'FAIL: retry did not complete correctly' }
 
+    # Persistent recovery artifacts are bound to their SHA-256 content.
+    $manifestFile = Join-Path $tempRoot 'com-snapshot.reg'
+    [IO.File]::WriteAllText($manifestFile,"Windows Registry Editor Version 5.00`r`n")
+    $manifestHash = (Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash
+    if ($manifestHash -notmatch '^[A-Fa-f0-9]{64}    $badPath = Join-Path $tempRoot 'bad.json'
+    [IO.File]::WriteAllText($badPath,'{"SchemaVersion":99,"Operation":"Uninstall","DeviceId":"bad","Steps":[]}')
+    try { Read-MBRecoveryJournal -Path $badPath | Out-Null; throw 'FAIL: corrupt journal accepted' }
+    catch { if ($_.Exception.Message -eq 'FAIL: corrupt journal accepted') { throw } }
+
+
+    # Caller identity and exact step-plan binding must fail closed.
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedOperation InstallRollback | Out-Null
+        throw 'FAIL: operation mismatch accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: operation mismatch accepted') { throw } }
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedDeviceId ([guid]::NewGuid()) | Out-Null
+        throw 'FAIL: endpoint mismatch accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: endpoint mismatch accepted') { throw } }
+    try {
+        Read-MBRecoveryJournal -Path $journalPath -ExpectedStepIds @('RestoreCom','RestoreEndpointAcl','RestoreEndpointValues') | Out-Null
+        throw 'FAIL: altered step plan accepted'
+    } catch { if ($_.Exception.Message -eq 'FAIL: altered step plan accepted') { throw } }
+
+    # An exclusive lock prevents two recovery processes from executing concurrently.
+    $lockPath = "$journalPath.lock"
+    $heldLock = New-Object IO.FileStream($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    $ranWhileLocked = $false
+    try {
+        try {
+            Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestoreEndpointAcl' -Action { $script:ranWhileLocked=$true } -Verify { $false }
+            throw 'FAIL: recovery proceeded while lock was held'
+        } catch { if ($_.Exception.Message -eq 'FAIL: recovery proceeded while lock was held') { throw } }
+    } finally { $heldLock.Dispose() }
+    if ($ranWhileLocked) { throw 'FAIL: action ran despite a held recovery lock' }
+
+
+    # Operation-wide lock is distinct from the per-step journal lock and must
+    # prevent a second transaction from entering while the first plan is active.
+    $operationLock = Enter-MBRecoveryOperationLock -Path $journalPath
+    try {
+        $blocked = $false
+        try { Enter-MBRecoveryOperationLock -Path $journalPath | Out-Null }
+        catch { if ($_.Exception.Message -like '*Another MicBridge*') { $blocked = $true } else { throw } }
+        if (-not $blocked) { throw 'FAIL: operation-wide lock allowed a concurrent transaction' }
+    } finally { $operationLock.Dispose() }
+
+    # A plan must continue independent restoration steps after one action fails,
+    # retain successful progress, and report the failed step for a later retry.
+    $planPath = Join-Path $tempRoot 'plan.json'
+    $planSteps = @('RestoreValues','RestoreAcl','RestoreCom')
+    New-MBRecoveryJournal -Path $planPath -Operation Uninstall -DeviceId $device -StepIds $planSteps | Out-Null
+    $planState = Join-Path $tempRoot 'plan-state'
+    New-Item -ItemType Directory -Path $planState | Out-Null
+    $actions = @{
+        RestoreValues = { [IO.File]::WriteAllText((Join-Path $planState 'values'),'ok') }
+        RestoreAcl = { throw 'injected ACL restore failure' }
+        RestoreCom = { [IO.File]::WriteAllText((Join-Path $planState 'com'),'ok') }
+    }
+    $verifiers = @{
+        RestoreValues = { Test-Path (Join-Path $planState 'values') }
+        RestoreAcl = { Test-Path (Join-Path $planState 'acl') }
+        RestoreCom = { Test-Path (Join-Path $planState 'com') }
+    }
+    $planFailed = $false
+    try {
+        Invoke-MBRecoveryPlan -Path $planPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $planSteps -Actions $actions -Verifiers $verifiers
+    } catch { if ($_.Exception.Message -like '*RestoreAcl*') { $planFailed = $true } else { throw } }
+    if (-not $planFailed) { throw 'FAIL: incomplete plan did not report its failed step' }
+    if (-not (Test-Path (Join-Path $planState 'values')) -or -not (Test-Path (Join-Path $planState 'com'))) {
+        throw 'FAIL: independent steps were not attempted after the ACL failure'
+    }
+    $partial = Read-MBRecoveryJournal -Path $planPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $planSteps
+    if ((@($partial.Steps | Where-Object { $_.State -eq 'Completed' })).Count -ne 2) {
+        throw 'FAIL: successful independent plan steps were not durably recorded'
+    }
+    $actions.RestoreAcl = { [IO.File]::WriteAllText((Join-Path $planState 'acl'),'ok') }
+    Invoke-MBRecoveryPlan -Path $planPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $planSteps -Actions $actions -Verifiers $verifiers | Out-Null
+    $finished = Read-MBRecoveryJournal -Path $planPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $planSteps
+    if (@($finished.Steps | Where-Object { $_.State -ne 'Completed' }).Count -ne 0) {
+        throw 'FAIL: resumed plan did not complete every step'
+    }
+
+    Write-Host 'PASS: durable journal creation, hard process interruption/resume, retry, and identity binding, exclusive locking, and fail-closed validation'
+} finally {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+) { throw 'FAIL: SHA-256 manifest format' }
+    [IO.File]::AppendAllText($manifestFile,';tampered')
+    $tamperedHash = (Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash
+    if ([string]::Equals($manifestHash,$tamperedHash,[StringComparison]::OrdinalIgnoreCase)) { throw 'FAIL: modified recovery artifact retained its original hash' }
+
     # Corrupt identity/schema must fail closed.
     $badPath = Join-Path $tempRoot 'bad.json'
     [IO.File]::WriteAllText($badPath,'{"SchemaVersion":99,"Operation":"Uninstall","DeviceId":"bad","Steps":[]}')
