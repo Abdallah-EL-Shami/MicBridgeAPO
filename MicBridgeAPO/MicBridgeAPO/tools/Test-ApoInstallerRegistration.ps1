@@ -122,7 +122,7 @@ Assert-Contains $installer 'function Invoke-MBInstallRollbackRecovery' 'Installe
 Assert-Contains $installer "TransactionOutcome = 'Pending'" 'Install transaction begins in a durable pending state'
 Assert-Contains $installer "TransactionOutcome = 'Committed'" 'Successful install persists a committed outcome'
 Assert-Contains $installer 'Committed installation' 'Startup skips rollback for a committed installation'
-Assert-Contains $installer 'TransactionId = \\$transactionId' 'Install snapshot is bound to its transaction folder identity'
+Assert-Contains $installer 'TransactionId = \$transactionId' 'Install snapshot is bound to its transaction folder identity'
 $commitIndex = $installer.IndexOf("`$transactionState.TransactionOutcome = 'Committed'")
 $commitPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $commitIndex)
 $cleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force', $commitPersistIndex)
