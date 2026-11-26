@@ -54,7 +54,67 @@ function Restore-MBDllSnapshot {
         if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) { throw 'New DLL removal could not be verified.' }
         return $true
     }
-    if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Original DLL SHA-256 is missing or malformed.' }
+    if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64} -or [string]::IsNullOrWhiteSpace($BackupPath) -or
+        -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot)) {
+        throw 'DLL rollback backup path is missing or escapes the protected backup directory.'
+    }
+    if ($BackupSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
+        throw 'DLL rollback backup or its SHA-256 is missing.'
+    }
+    $backupItem = Get-Item -LiteralPath $BackupPath -Force -ErrorAction Stop
+    if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'DLL rollback backup must not be a reparse point.' }
+    $actualBackupHash = (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($actualBackupHash,$BackupSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL rollback backup hash mismatch; refusing to restore an unverified binary.'
+    }
+    $destinationFull = [IO.Path]::GetFullPath($InstalledDllPath)
+    $backupFull = [IO.Path]::GetFullPath($BackupPath)
+    if ([string]::Equals($destinationFull,$backupFull,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL rollback source and destination must be different files.'
+    }
+    Copy-Item -LiteralPath $BackupPath -Destination $InstalledDllPath -Force -ErrorAction Stop
+    if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) {
+        throw 'Restored DLL hash does not match the durable pre-transaction snapshot.'
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBDllSnapshotRestored,Restore-MBDllSnapshot
+) { throw 'Original DLL SHA-256 is missing or malformed.' }
+    # A crash may occur after the DLL copy succeeds but before the journal is
+    # marked complete. If the destination already matches the snapshot, replay
+    # is complete even if cleanup or loss of the backup happened afterward.
+    if (Test-MBDllSnapshotRestored @PSBoundParameters) { return $true }
+    if ($BackupSha256 -notmatch '^[A-Fa-f0-9]{64} -or [string]::IsNullOrWhiteSpace($BackupPath) -or
+        -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot)) {
+        throw 'DLL rollback backup path is missing or escapes the protected backup directory.'
+    }
+    if ($BackupSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
+        throw 'DLL rollback backup or its SHA-256 is missing.'
+    }
+    $backupItem = Get-Item -LiteralPath $BackupPath -Force -ErrorAction Stop
+    if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'DLL rollback backup must not be a reparse point.' }
+    $actualBackupHash = (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($actualBackupHash,$BackupSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL rollback backup hash mismatch; refusing to restore an unverified binary.'
+    }
+    $destinationFull = [IO.Path]::GetFullPath($InstalledDllPath)
+    $backupFull = [IO.Path]::GetFullPath($BackupPath)
+    if ([string]::Equals($destinationFull,$backupFull,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL rollback source and destination must be different files.'
+    }
+    Copy-Item -LiteralPath $BackupPath -Destination $InstalledDllPath -Force -ErrorAction Stop
+    if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) {
+        throw 'Restored DLL hash does not match the durable pre-transaction snapshot.'
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBDllSnapshotRestored,Restore-MBDllSnapshot
+ -or
+        -not [string]::Equals($BackupSha256,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DLL backup hash does not match the recorded original DLL snapshot.'
+    }
     if ([string]::IsNullOrWhiteSpace($BackupRoot) -or [string]::IsNullOrWhiteSpace($BackupPath) -or
         -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot)) {
         throw 'DLL rollback backup path is missing or escapes the protected backup directory.'
