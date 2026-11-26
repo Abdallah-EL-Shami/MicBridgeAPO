@@ -48,7 +48,7 @@ function Test-MBRegistryExportSnapshot {
         [Parameter(Mandatory)][string]$TemporaryDirectory,
         [scriptblock]$ExportAction
     )
-    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') { return $false }
+    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
     if (-not (Test-Path -LiteralPath $TemporaryDirectory -PathType Container)) { return $false }
     if ($RegistryPath -notmatch '^(HKLM|HKCU)\\') { return $false }
 
