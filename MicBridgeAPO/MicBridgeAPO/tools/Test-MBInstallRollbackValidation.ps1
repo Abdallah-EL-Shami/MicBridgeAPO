@@ -195,8 +195,8 @@ try {
     $recoveryModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
     Import-Module $recoveryModule -Force
     $crashLeaf = 'MicBridgeRollbackCrash-' + [guid]::NewGuid().ToString('N')
-    $crashProviderPath = "Registry::HKEY_CURRENT_USER\\Software\\$crashLeaf"
-    $crashRegistryPath = "HKCU\\Software\\$crashLeaf"
+    $crashProviderPath = "Registry::HKEY_CURRENT_USER\Software\$crashLeaf"
+    $crashRegistryPath = "HKCU\Software\$crashLeaf"
     $crashSnapshot = Join-Path $tx 'crash-registry.reg'
     New-Item -Path $crashProviderPath -Force | Out-Null
     Set-ItemProperty -LiteralPath $crashProviderPath -Name 'OriginalValue' -Value 'before' -Type String
