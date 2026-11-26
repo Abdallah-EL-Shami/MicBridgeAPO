@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupJournal.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupJournal.psm1') -ErrorAction Stop
 
 function Test-MBLegacyCleanupPreflight {
     [CmdletBinding()]
