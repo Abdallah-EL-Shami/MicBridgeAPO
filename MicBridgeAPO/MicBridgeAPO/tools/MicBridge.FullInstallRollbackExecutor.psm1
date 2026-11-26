@@ -40,13 +40,17 @@ function Get-MBFullRollbackEndpointSnapshot {
 
 function Get-MBFullRollbackDllArguments {
     param([Parameter(Mandatory)][object]$State,[Parameter(Mandatory)][string]$DataDirectory,[Parameter(Mandatory)][string]$InstallDirectory)
+    $backupPath=$null
+    $backupHash=$null
+    if($State.PSObject.Properties.Name -contains 'DllBackupPath') { $backupPath=[string]$State.DllBackupPath }
+    if($State.PSObject.Properties.Name -contains 'DllBackupSha256') { $backupHash=[string]$State.DllBackupSha256 }
     return @{
         InstalledDllPath=(Join-Path $InstallDirectory 'MicBridgeAPO.dll')
         DllExisted=[bool]$State.DllExisted
         ReplacementStarted=[bool]$State.DllReplacementStarted
         OriginalSha256=[string]$State.DllOriginalSha256
-        BackupPath=[string]$State.DllBackupPath
-        BackupSha256=[string]$State.DllBackupSha256
+        BackupPath=$backupPath
+        BackupSha256=$backupHash
         BackupRoot=(Join-Path $DataDirectory 'dll-backups')
         NewDllSha256=[string]$State.DllNewSha256
         InstallRoot=$InstallDirectory
@@ -88,7 +92,7 @@ function Invoke-MBInstallFullRollback {
     $install=[IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')
     $desktop=[IO.Path]::GetFullPath($DesktopDirectory).TrimEnd('\')
     if([IO.Path]::GetFileName($tx) -notmatch '^transactions-[A-Za-z0-9-]+$') { throw 'Full rollback requires a transaction-owned transactions-* directory.' }
-    foreach($dir in @($tx,$data,$install,$desktop)) {
+    foreach($dir in @($tx,$data,$desktop)) {
         if(-not (Test-Path -LiteralPath $dir -PathType Container)) { throw "Required full rollback directory is missing: $dir" }
     }
     $lock=Enter-MBRecoveryOperationLock -Path (Join-Path $data 'operation') -TimeoutSeconds 0
@@ -99,6 +103,12 @@ function Invoke-MBInstallFullRollback {
         $preflight=Test-MBInstallRollbackTransaction -JournalPath $journalPath -StatePath $statePath -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $stepIds -RegistryHive $RegistryHive
         if(-not $preflight.IsValid -or -not $preflight.ReplaySafe) { throw "Full rollback preflight failed; no recovery actions attempted. $($preflight.Errors -join '; ')" }
         $state=$preflight.State
+        if([bool]$state.InstallDirExisted -and -not (Test-Path -LiteralPath $install -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $install | Out-Null
+        }
+        if(Test-Path -LiteralPath $install -PathType Container -and -not (Test-MBMetadataPathNoReparse $install)) {
+            throw 'Installation directory traverses a reparse point; refusing full rollback.'
+        }
         $device=[guid]$state.DeviceId
         $endpointSnapshot=Get-MBFullRollbackEndpointSnapshot -State $state -RegistryHive $RegistryHive
         $captureSub="SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\$($device.ToString('D'))"
