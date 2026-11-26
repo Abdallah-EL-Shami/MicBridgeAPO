@@ -180,7 +180,7 @@ function Restore-MBComRegistrySnapshot {
     }
     if(-not (Test-MBComRegistrySnapshotRestored -Target $Target -State $State -TransactionDirectory $TransactionDirectory -RegistryHive $RegistryHive)) {
         $actualAfterImport=Get-MBComRegistryExportHash -RegistryKey $registryKey -TemporaryDirectory $TransactionDirectory
-        $backupAfterImport=(Get-FileHash -LiteralPath $backupFull -Algorithm SHA256 -ErrorAction Stop).Hash
+        $backupAfterImport=Get-MBComCanonicalRegFileHash -Path $backupFull
         throw "$Target COM snapshot postcondition failed (live export SHA256='$actualAfterImport'; snapshot SHA256='$backupAfterImport')."
     }
     return $true
