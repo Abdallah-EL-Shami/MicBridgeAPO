@@ -43,6 +43,12 @@ Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBacku
 Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
 Assert-Contains $installer 'DLL rollback backup path is missing or outside the protected backup directory' 'Rollback rejects DLL backups outside its dedicated directory'
 Assert-Contains $installer 'Restored DLL hash does not match the durable pre-install backup hash' 'Rollback verifies the restored DLL bytes against the durable snapshot'
+Assert-Contains $installer '\$backupHash\s*=\s*\(Get-FileHash\s+-LiteralPath\s+\$backupPath' 'Installer records SHA-256 for each existing UI and uninstaller file snapshot'
+Assert-Contains $installer 'ShortcutBackupSha256\s*=\s*\$shortcutBackupSha256' 'Installer records the original desktop shortcut hash'
+Assert-Contains $installer 'Get-FileHash\s+-LiteralPath\s+\$target\s+-Algorithm SHA256' 'Rollback verifies restored UI and uninstaller file contents'
+Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$dataDir' 'Rollback verifies restored ProgramData directory ACL'
+Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$controlPath' 'Rollback verifies restored control file ACL'
+Assert-Contains $installer 'ShortcutBackupSha256' 'Rollback verifies restored desktop shortcut contents'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
