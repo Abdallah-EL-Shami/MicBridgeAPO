@@ -6,6 +6,9 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Force -ErrorAction Stop
+# Deferred recovery ScriptBlocks execute outside this module's session state;
+# publish the action/verifier commands to the caller session as well.
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Force -Global -ErrorAction Stop
 
 function Invoke-MBInstallDllRecovery {
     [CmdletBinding()]
