@@ -123,6 +123,14 @@ namespace MicBridge.LegacyFileHandleLease {
             return b.ToString();
         }
 
+        private static string NormalizeFinalPath(string path) {
+            if (path.StartsWith(@"\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
+                return @"\\\\" + path.Substring(8);
+            if (path.StartsWith(@"\\?\\", StringComparison.OrdinalIgnoreCase))
+                return path.Substring(4);
+            return path;
+        }
+
         private static DirectoryPinSet PinDirectoryChain(string directoryPath) {
             string full = Path.GetFullPath(directoryPath);
             string volumeRoot = Path.GetPathRoot(full);
@@ -158,6 +166,10 @@ namespace MicBridge.LegacyFileHandleLease {
                 if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
                     (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
                     throw new InvalidOperationException("A directory component is not a regular directory or is a reparse point: " + path);
+                string actualPath = NormalizeFinalPath(FinalPath(h));
+                string expectedPath = Path.GetFullPath(path).TrimEnd('\\');
+                if (!String.Equals(actualPath.TrimEnd('\\'), expectedPath, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Directory component resolved to a different path during pinning: " + path);
                 pins.Add(h);
                 h = null;
             } finally { if (h != null) h.Dispose(); }
