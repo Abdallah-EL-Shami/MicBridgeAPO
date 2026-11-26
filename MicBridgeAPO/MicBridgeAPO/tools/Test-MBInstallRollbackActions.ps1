@@ -160,18 +160,14 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreDll' -ExpectedOperation Ins
     ) -Wait -PassThru
     if ($childProcess.ExitCode -eq 0) { throw 'FAIL: DLL rollback crash-injection child exited successfully' }
     $interrupted = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll')
-    if ($interrupted.Steps[0].State -ne 'Running' -or
-        -not (Test-MBDllSnapshotRestored @{
-            InstalledDllPath=$crashInstalled; DllExisted=$true; ReplacementStarted=$true
-            OriginalSha256=$crashOriginalHash; BackupPath=$crashBackup; BackupSha256=$crashOriginalHash
-            BackupRoot=$backupRoot; NewDllSha256=$crashNewHash; InstallRoot=$installRoot
-        })) {
-        throw 'FAIL: process interruption did not leave a Running journal with a verified restored DLL'
-    }
     $resumeArgs = @{
         InstalledDllPath=$crashInstalled; DllExisted=$true; ReplacementStarted=$true
         OriginalSha256=$crashOriginalHash; BackupPath=$crashBackup; BackupSha256=$crashOriginalHash
         BackupRoot=$backupRoot; NewDllSha256=$crashNewHash; InstallRoot=$installRoot
+    }
+    if ($interrupted.Steps[0].State -ne 'Running' -or
+        -not (Test-MBDllSnapshotRestored @resumeArgs)) {
+        throw 'FAIL: process interruption did not leave a Running journal with a verified restored DLL'
     }
     Invoke-MBRecoveryStep -Path $crashJournal -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll') -Action { throw 'DLL restore action repeated after fresh-process recovery' } -Verify { Test-MBDllSnapshotRestored @resumeArgs }
     $resumed = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreDll')
