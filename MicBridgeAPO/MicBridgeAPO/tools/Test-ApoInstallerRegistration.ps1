@@ -192,7 +192,7 @@ Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\$transactionState\s+-Pa
 Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{' 'Composite EFX snapshot uses atomic JSON persistence'
 
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
-Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
+Assert-Contains $fullExecutor 'Restore-MBComRegistrySnapshot -Target CLSID' 'Full rollback executor restores the prior CLSID registration after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
 Assert-Contains $installer 'MicBridge.InstallRollbackValidation.psm1' 'Installer loads the rollback snapshot validator before recovery mutations'
 Assert-Contains $installer 'Test-MBInstallRollbackTransaction' 'Installer validates the durable transaction journal and snapshot before replay'
