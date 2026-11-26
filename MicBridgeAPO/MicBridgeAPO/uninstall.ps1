@@ -8,19 +8,9 @@ if (-not $isAdmin) {
     exit
 }
 
-# Serialize the complete preflight/restoration/COM/file-removal operation.
-$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
-Import-Module -Name $recoveryModule -Force -ErrorAction Stop
-$operationLockPath = Join-Path (Join-Path $env:ProgramData 'MicBridgeAPO') 'operation'
-$operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
-try {
-
-$clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
-$fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
-$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
-$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
+# Prepare the dedicated uninstall log before module loading and lock acquisition.
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
-$dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
+$dataDir = Join-Path $env:ProgramData 'MicBridgeAPO'
 $uninstallLog = Join-Path $dataDir 'Uninstall.log'
 function Write-UninstallLog([string]$Level,[string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
@@ -32,7 +22,23 @@ function Write-UninstallLog([string]$Level,[string]$Message) {
     }
 }
 Write-Host "سجل الإزالة: $uninstallLog"
-Write-UninstallLog 'INFO' 'Uninstaller started with administrative privileges.'
+Write-UninstallLog 'INFO' 'Uninstaller process started.'
+$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
+try {
+    Import-Module -Name $recoveryModule -Force -ErrorAction Stop
+    $operationLockPath = Join-Path $dataDir 'operation'
+    $operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+} catch {
+    Write-UninstallLog 'ERROR' "Uninstaller could not initialize its recovery lock/module; no removal or restoration started. $($_.Exception.ToString())"
+    throw
+}
+try {
+try {
+
+$clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+$fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
+$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
+$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
 $backupFile = Join-Path $dataDir 'backup.json'
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
