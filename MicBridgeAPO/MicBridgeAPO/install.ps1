@@ -376,7 +376,7 @@ Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 # Durable rollback journal is created from the verified pre-install snapshot.
 $rollbackJournalPath = Join-Path $transactionDir 'rollback-recovery.json'
 $rollbackDeviceId = [guid]$dev.Id
-$rollbackStepIds = @('RestoreEndpointFxValues','RestorePreviousInstallState')
+$rollbackStepIds = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
 $rollbackJournal = New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds
 $transactionState.TransactionId = [string]$rollbackJournal.TransactionId
 Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
@@ -574,6 +574,20 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 Import-Module -Name $endpointRollbackModule -Force -ErrorAction Stop
                 Test-MBEndpointRegistrySnapshot -Snapshot (Get-MBTransactionFxRegistrySnapshot $tx)
             }
+            Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestoreEndpointAcl' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
+                $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) {
+                    Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" ([string]$tx.FxSddl)
+                }
+                if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" ([string]$tx.DevSddl) }
+                Write-InstallLog 'INFO' 'Endpoint FxProperties and capture endpoint ACL snapshots restored.'
+            } -Verify {
+                $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                if ($tx.DevSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)") -ne [string]$tx.DevSddl) { return $false }
+                $fxAcl = Get-Sddl "$capSub\$($tx.DeviceId)\FxProperties"
+                if ($tx.FxSddl) { return ([string]$fxAcl -eq [string]$tx.FxSddl) }
+                return ($null -eq $fxAcl)
+            }
             Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
                         # Reload the durable snapshot: process-local variables are not recovery evidence.
                         $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
@@ -595,8 +609,6 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                             Write-InstallLog 'INFO' 'DLL rollback action completed and verified against transaction hashes.'
                         }
                         # Roll back this installation attempt to the immediately preceding installed state.
-                            if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) { Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" $tx.FxSddl }
-                            if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" $tx.DevSddl }
                             $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
                             $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
                             Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
