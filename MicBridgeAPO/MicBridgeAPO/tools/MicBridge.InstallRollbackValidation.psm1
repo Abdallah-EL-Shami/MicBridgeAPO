@@ -10,6 +10,34 @@ function Test-MBPathWithinDirectory {
     } catch { return $false }
 }
 
+function Test-MBNoReparsePath {
+    param([string]$Path,[string]$StopAt)
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($StopAt)) { return $false }
+    try {
+        $pathFull = [IO.Path]::GetFullPath($Path)
+        $stopFull = [IO.Path]::GetFullPath($StopAt).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        if (-not [string]::Equals($pathFull,$stopFull,[StringComparison]::OrdinalIgnoreCase) -and
+            -not $pathFull.StartsWith($stopFull + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+
+        # Check the file, every parent, and the transaction root. Checking only
+        # the leaf misses junctions/symlinks that redirect a backup outside its root.
+        $current = $pathFull
+        $volumeRoot = [IO.Path]::GetPathRoot($pathFull)
+        while ($true) {
+            if (Test-Path -LiteralPath $current) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            }
+            if ([string]::Equals($current.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar),
+                $volumeRoot.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { break }
+            $parent = [IO.Directory]::GetParent($current)
+            if (-not $parent) { return $false }
+            $current = $parent.FullName
+        }
+        return $true
+    } catch { return $false }
+}
+
 function Test-MBFileSnapshot {
     param(
         [string]$Path,
@@ -26,8 +54,18 @@ function Test-MBFileSnapshot {
         [void]$Errors.Add("$Label SHA-256 is missing or malformed.")
         return
     }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container) -or
+        -not (Test-MBNoReparsePath -Path $Path -StopAt $Root)) {
+        [void]$Errors.Add("$Label snapshot path traverses a reparse point or an unsafe transaction directory.")
+        return
+    }
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         [void]$Errors.Add("$Label snapshot file is missing.")
+        return
+    }
+    $snapshotItem = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (($snapshotItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        [void]$Errors.Add("$Label snapshot file must not be a reparse point.")
         return
     }
     try {
