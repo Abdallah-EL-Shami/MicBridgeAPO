@@ -31,7 +31,8 @@ function Invoke-MBInstallDllRecovery {
             throw "Required rollback module is missing: $modulePath"
         }
     }
-    Import-Module $journalModule -Force -ErrorAction Stop
+    # Keep journal commands visible to the caller after this executor returns.
+    Import-Module $journalModule -Force -Global -ErrorAction Stop
 
     # Use the same exclusive operation lock as install.ps1 across the full
     # preflight, DLL side effect, verification, and journal completion.
