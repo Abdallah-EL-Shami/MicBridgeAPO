@@ -33,11 +33,60 @@ try {
         $beforeServer = [string]$beforeClsid.OpenSubKey('InprocServer32').GetValue('')
     } finally { if ($beforeClsid) {$beforeClsid.Dispose()}; if ($beforeApo) {$beforeApo.Dispose()} }
 
-    $result = Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot ('HKCU:\' + $registrySub)
+    $expectedDevice=[guid]::NewGuid()
+    $registryRoot='HKCU:\'+$registrySub
+    $missingBaseline=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+    if($missingBaseline.Outcome -ne 'ReviewRequired' -or $missingBaseline.BaselineAssessment -ne 'Missing') {
+        throw 'FAIL: an existing MicBridge installation without a permanent backup was not marked for review'
+    }
+
+    $comBackupDir=Join-Path $data 'com-registration-backup'
+    New-Item -ItemType Directory -Force -Path $comBackupDir | Out-Null
+    $clsidExport=Join-Path $comBackupDir 'previous-clsid.reg'
+    $apoExport=Join-Path $comBackupDir 'previous-audioengine-apo.reg'
+    $regExe=Join-Path $env:SystemRoot 'System32\reg.exe'
+    & $regExe export "HKCU\$registrySub\SOFTWARE\Classes\CLSID\$clsid" $clsidExport /y | Out-Null
+    if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export isolated permanent CLSID backup' }
+    & $regExe export "HKCU\$registrySub\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" $apoExport /y | Out-Null
+    if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export isolated permanent APO backup' }
+    $permanentBackup=[pscustomobject]@{
+        ComRegistrationSnapshotVersion=1
+        DeviceId=$expectedDevice.ToString('D')
+        PrevClsidRegistrationExists=$true
+        PrevApoRegistrationExists=$true
+        PrevClsidRegistrationFile=$clsidExport
+        PrevApoRegistrationFile=$apoExport
+        PrevClsidRegistrationSha256=(Get-FileHash $clsidExport -Algorithm SHA256).Hash
+        PrevApoRegistrationSha256=(Get-FileHash $apoExport -Algorithm SHA256).Hash
+    }
+    $backupJson=Join-Path $data 'backup.json'
+    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    $backupHashBefore=(Get-FileHash $backupJson -Algorithm SHA256).Hash
+    $result = Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+    if($result.BaselineAssessment -ne 'StructurallyValidCandidate' -or $result.Outcome -ne 'InventoryOnly') {
+        throw 'FAIL: structurally valid permanent backup candidate was not distinguished from an unproven Windows baseline'
+    }
+    if((Get-FileHash $backupJson -Algorithm SHA256).Hash -ne $backupHashBefore) { throw 'FAIL: read-only audit modified permanent backup.json' }
     if (-not $result.IsReadOnly -or $result.CleanupAllowed -or $result.OriginalWindowsBaselineProven) {
         throw 'FAIL: audit claimed mutation permission or a proven original Windows baseline'
     }
     if ($result.Outcome -eq 'NoLegacyResidueDetected') { throw 'FAIL: product-owned test candidates were not inventoried' }
+
+    # Tampering or endpoint mismatch invalidates the baseline candidate without changing the live state.
+    [IO.File]::AppendAllText($clsidExport,'tampered')
+    $tampered=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+    if($tampered.Outcome -ne 'ReviewRequired' -or $tampered.BaselineAssessment -ne 'InvalidOrInsufficient') { throw 'FAIL: tampered permanent COM backup was accepted' }
+    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject ($permanentBackup | Select-Object * ) -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    $permanentBackup.DeviceId=[guid]::NewGuid().ToString('D')
+    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    $mismatch=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+    if($mismatch.Outcome -ne 'ReviewRequired') { throw 'FAIL: mismatched endpoint backup was accepted' }
+    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    $permanentBackup.DeviceId=$expectedDevice.ToString('D')
+    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText((Join-Path $install 'foreign.dll'),'unknown legacy file')
+    $unknownFile=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+    if($unknownFile.Outcome -ne 'ReviewRequired') { throw 'FAIL: unknown file in install directory was not preserved for review' }
     if (-not ($result.Findings | Where-Object { $_.Classification -eq 'MicBridgeCandidate' })) {
         throw 'FAIL: MicBridge-owned CLSID candidate was not identified'
     }
