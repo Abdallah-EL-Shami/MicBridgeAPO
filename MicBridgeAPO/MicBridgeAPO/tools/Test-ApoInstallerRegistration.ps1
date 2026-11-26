@@ -268,3 +268,15 @@ if ($rollbackCatchStart -lt 0 -or $rollbackFinallyStart -le $rollbackCatchStart)
 $rollbackCatch = $installer.Substring($rollbackCatchStart, $rollbackFinallyStart - $rollbackCatchStart)
 if ($rollbackCatch -match '(?im)Restart-Service\s+-Name\s+Audiosrv') { throw 'FAIL: Install rollback must not restart or otherwise control Audiosrv' }
 Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
+
+Assert-Contains $installer 'MicBridge.LegacyInstallAudit.psm1' 'Installer loads the read-only legacy installation audit'
+Assert-Contains $installer 'Test-MBLegacyInstallationState' 'Installer audits legacy backup, COM registration, and file provenance before upgrade'
+Assert-Contains $installer "Outcome -eq 'ReviewRequired'" 'Installer blocks ambiguous legacy state without automatic cleanup'
+Assert-Contains $installer 'Original Windows baseline is not claimed as proven' 'Installer does not overstate the trustworthiness of a historical backup'
+$auditPosition = $installer.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
+$checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison]::Ordinal)
+if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $checkpointPosition) {
+    throw 'FAIL: legacy audit must run before the restore point and all installation mutations'
+}
+$workflow = Get-Content -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '.github/workflows/build.yml') -Raw
+Assert-Contains $workflow 'MicBridge.LegacyInstallAudit.psm1' 'Build package stages the legacy audit module beside the installer'
