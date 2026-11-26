@@ -102,10 +102,40 @@ namespace MicBridge.LegacyFileHandleLease {
             return b.ToString();
         }
 
+        private static void ValidateDirectoryChain(string directoryPath) {
+            string full = Path.GetFullPath(directoryPath);
+            string volumeRoot = Path.GetPathRoot(full);
+            if (String.IsNullOrEmpty(volumeRoot))
+                throw new InvalidOperationException("Directory path has no supported volume root.");
+            string current = volumeRoot;
+            ValidateDirectoryComponent(current);
+            string remainder = full.Substring(volumeRoot.Length);
+            string[] parts = remainder.Split(new char[] { '\\\\' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string part in parts) {
+                current = Path.Combine(current, part);
+                ValidateDirectoryComponent(current);
+            }
+        }
+
+        private static void ValidateDirectoryComponent(string path) {
+            using (SafeFileHandle h = Native.CreateFile(path, 0x80, FILE_SHARE_ALL, IntPtr.Zero,
+                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
+                if (h.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                BY_HANDLE_FILE_INFORMATION info;
+                if (!Native.GetFileInformationByHandle(h, out info))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                    (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                    throw new InvalidOperationException("A directory component is not a regular directory or is a reparse point: " + path);
+            }
+        }
+
         public static Lease OpenExclusiveRegularFile(string candidatePath, string installRoot,
                                                      string expectedSha256, string expectedIdentity) {
             string fullCandidate = Path.GetFullPath(candidatePath);
             string fullRoot = Path.GetFullPath(installRoot);
+            ValidateDirectoryChain(fullRoot);
+            ValidateDirectoryChain(Path.GetDirectoryName(fullCandidate));
             using (SafeFileHandle root = Native.CreateFile(fullRoot, 0x80, FILE_SHARE_ALL, IntPtr.Zero,
                     OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
                 if (root.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
