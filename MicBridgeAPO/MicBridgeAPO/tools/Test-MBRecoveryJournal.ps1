@@ -66,6 +66,18 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     if ($restoredPrimary.TransactionId -ne $fallbackJournal.TransactionId) { throw 'FAIL: validated fallback was not restored to the primary journal path' }
     if (-not (Get-ChildItem -LiteralPath $tempRoot -Filter 'fallback.json.corrupt.*' -File)) { throw 'FAIL: corrupt primary journal was not preserved for diagnosis' }
 
+    # Missing primary with a valid .previous must recreate the primary durably.
+    $missingPath = Join-Path $tempRoot 'missing-primary.json'
+    $missingJournal = New-MBRecoveryJournal -Path $missingPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreMissing')
+    Invoke-MBRecoveryStep -Path $missingPath -StepId 'RestoreMissing' -Action { [IO.File]::WriteAllText((Join-Path $tempRoot 'missing-effect'),'ok') } -Verify { Test-Path (Join-Path $tempRoot 'missing-effect') }
+    if (-not (Test-Path -LiteralPath "$missingPath.previous" -PathType Leaf)) { throw 'FAIL: missing-primary scenario has no previous snapshot' }
+    Remove-Item -LiteralPath $missingPath -Force
+    $fromMissing = Read-MBRecoveryJournal -Path $missingPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('RestoreMissing')
+    if ($fromMissing.TransactionId -ne $missingJournal.TransactionId) { throw 'FAIL: missing primary fallback changed transaction identity' }
+    if (-not (Test-Path -LiteralPath $missingPath -PathType Leaf)) { throw 'FAIL: missing primary was not recreated from the previous snapshot' }
+    $recreated = Get-Content -LiteralPath $missingPath -Raw | ConvertFrom-Json
+    if ($recreated.TransactionId -ne $missingJournal.TransactionId) { throw 'FAIL: recreated primary content is invalid' }
+
     # Idempotent retry after an action failed before its effect.
     $retryPath = Join-Path $tempRoot 'retry.json'
     New-MBRecoveryJournal -Path $retryPath -Operation InstallRollback -DeviceId $device -StepIds @('RestoreFiles') | Out-Null
