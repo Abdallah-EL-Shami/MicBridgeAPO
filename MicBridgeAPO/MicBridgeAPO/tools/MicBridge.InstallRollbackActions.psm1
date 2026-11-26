@@ -127,12 +127,14 @@ function Restore-MBDllSnapshot {
     $stagedPath = Join-Path (Split-Path -Parent $InstalledDllPath) ('.MicBridgeAPO.rollback.' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         Copy-Item -LiteralPath $BackupPath -Destination $stagedPath -ErrorAction Stop
+        $stageStream = [IO.File]::Open($stagedPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
+        try { $stageStream.Flush($true) } finally { $stageStream.Dispose() }
         $stagedHash = (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash
         if (-not [string]::Equals($stagedHash,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
             throw 'Staged rollback DLL hash does not match the durable original snapshot.'
         }
         if (Test-Path -LiteralPath $InstalledDllPath -PathType Leaf) {
-            [IO.File]::Replace($stagedPath,$InstalledDllPath,$null,$true)
+            [IO.File]::Replace($stagedPath,$InstalledDllPath,$null,$false)
         } elseif (Test-Path -LiteralPath $InstalledDllPath) {
             throw 'Installed DLL destination exists but is not a regular file; refusing replacement.'
         } else {
