@@ -64,11 +64,11 @@ function Restore-MBInstallMetadataSnapshot {
     $ini=Join-Path $data 'MicBridge.ini'
     $control=Join-Path $data 'control.ini'
     foreach($spec in @(
-        [pscustomobject]@{Path=$ini;Existed=[bool]$State.IniExisted;NewHash=[string]$State.IniNewSha256;Name='MicBridge.ini'},
-        [pscustomobject]@{Path=$control;Existed=[bool]$State.ControlExisted;NewHash=[string]$State.ControlNewSha256;Name='control.ini'}
+        [pscustomobject]@{Path=$ini;Existed=[bool]$State.IniExisted;NewHash=[string]$State.IniNewSha256;OriginalHash=[string]$State.IniOriginalSha256;Name='MicBridge.ini'},
+        [pscustomobject]@{Path=$control;Existed=[bool]$State.ControlExisted;NewHash=[string]$State.ControlNewSha256;OriginalHash=[string]$State.ControlOriginalSha256;Name='control.ini'}
     )) {
         if($spec.Existed) {
-            if(-not (Test-Path -LiteralPath $spec.Path -PathType Leaf) -or (Get-MBMetadataHash $spec.Path) -ne [string]$State.$(if($spec.Name -eq 'MicBridge.ini') {'IniOriginalSha256'} else {'ControlOriginalSha256'})) { throw "$($spec.Name) changed after the transaction snapshot; refusing to overwrite it." }
+            if(-not (Test-Path -LiteralPath $spec.Path -PathType Leaf) -or (Get-MBMetadataHash $spec.Path) -ne [string]$spec.OriginalHash) { throw "$($spec.Name) changed after the transaction snapshot; refusing to overwrite it." }
             continue
         }
         if(Test-Path -LiteralPath $spec.Path) {
@@ -123,12 +123,11 @@ function Test-MBInstallMetadataRestored {
     $data=[IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
     $desktop=[IO.Path]::GetFullPath($DesktopDirectory).TrimEnd('\')
     foreach($spec in @(
-        [pscustomobject]@{Path=(Join-Path $data 'MicBridge.ini');Existed=[bool]$State.IniExisted;Hash=[string]$State.IniNewSha256},
-        [pscustomobject]@{Path=(Join-Path $data 'control.ini');Existed=[bool]$State.ControlExisted;Hash=[string]$State.ControlNewSha256}
+        [pscustomobject]@{Path=(Join-Path $data 'MicBridge.ini');Existed=[bool]$State.IniExisted;OriginalHash=[string]$State.IniOriginalSha256},
+        [pscustomobject]@{Path=(Join-Path $data 'control.ini');Existed=[bool]$State.ControlExisted;OriginalHash=[string]$State.ControlOriginalSha256}
     )) {
         if($spec.Existed) {
-            $originalHash=if($spec.Path -like '*MicBridge.ini') {[string]$State.IniOriginalSha256} else {[string]$State.ControlOriginalSha256}
-            if(-not (Test-Path -LiteralPath $spec.Path -PathType Leaf) -or (Get-MBMetadataHash $spec.Path) -ne $originalHash) { return $false }
+            if(-not (Test-Path -LiteralPath $spec.Path -PathType Leaf) -or (Get-MBMetadataHash $spec.Path) -ne [string]$spec.OriginalHash) { return $false }
         }
         elseif(Test-Path -LiteralPath $spec.Path) { return $false }
     }
