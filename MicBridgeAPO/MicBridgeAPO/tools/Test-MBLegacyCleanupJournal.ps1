@@ -67,8 +67,10 @@ try {
     $originalHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
     if ($originalHash -ne $hash) { throw 'FAIL: journal changed product file.' }
     $raw = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
-    $raw.Payload.Entries[0].Reviewer = 'tampered'
-    Set-Content -LiteralPath $journalPath -Value (ConvertTo-Json -InputObject $raw -Depth 14)
+    $tamperedPayload = [string]$raw.PayloadJson | ConvertFrom-Json
+    $tamperedPayload.Entries[0].Reviewer = 'tampered'
+    $raw.PayloadJson = ConvertTo-Json -InputObject $tamperedPayload -Compress -Depth 12
+    Set-Content -LiteralPath $journalPath -Value (ConvertTo-Json -InputObject $raw -Depth 5)
     $integrityBlocked = $false
     try { Get-MBLegacyCleanupJournal -Path $journalPath | Out-Null } catch { $integrityBlocked = $true }
     if (-not $integrityBlocked) { throw 'FAIL: tampered journal passed integrity validation.' }
