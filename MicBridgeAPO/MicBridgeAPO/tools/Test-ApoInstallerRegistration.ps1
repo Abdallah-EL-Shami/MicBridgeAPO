@@ -113,7 +113,7 @@ Assert-Contains $installer 'added in memory only' 'Legacy backup migration is no
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
 Assert-Contains $installer 'function Invoke-MBInstallRollbackRecovery' 'Installer can resume an interrupted rollback from its durable snapshot'
 Assert-Contains $installer 'ExpectedOperation InstallRollback -ExpectedDeviceId' 'Rollback replay binds the journal to the original capture endpoint'
-Assert-Contains $installer 'DllBackupPath = $null' 'Transaction snapshot defines durable previous-DLL metadata'
+Assert-Contains $installer 'DllBackupPath\s*=\s*\$null' 'Transaction snapshot defines durable previous-DLL metadata'
 Assert-Contains $installer 'The previous-DLL backup path is outside the MicBridge-owned backup directory' 'Rollback rejects DLL backup paths outside ProgramData ownership'
 Assert-Contains $installer 'The previous-DLL backup hash does not match the transaction snapshot' 'Rollback verifies the previous DLL hash before restoration'
 Assert-Contains $installer 'Interrupted installation rollback resumed and verified' 'Installer reports only a verified resumed rollback'
