@@ -68,6 +68,69 @@ function New-MBRecoveryJournal {
     return $journal
 }
 
+function Restore-MBRecoveryPreviousJournal {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$ExpectedOperation,
+        [guid]$ExpectedDeviceId,
+        [string[]]$ExpectedStepIds
+    )
+    $writeLock = $null
+    $temp = $null
+    try {
+        # Recovery must serialize with normal writers and re-check the primary
+        # only after acquiring the same lock used by Write-MBRecoveryJsonAtomic.
+        $writeLock = New-Object IO.FileStream("$Path.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        $primaryArgs = @{ Path=$Path; NoPreviousFallback=$true }
+        if ($ExpectedOperation) { $primaryArgs.ExpectedOperation=$ExpectedOperation }
+        if ($PSBoundParameters.ContainsKey('ExpectedDeviceId')) { $primaryArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) { $primaryArgs.ExpectedStepIds=$ExpectedStepIds }
+        try {
+            # A writer may have repaired/replaced the primary while we waited.
+            # Prefer that newer valid primary over an older .previous snapshot.
+            return Read-MBRecoveryJournal @primaryArgs
+        } catch {
+            # Continue only when the primary is still missing or invalid.
+        }
+        $previousPath = "$Path.previous"
+        if (-not (Test-Path -LiteralPath $previousPath -PathType Leaf)) {
+            throw "Recovery journal and its fallback are invalid or unreadable: $Path"
+        }
+        $fallbackArgs = @{ Path=$previousPath; NoPreviousFallback=$true }
+        if ($ExpectedOperation) { $fallbackArgs.ExpectedOperation=$ExpectedOperation }
+        if ($PSBoundParameters.ContainsKey('ExpectedDeviceId')) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
+        $fallback = Read-MBRecoveryJournal @fallbackArgs
+        $directory = Split-Path -Parent $Path
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.restore.tmp')
+        $bytes = [IO.File]::ReadAllBytes($previousPath)
+        $corrupt = "$Path.corrupt.$([guid]::NewGuid().ToString('N'))"
+        $restore = $null
+        try {
+            $restore = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
+            $restore.Write($bytes,0,$bytes.Length)
+            $restore.Flush($true)
+            $restore.Dispose()
+            $restore = $null
+            if (Test-Path -LiteralPath $Path -PathType Leaf) {
+                [IO.File]::Replace($temp,$Path,$corrupt,$true)
+            } else {
+                [IO.File]::Move($temp,$Path)
+            }
+        } finally {
+            if ($restore) { $restore.Dispose() }
+            if ($temp -and (Test-Path -LiteralPath $temp)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        }
+        return $fallback
+    } finally {
+        if ($writeLock) { $writeLock.Dispose() }
+    }
+}
+
 function Read-MBRecoveryJournal {
     [CmdletBinding()]
     param(
@@ -115,32 +178,7 @@ function Read-MBRecoveryJournal {
         if ($NoPreviousFallback -or $usedPrevious -or -not (Test-Path -LiteralPath "$Path.previous" -PathType Leaf)) {
             throw "Recovery journal and its fallback are invalid or unreadable: $($_.Exception.Message)"
         }
-        # Validate the fallback independently; never trust it merely because it exists.
-        $fallbackArgs = @{ Path="$Path.previous"; NoPreviousFallback=$true }
-        if ($ExpectedOperation) { $fallbackArgs.ExpectedOperation=$ExpectedOperation }
-        if ($PSBoundParameters.ContainsKey('ExpectedDeviceId')) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
-        if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
-        $fallback = Read-MBRecoveryJournal @fallbackArgs
-        # Restore the last-known-good bytes through a flushed temporary file. Keep
-        # the corrupt primary as a separate forensic artifact.
-        $directory = Split-Path -Parent $Path
-        $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.restore.tmp')
-        $corrupt = "$Path.corrupt.$([guid]::NewGuid().ToString('N'))"
-        $bytes = [IO.File]::ReadAllBytes("$Path.previous")
-        $restore = $null
-        try {
-            $restore = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
-            $restore.Write($bytes,0,$bytes.Length)
-            $restore.Flush($true)
-            $restore.Dispose()
-            $restore = $null
-            if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp,$Path,$corrupt,$true) }
-            else { [IO.File]::Move($temp,$Path) }
-        } finally {
-            if ($restore) { $restore.Dispose() }
-            if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
-        }
-        return $fallback
+        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
     }
     if ($ExpectedOperation -and $j.Operation -ne $ExpectedOperation) {
         throw 'Recovery journal operation does not match the requested operation; refusing recovery.'
@@ -155,26 +193,7 @@ function Read-MBRecoveryJournal {
         }
     }
     if ($usedPrevious) {
-        # The primary was absent: restore the validated fallback before returning
-        # so subsequent updates can use the normal atomic-replace path.
-        $directory = Split-Path -Parent $Path
-        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-            New-Item -ItemType Directory -Force -Path $directory | Out-Null
-        }
-        $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.restore.tmp')
-        $bytes = [IO.File]::ReadAllBytes($sourcePath)
-        $restore = $null
-        try {
-            $restore = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
-            $restore.Write($bytes,0,$bytes.Length)
-            $restore.Flush($true)
-            $restore.Dispose()
-            $restore = $null
-            [IO.File]::Move($temp,$Path)
-        } finally {
-            if ($restore) { $restore.Dispose() }
-            if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
-        }
+        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
     }
     return $j
 }
