@@ -19,6 +19,28 @@ $dataDir = Join-Path $env:ProgramData 'MicBridgeAPO'
 $installLog = Join-Path $dataDir 'Install.log'
 $recoveryLog = Join-Path $dataDir 'Recovery.log'
 $upgradeLog = Join-Path $dataDir 'Upgrade.log'
+function Resolve-MBLogPath([string]$PrimaryPath, [string]$FallbackPath) {
+    try {
+        $parent = Split-Path -Parent $PrimaryPath
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Force -Path $parent -ErrorAction Stop | Out-Null }
+        $stream = New-Object IO.FileStream($PrimaryPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $stream.Dispose()
+        return $PrimaryPath
+    } catch {
+        try {
+            $fallbackParent = Split-Path -Parent $FallbackPath
+            if (-not (Test-Path -LiteralPath $fallbackParent -PathType Container)) { New-Item -ItemType Directory -Force -Path $fallbackParent -ErrorAction Stop | Out-Null }
+            $stream = New-Object IO.FileStream($FallbackPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            $stream.Dispose()
+            return $FallbackPath
+        } catch {
+            throw "Cannot create MicBridge install/recovery/upgrade log at either '$PrimaryPath' or '$FallbackPath'. $($_.Exception.Message)"
+        }
+    }
+}
+$installLog = Resolve-MBLogPath $installLog (Join-Path $env:TEMP 'MicBridgeAPO-Install.log')
+$recoveryLog = Resolve-MBLogPath $recoveryLog (Join-Path $env:TEMP 'MicBridgeAPO-Recovery.log')
+$upgradeLog = Resolve-MBLogPath $upgradeLog (Join-Path $env:TEMP 'MicBridgeAPO-Upgrade.log')
 function Write-RecoveryLog([string]$Level,[string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
     try {
