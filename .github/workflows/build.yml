@@ -29,6 +29,9 @@ jobs:
       - name: Test read-only legacy cleanup planner (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupPlan.ps1
+      - name: Test installer legacy audit gates (static, no system mutation)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerLegacyGate.ps1
       - name: Test isolated COM registration rollback (HKCU only)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBComRegistrationRollback.ps1
