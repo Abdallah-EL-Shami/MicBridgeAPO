@@ -91,6 +91,7 @@ function Restore-MBInstallMetadataSnapshot {
     )
     $check=Test-MBInstallMetadataSnapshot -State $State -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -DesktopDirectory $DesktopDirectory
     if(-not $check.IsValid) { throw "Metadata rollback preflight failed: $($check.Errors -join '; ')" }
+    $tx=[IO.Path]::GetFullPath($TransactionDirectory).TrimEnd('\')
     $data=[IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
     $desktop=[IO.Path]::GetFullPath($DesktopDirectory).TrimEnd('\')
     $ini=Join-Path $data 'MicBridge.ini'
