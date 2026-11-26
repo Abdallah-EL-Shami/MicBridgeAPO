@@ -271,6 +271,14 @@ if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
     if ([string]$compositeState.DeviceId -ne [string]$dev.Id) { throw 'Composite EFX recovery record belongs to a different endpoint; refusing installation.' }
 }
 
+# Verify the package DLL before creating any transaction state.
+if (-not (Test-Path -LiteralPath $DllSource -PathType Leaf)) { throw "DLL source is missing or is not a regular file: $DllSource" }
+$dllSourceHash = (Get-FileHash -LiteralPath $DllSource -Algorithm SHA256 -ErrorAction Stop).Hash
+$installedDllCandidate = Join-Path $installDir 'MicBridgeAPO.dll'
+if ((Test-Path -LiteralPath $installedDllCandidate) -and -not (Test-Path -LiteralPath $installedDllCandidate -PathType Leaf)) {
+    throw 'Installed DLL destination exists but is not a regular file; refusing to replace it.'
+}
+
 # Snapshot the currently installed state for transaction rollback. This is separate
 # from backup.json, which remains the immutable pre-first-install recovery record.
 $transactionId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
@@ -325,6 +333,8 @@ $transactionState = [pscustomobject]@{
     ApoRegSha256 = if ($apoRegExisted) { (Get-FileHash -LiteralPath $apoRegBackup -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
     DllExisted = (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))
     DllOriginalSha256 = if (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -PathType Leaf) { (Get-FileHash -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
+    DllNewSha256 = $dllSourceHash
+    DllReplacementStarted = $false
     IniExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))
     ControlExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'control.ini'))
     DataDirSddl = $dataDirSddl
@@ -365,11 +375,33 @@ if (Test-Path -LiteralPath $installedDll) {
     Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
     Write-InstallLog 'INFO' "Previous DLL backed up to '$dllBackupPath'. SHA256=$dllBackupHash"
 }
-$dllReplacementStarted = $true
-$transactionState.DllReplacementStarted = $true
-Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
-Copy-Item -LiteralPath $DllSource -Destination $installedDll -Force -ErrorAction Stop
-Write-InstallLog 'INFO' "New DLL copied. SHA256=$((Get-FileHash -LiteralPath $installedDll -Algorithm SHA256).Hash)"
+# Stage on the same volume, verify bytes, then atomically publish the new DLL.
+# File.Replace fails closed if Windows has the current image mapped/locked.
+$stagedDll = Join-Path $installDir ('.MicBridgeAPO.install.' + [guid]::NewGuid().ToString('N') + '.tmp')
+try {
+    Copy-Item -LiteralPath $DllSource -Destination $stagedDll -ErrorAction Stop
+    $stagedDllHash = (Get-FileHash -LiteralPath $stagedDll -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($stagedDllHash,$dllSourceHash,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Staged DLL hash differs from the verified package source.'
+    }
+    # Persist the intent and exact new-file identity before the atomic publish.
+    $transactionState.DllReplacementStarted = $true
+    Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
+    if (Test-Path -LiteralPath $installedDll -PathType Leaf) {
+        [IO.File]::Replace($stagedDll,$installedDll,$null,$true)
+    } elseif (Test-Path -LiteralPath $installedDll) {
+        throw 'Installed DLL destination changed to a non-file before publish.'
+    } else {
+        [IO.File]::Move($stagedDll,$installedDll)
+    }
+} finally {
+    if (Test-Path -LiteralPath $stagedDll) { Remove-Item -LiteralPath $stagedDll -Force -ErrorAction SilentlyContinue }
+}
+$publishedDllHash = (Get-FileHash -LiteralPath $installedDll -Algorithm SHA256 -ErrorAction Stop).Hash
+if (-not [string]::Equals($publishedDllHash,$dllSourceHash,[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Published DLL hash differs from the verified package source.'
+}
+Write-InstallLog 'INFO' "New DLL atomically published. SHA256=$publishedDllHash"
 foreach ($f in 'MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
 $ini = Join-Path $dataDir 'MicBridge.ini'
 if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot 'MicBridge.ini') $ini }
