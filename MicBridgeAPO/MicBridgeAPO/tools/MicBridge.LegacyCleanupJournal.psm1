@@ -42,9 +42,12 @@ function Get-MBLegacyCleanupJournal {
     if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Journal is a reparse point.' }
     $envelope = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     if ($envelope.Payload.SchemaVersion -ne 1 -or $envelope.Payload.Purpose -ne 'ReviewOnly' -or
-        $envelope.Payload.CleanupExecutionAllowed -ne $false -or $envelope.Payload.InstallAllowed -ne $false) {
-        throw 'Journal schema or safety flags are invalid.'
+        $envelope.Payload.CleanupExecutionAllowed -ne $false -or $envelope.Payload.InstallAllowed -ne $false -or
+        [string]::IsNullOrWhiteSpace([string]$envelope.Payload.InstallDirectory) -or
+        $envelope.Payload.CanProceedToCleanupReview -isnot [bool]) {
+        throw 'Journal schema, audited root, or safety flags are invalid.'
     }
+    $envelope.Payload.InstallDirectory = [IO.Path]::GetFullPath([string]$envelope.Payload.InstallDirectory)
     $actual = Get-MBLegacyJournalHash -Text (ConvertTo-Json -InputObject $envelope.Payload -Compress -Depth 12)
     if (-not $actual.Equals([string]$envelope.PayloadSha256,[StringComparison]::OrdinalIgnoreCase)) { throw 'Journal integrity check failed.' }
     $ids = @($envelope.Payload.Entries | ForEach-Object { [string]$_.Id })
