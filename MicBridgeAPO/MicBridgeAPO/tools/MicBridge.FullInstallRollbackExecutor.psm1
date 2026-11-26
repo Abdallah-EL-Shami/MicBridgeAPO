@@ -163,7 +163,13 @@ function Invoke-MBInstallFullRollback {
             }
         }.GetNewClosure()
         $previousStateVerify={
-            Test-MBFullRollbackPreviousInstallState -State $state -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -RegistryHive $RegistryHive
+            $clsidOk=Test-MBComRegistrySnapshotRestored -Target CLSID -State $state -TransactionDirectory $tx -RegistryHive $RegistryHive
+            $apoOk=Test-MBComRegistrySnapshotRestored -Target AudioEngineAPO -State $state -TransactionDirectory $tx -RegistryHive $RegistryHive
+            $dllOk=Test-MBDllSnapshotRestored @dllArgs
+            $filesOk=Test-MBInstallSupportFilesRestored -State $state -InstallDirectory $install
+            $metadataOk=Test-MBInstallMetadataRestored -State $state -DataDirectory $data -DesktopDirectory $desktop
+            $installOk=([bool]$state.InstallDirExisted -or -not (Test-Path -LiteralPath $install -PathType Container))
+            return ($clsidOk -and $apoOk -and $dllOk -and $filesOk -and $metadataOk -and $installOk)
         }.GetNewClosure()
         Invoke-MBRecoveryStep -Path $journalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds $stepIds -Action $previousStateAction -Verify $previousStateVerify
 
