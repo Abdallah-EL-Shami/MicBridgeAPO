@@ -14,6 +14,43 @@ if (-not $isAdmin) {
 }
 
 # Establish operation-specific diagnostics before acquiring locks or running preflight.
+$installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
+$dataDir = Join-Path $env:ProgramData 'MicBridgeAPO'
+$installLog = Join-Path $dataDir 'Install.log'
+$recoveryLog = Join-Path $dataDir 'Recovery.log'
+$upgradeLog = Join-Path $dataDir 'Upgrade.log'
+function Write-RecoveryLog([string]$Level,[string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $recoveryLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Recovery.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
+    }
+}
+function Write-EarlyInstallLog([string]$Level,[string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $installLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Install.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
+    }
+}
+Write-Host "سجل التثبيت: $installLog"
+Write-Host "سجل الاستعادة: $recoveryLog"
+Write-Host "سجل فحص الترقية: $upgradeLog"
+Write-EarlyInstallLog 'INFO' "Installer process started. DeviceName='$DeviceName'; DllSource='$DllSource'."
+$recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
+try {
+    Import-Module -Name $recoveryModule -Force -ErrorAction Stop
+    $operationLockPath = Join-Path $dataDir 'operation'
+    $operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+} catch {
+    Write-EarlyInstallLog 'ERROR' "Installer could not initialize its recovery lock/module; installation did not start. $($_.Exception.ToString())"
+    Write-RecoveryLog 'ERROR' "Installer initialization failed before any installation changes. $($_.Exception.ToString())"
+    throw
+}
 try {
 # Fail closed when a prior install rollback was interrupted. Until the full
 # replay handler is available, never start a new transaction over uncertain state.
