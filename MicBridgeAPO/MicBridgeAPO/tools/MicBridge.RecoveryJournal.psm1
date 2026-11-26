@@ -338,6 +338,11 @@ function Invoke-MBRecoveryPlan {
                 if ($dependency -notin $ExpectedStepIds -or $dependency -eq $id) {
                     throw "Recovery plan has an invalid prerequisite '$dependency' for '$id'."
                 }
+                $dependencyIndex = [Array]::IndexOf([string[]]$ExpectedStepIds,[string]$dependency)
+                $stepIndex = [Array]::IndexOf([string[]]$ExpectedStepIds,[string]$id)
+                if ($dependencyIndex -ge $stepIndex) {
+                    throw "Recovery plan prerequisite '$dependency' must appear before dependent step '$id'."
+                }
             }
         }
     }
