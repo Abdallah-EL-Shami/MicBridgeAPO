@@ -207,13 +207,11 @@ function Restore-MBRegistryExportSnapshot {
         [Parameter(Mandatory)][string]$ExpectedSha256,
         [Parameter(Mandatory)][string]$TemporaryDirectory
     )
-    # This primitive is intentionally limited to explicit HKLM/HKCU keys and a
-    # caller-validated, transaction-owned .reg snapshot. It never edits APO
-    # registration policy or AudioDG protection settings.
+
     if ($RegistryPath -notmatch '^(HKLM|HKCU)\\') {
         throw 'Registry restore path must be an explicit HKLM or HKCU key.'
     }
-    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}
+    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
         throw 'Registry snapshot SHA-256 is missing or malformed.'
     }
     if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) {
@@ -222,14 +220,16 @@ function Restore-MBRegistryExportSnapshot {
     if (-not (Test-Path -LiteralPath $TemporaryDirectory -PathType Container)) {
         throw 'Registry verification directory is missing.'
     }
+
     $snapshotItem = Get-Item -LiteralPath $SnapshotPath -Force -ErrorAction Stop
     if (($snapshotItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'Registry snapshot must not be a reparse point.'
     }
     $actualSnapshotHash = (Get-FileHash -LiteralPath $SnapshotPath -Algorithm SHA256 -ErrorAction Stop).Hash
-    if (-not [string]::Equals($actualSnapshotHash,$ExpectedSha256,[StringComparison]::OrdinalIgnoreCase)) {
+    if (-not [string]::Equals($actualSnapshotHash, $ExpectedSha256, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Registry snapshot hash mismatch; refusing to import untrusted recovery data.'
     }
+
     & reg.exe import $SnapshotPath | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "reg.exe import failed for the fixed recovery target '$RegistryPath' (exit $LASTEXITCODE)."
