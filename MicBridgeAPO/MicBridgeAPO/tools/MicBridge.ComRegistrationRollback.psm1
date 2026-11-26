@@ -159,7 +159,11 @@ function Restore-MBComRegistrySnapshot {
     } elseif(Test-Path -LiteralPath $psPath) {
         Remove-Item -LiteralPath $psPath -Recurse -Force -ErrorAction Stop
     }
-    if(-not (Test-MBComRegistrySnapshotRestored -Target $Target -State $State -TransactionDirectory $TransactionDirectory -RegistryHive $RegistryHive)) { throw "$Target COM snapshot postcondition failed." }
+    if(-not (Test-MBComRegistrySnapshotRestored -Target $Target -State $State -TransactionDirectory $TransactionDirectory -RegistryHive $RegistryHive)) {
+        $actualAfterImport=Get-MBComRegistryExportHash -RegistryKey $registryKey -TemporaryDirectory $TransactionDirectory
+        $backupAfterImport=(Get-FileHash -LiteralPath $backupFull -Algorithm SHA256 -ErrorAction Stop).Hash
+        throw "$Target COM snapshot postcondition failed (live export SHA256='$actualAfterImport'; snapshot SHA256='$backupAfterImport')."
+    }
     return $true
 }
 Export-ModuleMember -Function Test-MBComRegistrySnapshotRestored,Restore-MBComRegistrySnapshot
