@@ -26,6 +26,13 @@ try {
             [IO.File]::Move($movedPath,$dll)
             throw 'FAIL: file was renamed while exclusive lease was held.'
         }
+        $renamedRoot = $root + '.renamed'
+        $directoryRenameBlocked = $false
+        try { [IO.Directory]::Move($root,$renamedRoot) } catch { $directoryRenameBlocked = $true }
+        if (-not $directoryRenameBlocked) {
+            [IO.Directory]::Move($renamedRoot,$root)
+            throw 'FAIL: install-root directory was renamed while directory pins were held.'
+        }
         $wrongHashRejected = $false
         try {
             Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
@@ -88,7 +95,7 @@ namespace MicBridgeHandleLeaseHardLink {
         if (-not $outsideRejected) { throw 'FAIL: candidate outside install root was accepted.' }
     } finally { Remove-Item -LiteralPath $outside -Force }
 
-    Write-Host 'PASS: exclusive read handle pins file identity and blocks writers; wrong hash and out-of-root paths are rejected. No deletion occurs.'
+    Write-Host 'PASS: exclusive file and pinned directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
