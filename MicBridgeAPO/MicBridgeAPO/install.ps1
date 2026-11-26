@@ -389,6 +389,17 @@ try {
     # Persist the intent and exact new-file identity before the atomic publish.
     $transactionState.DllReplacementStarted = $true
     Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
+    if ([bool]$transactionState.DllExisted) {
+        if (-not (Test-Path -LiteralPath $installedDll -PathType Leaf)) {
+            throw 'Previously installed DLL disappeared before publish; refusing to change an unexpected destination state.'
+        }
+        $currentInstalledHash = (Get-FileHash -LiteralPath $installedDll -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($currentInstalledHash,[string]$transactionState.DllOriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Installed DLL changed after transaction snapshot; refusing to overwrite an unowned file.'
+        }
+    } elseif (Test-Path -LiteralPath $installedDll) {
+        throw 'A DLL appeared at the installation destination after transaction snapshot; refusing to overwrite it.'
+    }
     if (Test-Path -LiteralPath $installedDll -PathType Leaf) {
         [IO.File]::Replace($stagedDll,$installedDll,$null,$false)
     } elseif (Test-Path -LiteralPath $installedDll) {
