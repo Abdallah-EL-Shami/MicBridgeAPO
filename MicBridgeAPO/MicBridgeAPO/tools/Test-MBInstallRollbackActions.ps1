@@ -30,6 +30,8 @@ try {
     if (-not (Test-MBDllSnapshotRestored @restoreArgs)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
     Restore-MBDllSnapshot @restoreArgs | Out-Null
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $originalHash) { throw 'FAIL: repeated recovery was not idempotent' }
+    $rollbackTemps = @(Get-ChildItem -LiteralPath $installRoot -Filter '.MicBridgeAPO.rollback.*' -Force)
+    if ($rollbackTemps.Count -ne 0) { throw 'FAIL: rollback left staged or replacement-backup files behind' }
 
     # Simulate a crash after the destination copy but before journal completion,
     # followed by loss of the backup file. A verified destination must be enough
