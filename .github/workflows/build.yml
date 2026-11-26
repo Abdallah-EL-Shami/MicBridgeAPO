@@ -20,6 +20,9 @@ jobs:
       - name: Test durable recovery journal interruption and resume
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRecoveryJournal.ps1
+      - name: Test install rollback snapshot validation
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackValidation.ps1
       - name: Stage complete install package
         shell: pwsh
         run: |
