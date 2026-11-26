@@ -27,6 +27,14 @@ try {
     $blocked = $false
     try { Set-MBLegacyCleanupReviewDecision -Path $journalPath -ItemId $registration.Id -Reviewer 'test-reviewer' -Approve $true | Out-Null } catch { $blocked = $true }
     if (-not $blocked) { throw 'FAIL: registration approval was not blocked.' }
+    $staleJournalPath = Join-Path $root 'stale-review.json'
+    $staleJournal = New-MBLegacyCleanupJournal -Plan $plan -Path $staleJournalPath
+    [IO.File]::WriteAllBytes($dll, [byte[]](1,1,1,1))
+    $staleEntry = @($staleJournal.Entries | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' })[0]
+    $staleBlocked = $false
+    try { Set-MBLegacyCleanupReviewDecision -Path $staleJournalPath -ItemId $staleEntry.Id -Reviewer 'test-reviewer' -Approve $true | Out-Null } catch { $staleBlocked = $true }
+    if (-not $staleBlocked) { throw 'FAIL: changed candidate content was approved.' }
+    [IO.File]::WriteAllBytes($dll, [byte[]](9,8,7,6))
     $originalHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
     if ($originalHash -ne $hash) { throw 'FAIL: journal changed product file.' }
     $raw = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
