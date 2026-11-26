@@ -74,7 +74,6 @@ function Write-InstallLog([string]$Level, [string]$Message) {
     }
 }
 Write-InstallLog 'INFO' "Installer started with administrative privileges. DeviceName='$DeviceName'; DllSource='$DllSource'."
-$audioKey   = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
 
@@ -201,8 +200,6 @@ catch { Write-Warning "لم تُنشأ نقطة استعادة: $($_.Exception.M
 # ---- 3) النسخ الاحتياطي، بما فيه الصلاحيات الأصلية SDDL. لا نكتب فوق نسخة قديمة حتى لا نفقد الأصل.
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 if (-not (Test-Path $backupFile)) {
-    $prevDis = $null
-    if (Test-Path $audioKey) { $prevDis = (Get-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue).DisableProtectedAudioDG }
     $fxExists = Test-Path "$capRoot\$($dev.Id)\FxProperties"
     $prevFx = $null
     if ($fxExists) { $prevFx = (Get-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxValue -ErrorAction SilentlyContinue).$fxValue }
@@ -229,7 +226,7 @@ if (-not (Test-Path $backupFile)) {
         PrevApoRegistrationFile = $prevApoRegistrationFile
         PrevClsidRegistrationSha256 = if ($prevClsidRegistrationExists) { (Get-FileHash -LiteralPath $prevClsidRegistrationFile -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
         PrevApoRegistrationSha256 = if ($prevApoRegistrationExists) { (Get-FileHash -LiteralPath $prevApoRegistrationFile -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
-        DeviceId = $dev.Id; PrevDisableProtectedAudioDG = $prevDis; PrevEndpointEffect = $prevFx
+        DeviceId = $dev.Id; PrevEndpointEffect = $prevFx
         PrevFxAssociation = if ($fxExists) { (Get-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue } else { $null }
         DevKeySddl = $devSddl; FxKeySddl = $fxSddl; CreatedFx = (-not $fxExists)
     }
@@ -276,7 +273,6 @@ $clsidRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
 $apoRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
 if ($clsidRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\CLSID\$clsid" $clsidRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing COM CLSID registration.' } }
 if ($apoRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" $apoRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing AudioEngine APO registration.' } }
-$audioSub = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $fxNowSub = "$capSub\$($dev.Id)\FxProperties"
 $installFilesBackup = @()
 $installFilesDir = Join-Path $transactionDir 'install-files'
@@ -297,7 +293,6 @@ $controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath 
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
 $transactionState = [pscustomobject]@{
     DeviceId = $dev.Id
-    AudioProtected = (Get-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG')
     FxEffect = (Get-RegistryValueSnapshot $fxNowSub $fxValue)
     FxAssociation = (Get-RegistryValueSnapshot $fxNowSub $fxAssociationValue)
     FxComposite = (Get-RegistryValueSnapshot $fxNowSub $fxCompositeValue)
@@ -367,9 +362,9 @@ Set-ItemProperty $apo Flags 15 -Type DWord
 Set-ItemProperty $apo MaxInstances 0xFFFFFFFF -Type DWord
 Set-ItemProperty $apo APOInterface0 $iidApo
 
-# ---- 6) السماح بتحميل APO غير موقّع داخل audiodg
-if (-not (Test-Path $audioKey)) { New-Item -Force $audioKey | Out-Null }
-Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value 1 -Type DWord
+# ---- 6) إعداد حماية Windows AudioDG
+# MicBridge never changes DisableProtectedAudioDG. Older releases captured it from an incorrect path.
+Write-InstallLog 'INFO' 'Windows AudioDG protection setting left unchanged.'
 
 # ---- 7) ربط الـ APO بالمايك (مع أخذ ملكية المفتاح مؤقتًا؛ تُعاد عند الإزالة)
 [TokenPriv]::Enable('SeTakeOwnershipPrivilege') | Out-Null
@@ -444,7 +439,6 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                         # Roll back this installation attempt to the immediately preceding installed state.
                             $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
                             $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
-                            Restore-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected
                             Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
                             Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
                             Restore-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite
@@ -500,7 +494,6 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             } -Verify {
                 $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
                 $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
-                if (-not (Test-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected)) { return $false }
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect)) { return $false }
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation)) { return $false }
                 if (-not (Test-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite)) { return $false }
