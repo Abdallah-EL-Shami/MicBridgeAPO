@@ -7,7 +7,8 @@ $dllModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'
 $executorModule = Join-Path $PSScriptRoot 'MicBridge.RollbackExecutor.psm1'
 $comExecutorModule = Join-Path $PSScriptRoot 'MicBridge.ComRegistrationExecutor.psm1'
 $fileExecutorModule = Join-Path $PSScriptRoot 'MicBridge.InstallFileExecutor.psm1'
-foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule,$comExecutorModule,$fileExecutorModule)) {
+$metadataExecutorModule = Join-Path $PSScriptRoot 'MicBridge.MetadataExecutor.psm1'
+foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule,$comExecutorModule,$fileExecutorModule,$metadataExecutorModule)) {
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw "Missing test dependency: $module" }
 }
 # Import the executor first: it loads its dependencies into its own module scope.
@@ -15,17 +16,19 @@ foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModul
 Import-Module $executorModule -Force
 Import-Module $comExecutorModule -Force
 Import-Module $fileExecutorModule -Force
+Import-Module $metadataExecutorModule -Force
 Import-Module $journalModule -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeRollbackExecutor-' + [guid]::NewGuid().ToString('N'))
 $tx = Join-Path $root ('transactions-' + [guid]::NewGuid().ToString('N'))
 $data = Join-Path $root 'data'
 $install = Join-Path $root 'install'
+$desktop = Join-Path $root 'desktop'
 $installFiles = Join-Path $tx 'install-files'
 $dllBackups = Join-Path $data 'dll-backups'
 $comClsidSub = $null
 $comApoSub = $null
-New-Item -ItemType Directory -Force -Path $tx,$data,$install,$installFiles,$dllBackups | Out-Null
+New-Item -ItemType Directory -Force -Path $tx,$data,$install,$desktop,$installFiles,$dllBackups | Out-Null
 
 try {
     $device = [guid]::NewGuid()
@@ -70,6 +73,16 @@ try {
     & $regExe export "HKCU\$comApoSub" $apoBackup /y | Out-Null
     if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export transaction APO fixture' }
 
+    $iniPackageFixture=Join-Path $tx 'ini-package-fixture'
+    $controlPackageFixture=Join-Path $tx 'control-package-fixture'
+    $shortcutPackageFixture=Join-Path $tx 'shortcut-package-fixture'
+    [IO.File]::WriteAllText($iniPackageFixture,'new-ini-fixture')
+    [IO.File]::WriteAllBytes($controlPackageFixture,[Text.Encoding]::ASCII.GetBytes('[Control]'+[char]13+[char]10+'Enabled=1'+[char]13+[char]10))
+    [IO.File]::WriteAllText($shortcutPackageFixture,'new-shortcut-fixture')
+    $iniNewHash=(Get-FileHash $iniPackageFixture -Algorithm SHA256).Hash
+    $controlNewHash=(Get-FileHash $controlPackageFixture -Algorithm SHA256).Hash
+    $shortcutNewHash=(Get-FileHash $shortcutPackageFixture -Algorithm SHA256).Hash
+
     $state = [pscustomobject]@{
         DeviceId=$device.ToString('D')
         TransactionId=$transaction.ToString('D')
@@ -84,10 +97,12 @@ try {
         DllExisted=$true; DllOriginalSha256=$originalHash
         DllNewSha256=$newHash; DllReplacementStarted=$true
         DllBackupPath=$originalDll; DllBackupSha256=$originalHash
-        IniExisted=$false; ControlExisted=$false
-        DataDirSddl='O:SYG:SYD:PAI(A;;FA;;;SY)'; ControlSddl=$null
+        IniExisted=$false; IniOriginalSha256=$null
+        ControlExisted=$false; ControlOriginalSha256=$null
+        IniNewSha256=$iniNewHash; ControlNewSha256=$controlNewHash
+        DataDirSddl=(Get-Acl -LiteralPath $data).Sddl; ControlSddl=$null
         InstallFiles=$fileEntries
-        ShortcutExisted=$false; ShortcutBackup=$null; ShortcutBackupSha256=$null
+        ShortcutExisted=$false; ShortcutBackup=$null; ShortcutBackupSha256=$null; ShortcutNewSha256=$shortcutNewHash
         InstallDirExisted=$true
     }
     $statePath = Join-Path $tx 'state.json'
@@ -105,6 +120,17 @@ try {
     if($fileJournal.Steps[0].State -ne 'Completed') { throw 'FAIL: support-file component journal did not complete' }
     $mainAfterFiles=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
     if($mainAfterFiles.Steps[2].State -ne 'Pending') { throw 'FAIL: support-file executor incorrectly marked grouped main step complete' }
+
+    # Restore transaction-created ProgramData files, desktop shortcut, and ACL.
+    [IO.File]::Copy($iniPackageFixture,(Join-Path $data 'MicBridge.ini'))
+    [IO.File]::Copy($controlPackageFixture,(Join-Path $data 'control.ini'))
+    [IO.File]::Copy($shortcutPackageFixture,(Join-Path $desktop 'MicBridge.lnk'))
+    $metadataResult=Invoke-MBInstallMetadataRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -ExpectedDeviceId $device -RegistryHive HKCU
+    if(-not $metadataResult.Success -or -not $metadataResult.MainTransactionStillPending) { throw 'FAIL: metadata executor returned an invalid result' }
+    if((Test-Path (Join-Path $data 'MicBridge.ini')) -or (Test-Path (Join-Path $data 'control.ini')) -or (Test-Path (Join-Path $desktop 'MicBridge.lnk'))) { throw 'FAIL: metadata executor left transaction-created configuration or shortcut files' }
+    Import-Module $journalModule -Force -Global
+    $metadataJournal=Read-MBRecoveryJournal -Path $metadataResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreInstallMetadata')
+    if($metadataJournal.Steps[0].State -ne 'Completed') { throw 'FAIL: metadata component journal did not complete' }
 
     # Mutate only values beneath the product-owned HKCU CLSID/APO fixture.
     $comClsidKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($comClsidSub,$true)
@@ -147,8 +173,11 @@ try {
     # left behind in the process that performed the first restore.
     $childScript = Join-Path $tx 'dll-executor-reentry-child.ps1'
     $childSource = @'
-param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$FileExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
+param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$FileExecutorModule,[string]$MetadataExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DesktopDirectory,[string]$DeviceId)
 $ErrorActionPreference = 'Stop'
+Import-Module $MetadataExecutorModule -Force
+$metadata = Invoke-MBInstallMetadataRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -DesktopDirectory $DesktopDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
+if (-not $metadata.Success -or -not $metadata.MainTransactionStillPending) { throw 'Fresh-process metadata executor returned an invalid result.' }
 Import-Module $FileExecutorModule -Force
 $file = Invoke-MBInstallSupportFileRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
 if (-not $file.Success -or -not $file.MainTransactionStillPending) { throw 'Fresh-process support-file executor returned an invalid result.' }
@@ -162,7 +191,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
     [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
     $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
         '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
-        $executorModule,$comExecutorModule,$fileExecutorModule,$tx,$data,$install,$device.ToString('D')
+        $executorModule,$comExecutorModule,$fileExecutorModule,$metadataExecutorModule,$tx,$data,$install,$desktop,$device.ToString('D')
     ) -Wait -PassThru
     if ($childProcess.ExitCode -ne 0) { throw "FAIL: fresh-process executor re-entry failed with exit code $($childProcess.ExitCode)" }
 
@@ -171,7 +200,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
         throw 'FAIL: fresh-process idempotent re-entry repeated the DLL restore side effect'
     }
 
-    Write-Host 'PASS: isolated COM, support-file and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
+    Write-Host 'PASS: isolated COM, metadata, support-file and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
 } finally {
     if ($comClsidSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comClsidSub,$false) }
     if ($comApoSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comApoSub,$false) }
