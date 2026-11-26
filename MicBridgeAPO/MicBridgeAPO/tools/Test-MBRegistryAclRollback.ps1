@@ -68,9 +68,12 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointAcl' -ExpectedOpera
     ) -Wait -PassThru
     if ($process.ExitCode -eq 0) { throw 'Crash-injection child exited successfully.' }
     $interrupted = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointAcl')
-    if ($interrupted.Steps[0].State -ne 'Running' -or
-        -not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -ExpectedSddl $originalSddl)) {
-        throw 'ACL side effect or Running journal was not durable after process death.'
+    if ($interrupted.Steps[0].State -ne 'Running') {
+        throw ("Journal state after child exit was [{0}], expected [Running]." -f $interrupted.Steps[0].State)
+    }
+    $postCrashSddl = Get-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey
+    if (-not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -ExpectedSddl $originalSddl)) {
+        throw ("ACL side effect was not durable after process death. Expected=[$originalSddl] Actual=[$postCrashSddl]")
     }
     Invoke-MBRecoveryStep -Path $journal -StepId 'RestoreEndpointAcl' -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointAcl') -Action { throw 'ACL restore action repeated after crash.' } -Verify { Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -ExpectedSddl $originalSddl }
     $resumed = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointAcl')
