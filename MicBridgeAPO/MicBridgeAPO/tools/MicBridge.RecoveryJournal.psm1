@@ -178,7 +178,7 @@ function Read-MBRecoveryJournal {
         if ($NoPreviousFallback -or $usedPrevious -or -not (Test-Path -LiteralPath "$Path.previous" -PathType Leaf)) {
             throw "Recovery journal and its fallback are invalid or unreadable: $($_.Exception.Message)"
         }
-        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId ([guid]$ExpectedDeviceId) -ExpectedStepIds $ExpectedStepIds
     }
     if ($ExpectedOperation -and $j.Operation -ne $ExpectedOperation) {
         throw 'Recovery journal operation does not match the requested operation; refusing recovery.'
@@ -193,7 +193,7 @@ function Read-MBRecoveryJournal {
         }
     }
     if ($usedPrevious) {
-        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+        return Restore-MBRecoveryPreviousJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId ([guid]$ExpectedDeviceId) -ExpectedStepIds $ExpectedStepIds
     }
     return $j
 }
