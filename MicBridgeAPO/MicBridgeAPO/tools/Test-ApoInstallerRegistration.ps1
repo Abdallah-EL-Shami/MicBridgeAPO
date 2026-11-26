@@ -25,6 +25,7 @@ Assert-Contains $uninstaller 'PSObject\.Properties\.Name\s+-contains\s+''PrevFxA
 Assert-Contains $uninstaller 'Name\s+\$fxAssociationValue\s+-Value\s+\$b\.PrevFxAssociation' 'Uninstaller restores a prior association value'
 Assert-Contains $uninstaller 'Remove-ItemProperty\s+-LiteralPath\s+\$fxPath\s+-Name\s+\$fxAssociationValue' 'Uninstaller removes only its association value when no prior value existed'
 Assert-Contains $uninstaller 'GetValueNames\(\)\.Count\s+-eq\s+0' 'Uninstaller checks that a created FxProperties key is empty before deleting it'
+Assert-Contains $uninstaller 'return \(\[bool\]\$Backup\.CreatedFx -and \[string\]::IsNullOrWhiteSpace\(\[string\]\$Backup\.FxKeySddl\)\)' 'Uninstaller accepts an absent FxProperties key only when the original snapshot proves MicBridge created it'
 Assert-NotContains $uninstaller 'Remove-Item\s+-LiteralPath\s+\$fxPath\s+-Recurse' 'Uninstaller never recursively deletes FxProperties and unrelated driver values'
 
 Assert-Contains $installer 'DllSource\s+`"\$DllSource`"' 'Elevated installer relaunch preserves the selected DLL source path'

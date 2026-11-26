@@ -112,7 +112,11 @@ function Test-MBRegistryDwordSnapshot([string]$SubKey, [string]$ValueName, [bool
 
 function Test-MBEndpointValueSnapshot([string]$DeviceSubKey, [string]$LegacyValueName, [string]$AssociationValueName, [string]$CompositeValueName, [string]$Clsid, $Backup, [string]$CompositeBackupPath) {
     $key = $hklm.OpenSubKey($DeviceSubKey + '\\FxProperties', $false)
-    if (-not $key) { return $false }
+    if (-not $key) {
+        # A missing FxProperties key is the expected original state when MicBridge created it.
+        # Treat it as restored only when the immutable first-install snapshot proves that fact.
+        return ([bool]$Backup.CreatedFx -and [string]::IsNullOrWhiteSpace([string]$Backup.FxKeySddl))
+    }
     try {
         if ($Backup.PSObject.Properties.Name -contains 'PrevFxAssociation') {
             $associationExists = $key.GetValueNames() -contains $AssociationValueName
