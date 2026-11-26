@@ -122,6 +122,16 @@ function Restore-RegistryValueSnapshot([string]$sub, [string]$name, $snapshot) {
     }
 }
 
+function Test-RegistryValueSnapshot([string]$sub, [string]$name, $snapshot) {
+    $actual = Get-RegistryValueSnapshot $sub $name
+    if ([bool]$actual.KeyExists -ne [bool]$snapshot.KeyExists -or [bool]$actual.Exists -ne [bool]$snapshot.Exists) { return $false }
+    if (-not $snapshot.Exists) { return $true }
+    if ([string]$actual.Kind -ne [string]$snapshot.Kind) { return $false }
+    $left = ConvertTo-Json -InputObject $actual.Value -Depth 8 -Compress
+    $right = ConvertTo-Json -InputObject $snapshot.Value -Depth 8 -Compress
+    return [string]::Equals($left,$right,[StringComparison]::Ordinal)
+}
+
 try {
 if (-not (Test-Path $DllSource)) { throw "لم أجد $DllSource . ضع MicBridgeAPO.dll بجانب هذا السكربت." }
 
@@ -292,6 +302,13 @@ if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxCompos
 }
 Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 
+# Durable rollback journal is created from the verified pre-install snapshot.
+$rollbackJournalPath = Join-Path $transactionDir 'rollback-recovery.json'
+$rollbackDeviceId = [guid]$dev.Id
+$rollbackStepIds = @('RestorePreviousInstallState')
+New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds | Out-Null
+
+
 # ---- 4) الملفات
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 $installedDll = Join-Path $installDir 'MicBridgeAPO.dll'
@@ -394,71 +411,94 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     $failure = $_
     Write-InstallLog 'ERROR' "Installation failed: $($failure.Exception.ToString())"
     Write-InstallLog 'ERROR' "Error position: $($failure.InvocationInfo.PositionMessage)"
-    if ($dllReplacementStarted -and $dllBackupPath -and $dllBackupHash -and (Test-Path -LiteralPath $dllBackupPath)) {
-        try {
-            $actualBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
-            if ($actualBackupHash -ne $dllBackupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
-            Copy-Item -LiteralPath $dllBackupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
-            Write-InstallLog 'WARN' "Previous DLL restored from '$dllBackupPath'."
-        } catch { Write-InstallLog 'CRITICAL' "DLL restoration failed: $($_.Exception.ToString())" }
-    }
-    # Roll back this installation attempt to the immediately preceding installed state.
     if ($transactionStateFile -and (Test-Path -LiteralPath $transactionStateFile)) {
         try {
-            $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
-            $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
-            Restore-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected
-            Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
-            Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
-            Restore-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite
-            if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) { Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" $tx.FxSddl }
-            if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" $tx.DevSddl }
-            if (-not $tx.FxKeyExisted) {
-                $fxNowPath = "$capRoot\$($tx.DeviceId)\FxProperties"
-                if (Test-Path -LiteralPath $fxNowPath) {
-                    $fxKey = $hklm.OpenSubKey("$capSub\$($tx.DeviceId)\FxProperties")
-                    if ($fxKey) { $empty = ($fxKey.GetValueNames().Count -eq 0 -and $fxKey.GetSubKeyNames().Count -eq 0); $fxKey.Close(); if ($empty) { Remove-Item -LiteralPath $fxNowPath -Force } }
+            Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
+                        if ($dllReplacementStarted -and $dllBackupPath -and $dllBackupHash -and (Test-Path -LiteralPath $dllBackupPath)) {
+                            try {
+                                $actualBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
+                                if ($actualBackupHash -ne $dllBackupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
+                                Copy-Item -LiteralPath $dllBackupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
+                                Write-InstallLog 'WARN' "Previous DLL restored from '$dllBackupPath'."
+                            } catch { Write-InstallLog 'CRITICAL' "DLL restoration failed: $($_.Exception.ToString())" }
+                        }
+                        # Roll back this installation attempt to the immediately preceding installed state.
+                            $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                            $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
+                            Restore-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected
+                            Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
+                            Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
+                            Restore-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite
+                            if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) { Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" $tx.FxSddl }
+                            if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" $tx.DevSddl }
+                            if (-not $tx.FxKeyExisted) {
+                                $fxNowPath = "$capRoot\$($tx.DeviceId)\FxProperties"
+                                if (Test-Path -LiteralPath $fxNowPath) {
+                                    $fxKey = $hklm.OpenSubKey("$capSub\$($tx.DeviceId)\FxProperties")
+                                    if ($fxKey) { $empty = ($fxKey.GetValueNames().Count -eq 0 -and $fxKey.GetSubKeyNames().Count -eq 0); $fxKey.Close(); if ($empty) { Remove-Item -LiteralPath $fxNowPath -Force } }
+                                }
+                            }
+                            $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+                            $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+                            Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
+                            Remove-Item -LiteralPath $apoPath -Recurse -Force -ErrorAction SilentlyContinue
+                            if ($tx.ClsidRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'clsid.reg'))) { & reg.exe import (Join-Path $transactionDir 'clsid.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior COM CLSID registration.' } }
+                            if ($tx.ApoRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'audioengine-apo.reg'))) { & reg.exe import (Join-Path $transactionDir 'audioengine-apo.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior AudioEngine APO registration.' } }
+                            if (-not $tx.IniExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -Force -ErrorAction SilentlyContinue }
+                            if (-not $tx.ControlExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'control.ini') -Force -ErrorAction SilentlyContinue }
+                            foreach ($fileState in @($tx.InstallFiles)) {
+                                $target = Join-Path $installDir $fileState.Name
+                                if ($fileState.Existed -and (Test-Path -LiteralPath $fileState.Backup)) {
+                                    Copy-Item -LiteralPath $fileState.Backup -Destination $target -Force -ErrorAction Stop
+                                } elseif (-not $fileState.Existed) {
+                                    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+                                }
+                            }
+                            if ($tx.ShortcutExisted -and (Test-Path -LiteralPath $tx.ShortcutBackup)) {
+                                Copy-Item -LiteralPath $tx.ShortcutBackup -Destination $shortcutPath -Force -ErrorAction Stop
+                            } elseif (-not $tx.ShortcutExisted) {
+                                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+                            }
+                            if ($tx.DataDirSddl) {
+                                $acl = Get-Acl -LiteralPath $dataDir
+                                $acl.SetSecurityDescriptorSddlForm([string]$tx.DataDirSddl)
+                                Set-Acl -LiteralPath $dataDir -AclObject $acl
+                            }
+                            if ($tx.ControlSddl -and (Test-Path -LiteralPath $controlPath)) {
+                                $acl = Get-Acl -LiteralPath $controlPath
+                                $acl.SetSecurityDescriptorSddlForm([string]$tx.ControlSddl)
+                                Set-Acl -LiteralPath $controlPath -AclObject $acl
+                            }
+                            if (-not $tx.DllExisted -and -not $dllBackupPath) { Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue }
+                            if (-not $tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) {
+                                $remaining = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
+                                if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue }
+                            }
+                            try { Restart-Service -Name Audiosrv -Force -ErrorAction Stop; Write-InstallLog 'INFO' 'Audio service restarted after transaction rollback.' }
+                            catch { Write-InstallLog 'CRITICAL' "Audio service restart after rollback failed: $($_.Exception.Message)" }
+                            Write-InstallLog 'INFO' 'Registry endpoint, COM registration, files, ACLs, and newly-created configuration state rolled back to the pre-attempt snapshot.'
+                
+            } -Verify {
+                $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
+                if (-not (Test-RegistryValueSnapshot $audioSub 'DisableProtectedAudioDG' $tx.AudioProtected)) { return $false }
+                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect)) { return $false }
+                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation)) { return $false }
+                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite)) { return $false }
+                if ($tx.DevSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)") -ne [string]$tx.DevSddl) { return $false }
+                if ($tx.FxSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)\FxProperties") -ne [string]$tx.FxSddl) { return $false }
+                $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+                $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
+                if ((Test-Path -LiteralPath $clsidPath) -ne [bool]$tx.ClsidRegExisted) { return $false }
+                if ((Test-Path -LiteralPath $apoPath) -ne [bool]$tx.ApoRegExisted) { return $false }
+                if ($tx.DllExisted -and -not (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))) { return $false }
+                if (-not $tx.DllExisted -and -not (Test-Path -LiteralPath $dllBackupPath) -and (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))) { return $false }
+                foreach ($fileState in @($tx.InstallFiles)) {
+                    $target = Join-Path $installDir $fileState.Name
+                    if ([bool]$fileState.Existed -ne [bool](Test-Path -LiteralPath $target)) { return $false }
                 }
+                return $true
             }
-            $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
-            $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
-            Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $apoPath -Recurse -Force -ErrorAction SilentlyContinue
-            if ($tx.ClsidRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'clsid.reg'))) { & reg.exe import (Join-Path $transactionDir 'clsid.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior COM CLSID registration.' } }
-            if ($tx.ApoRegExisted -and (Test-Path -LiteralPath (Join-Path $transactionDir 'audioengine-apo.reg'))) { & reg.exe import (Join-Path $transactionDir 'audioengine-apo.reg') | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Failed to restore prior AudioEngine APO registration.' } }
-            if (-not $tx.IniExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -Force -ErrorAction SilentlyContinue }
-            if (-not $tx.ControlExisted) { Remove-Item -LiteralPath (Join-Path $dataDir 'control.ini') -Force -ErrorAction SilentlyContinue }
-            foreach ($fileState in @($tx.InstallFiles)) {
-                $target = Join-Path $installDir $fileState.Name
-                if ($fileState.Existed -and (Test-Path -LiteralPath $fileState.Backup)) {
-                    Copy-Item -LiteralPath $fileState.Backup -Destination $target -Force -ErrorAction Stop
-                } elseif (-not $fileState.Existed) {
-                    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
-                }
-            }
-            if ($tx.ShortcutExisted -and (Test-Path -LiteralPath $tx.ShortcutBackup)) {
-                Copy-Item -LiteralPath $tx.ShortcutBackup -Destination $shortcutPath -Force -ErrorAction Stop
-            } elseif (-not $tx.ShortcutExisted) {
-                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
-            }
-            if ($tx.DataDirSddl) {
-                $acl = Get-Acl -LiteralPath $dataDir
-                $acl.SetSecurityDescriptorSddlForm([string]$tx.DataDirSddl)
-                Set-Acl -LiteralPath $dataDir -AclObject $acl
-            }
-            if ($tx.ControlSddl -and (Test-Path -LiteralPath $controlPath)) {
-                $acl = Get-Acl -LiteralPath $controlPath
-                $acl.SetSecurityDescriptorSddlForm([string]$tx.ControlSddl)
-                Set-Acl -LiteralPath $controlPath -AclObject $acl
-            }
-            if (-not $tx.DllExisted -and -not $dllBackupPath) { Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue }
-            if (-not $tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) {
-                $remaining = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
-                if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue }
-            }
-            try { Restart-Service -Name Audiosrv -Force -ErrorAction Stop; Write-InstallLog 'INFO' 'Audio service restarted after transaction rollback.' }
-            catch { Write-InstallLog 'CRITICAL' "Audio service restart after rollback failed: $($_.Exception.Message)" }
-            Write-InstallLog 'INFO' 'Registry endpoint, COM registration, files, ACLs, and newly-created configuration state rolled back to the pre-attempt snapshot.'
         } catch {
             Write-InstallLog 'CRITICAL' "Transaction rollback was incomplete: $($_.Exception.ToString())"
             Write-Warning "تعذر إكمال التراجع التلقائي: $($_.Exception.Message). احتفظ بمجلد المعاملة وbackup.json."
