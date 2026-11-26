@@ -76,11 +76,21 @@ try {
     $comValid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if (-not $comValid.IsValid) { throw "FAIL: valid transaction-bound COM export rejected: $($comValid.Errors -join '; ')" }
 
+    $exportAction = {
+        param($registryPath,$outputPath)
+        Copy-Item -LiteralPath $clsidExport -Destination $outputPath -Force
+        return $true
+    }.GetNewClosure()
+    $registryMatchesSnapshot = Test-MBRegistryExportSnapshot -RegistryPath 'HKLM\SOFTWARE\Classes\CLSID\Example' -ExpectedSha256 $state.ClsidRegSha256 -TemporaryDirectory $tx -ExportAction $exportAction
+    if (-not $registryMatchesSnapshot) { throw 'FAIL: matching restored COM registry export was rejected' }
+
     [IO.File]::AppendAllText($clsidExport,'tampered')
     $comTampered = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if ($comTampered.IsValid -or -not ($comTampered.Errors -match 'COM export snapshot hash')) { throw 'FAIL: modified COM export accepted' }
+    $registryTampered = Test-MBRegistryExportSnapshot -RegistryPath 'HKLM\SOFTWARE\Classes\CLSID\Example' -ExpectedSha256 $state.ClsidRegSha256 -TemporaryDirectory $tx -ExportAction $exportAction
+    if ($registryTampered) { throw 'FAIL: modified restored COM registry contents accepted' }
 
-    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, and transaction-bound COM export checks'
+    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, and restored registry content verification'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
