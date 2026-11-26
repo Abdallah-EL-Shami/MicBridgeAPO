@@ -57,16 +57,73 @@ function New-MBLegacyCleanupPlan {
         }
         elseif ($classification -eq 'MicBridgeBinaryCandidate') {
             $binaryFull = $null
+            $binaryHashValid = $false
             try {
                 if (-not [string]::IsNullOrWhiteSpace($path)) {
                     $binaryFull = [IO.Path]::GetFullPath($path)
+                }
+                if ($binaryFull -and (Test-Path -LiteralPath $binaryFull -PathType Leaf)) {
+                    $binaryItem = Get-Item -LiteralPath $binaryFull -Force -ErrorAction Stop
+                    if (($binaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+                        $finding.Sha256 -match '^[A-Fa-f0-9]{64}
+                $action = 'CandidateForReviewedRemoval'
+                $reason = 'Canonical product DLL path and recorded SHA-256 format qualify for human review only; this does not prove ownership or authorize removal.'
+            } else {
+                $blockers.Add("Product binary lacks a canonical install path or valid recorded hash: $path")
+                $reason = 'Path, filename, or recorded hash does not meet the narrow review-candidate rule.'
+            }
+        }
+        elseif ($classification -eq 'MicBridgeSupportFileCandidate') {
+            $blockers.Add("Support-file ownership is not proven by a signed/known manifest: $path")
+            $reason = 'Filename/location alone is insufficient to authorize deletion.'
+        }
+        elseif ($classification -in @('MicBridgeRecoveryEvidence','PreserveDataFile','ReparsePointPreserved')) {
+            $reason = 'Recovery evidence, user data, or reparse point is preserved by policy.'
+        }
+        elseif ($classification -notin @('Absent')) {
+            $blockers.Add("Unresolved or foreign item requires preservation: $path [$classification]")
+        }
+
+        $items.Add([pscustomobject]@{
+            Kind = [string]$finding.Kind
+            Name = [string]$finding.Name
+            Path = $path
+            Classification = $classification
+            ProposedAction = $action
+            Reason = $reason
+            Sha256 = [string]$finding.Sha256
+        })
+    }
+
+    $canProceed = ($blockers.Count -eq 0)
+    [pscustomobject]@{
+        SchemaVersion = 1
+        IsReadOnly = $true
+        CanProceedToCleanupReview = $canProceed
+        CleanupExecutionAllowed = $false
+        InstallAllowed = $false
+        Items = @($items)
+        Blockers = @($blockers)
+        Warnings = @(
+            'This is a review plan, not an executable cleanup authorization.',
+            'No registry or file mutation is performed.',
+            'Do not restore old backups as a Windows baseline.'
+        )
+    }
+}
+
+Export-ModuleMember -Function New-MBLegacyCleanupPlan
+) {
+                        $currentBinaryHash = (Get-FileHash -LiteralPath $binaryFull -Algorithm SHA256 -ErrorAction Stop).Hash
+                        $binaryHashValid = $currentBinaryHash.Equals([string]$finding.Sha256,[StringComparison]::OrdinalIgnoreCase)
+                    }
                 }
             } catch {}
 
             if ($binaryFull -and
                 $binaryFull.StartsWith($installFull + '\', [StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($binaryFull) -ieq 'MicBridgeAPO.dll' -and
-                $finding.Sha256 -match '^[A-Fa-f0-9]{64}$') {
+                $binaryHashValid) {
                 $action = 'CandidateForReviewedRemoval'
                 $reason = 'Canonical product DLL path and recorded SHA-256 format qualify for human review only; this does not prove ownership or authorize removal.'
             } else {
