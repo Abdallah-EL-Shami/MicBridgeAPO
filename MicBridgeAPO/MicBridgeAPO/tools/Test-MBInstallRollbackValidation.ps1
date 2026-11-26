@@ -68,6 +68,11 @@ try {
     $state.ClsidRegExisted = $true
     $state.ClsidRegBackup = $clsidExport
     $state.ClsidRegSha256 = (Get-FileHash $clsidExport -Algorithm SHA256).Hash
+    $wrongComPath = $state.ClsidRegBackup
+    $state.ClsidRegBackup = Join-Path $tx 'other.reg'
+    $wrongPath = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if ($wrongPath.IsValid -or -not ($wrongPath.Errors -match 'fixed transaction-owned filename')) { throw 'FAIL: alternate COM export path accepted' }
+    $state.ClsidRegBackup = $wrongComPath
     $comValid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if (-not $comValid.IsValid) { throw "FAIL: valid transaction-bound COM export rejected: $($comValid.Errors -join '; ')" }
 
