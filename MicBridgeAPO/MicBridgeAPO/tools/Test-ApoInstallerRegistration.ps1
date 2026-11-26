@@ -133,6 +133,9 @@ Assert-Contains $installer 'Snapshot the currently installed state for transacti
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
 Assert-Contains $installer '\[IO\.File\]::Replace' 'Atomic JSON helper replaces an existing snapshot atomically'
+Assert-Contains $installer '\$publishBackup\s*=\s*Join-Path\s+\$installDir' 'DLL publication keeps a same-directory copy of the previous image'
+Assert-Contains $installer '\[IO\.File\]::Replace\(\$stagedDll,\$installedDll,\$publishBackup,\$false\)' 'DLL publication never uses a null replacement backup'
+Assert-Contains $installer 'Remove-Item -LiteralPath \$publishBackup' 'DLL publication removes its temporary previous-image copy only after hash verification'
 Assert-Contains $installer '\$replacementBackup\s*=\s*Join-Path\s+\$directory' 'Atomic JSON replacement uses a same-directory backup file'
 Assert-Contains $installer '\[IO\.File\]::Replace\(\$temp,\s*\$Path,\s*\$replacementBackup,\s*\$true\)' 'Atomic JSON replacement never passes an empty backup path'
 Assert-Contains $installer 'Remove-Item -LiteralPath \$replacementBackup' 'Atomic JSON replacement cleans up its temporary backup'
