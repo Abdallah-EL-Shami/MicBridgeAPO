@@ -30,6 +30,7 @@ $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $installLog = Join-Path $dataDir 'Install.log'
 $recoveryLog = Join-Path $dataDir 'Recovery.log'
+$upgradeLog = Join-Path $dataDir 'Upgrade.log'
 function Write-RecoveryLog([string]$Level,[string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
     try {
@@ -41,6 +42,7 @@ function Write-RecoveryLog([string]$Level,[string]$Message) {
 }
 Write-Host "سجل التثبيت: $installLog"
 Write-Host "سجل الاستعادة: $recoveryLog"
+Write-Host "سجل فحص الترقية: $upgradeLog"
 
 # Fail closed when a prior install rollback was interrupted. Until the full
 # replay handler is available, never start a new transaction over uncertain state.
@@ -136,6 +138,15 @@ function Write-JsonAtomic([object]$Value, [string]$Path, [int]$Depth = 8) {
         if ($replacementBackup -and (Test-Path -LiteralPath $replacementBackup)) {
             Remove-Item -LiteralPath $replacementBackup -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+function Write-UpgradeLog([string]$Level,[string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $upgradeLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Upgrade.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
     }
 }
 function Write-InstallLog([string]$Level, [string]$Message) {
@@ -282,6 +293,8 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 }
 Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
+Write-UpgradeLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
+foreach ($finding in @($legacyAudit.Findings)) { Write-UpgradeLog 'INFO' "Finding: Kind=$($finding.Kind); Name=$($finding.Name); Classification=$($finding.Classification); Path=$($finding.Path); Detail=$($finding.Detail)" }
 if ($legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
     # InventoryOnly is not permission to upgrade: a structurally valid legacy
     # backup and matching hashes do not prove that it captured the original
