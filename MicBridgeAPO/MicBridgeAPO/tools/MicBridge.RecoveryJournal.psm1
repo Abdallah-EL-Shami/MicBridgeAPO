@@ -320,6 +320,8 @@ function Invoke-MBRecoveryPlan {
         [Parameter(Mandatory)][string[]]$ExpectedStepIds,
         [Parameter(Mandatory)][hashtable]$Actions,
         [Parameter(Mandatory)][hashtable]$Verifiers,
+        [hashtable]$Dependencies = @{},
+        [IO.FileStream]$OperationLock,
         [int]$LockTimeoutSeconds = 0
     )
     if (-not $ExpectedStepIds -or @($ExpectedStepIds | Select-Object -Unique).Count -ne $ExpectedStepIds.Count) {
@@ -330,22 +332,49 @@ function Invoke-MBRecoveryPlan {
             -not $Verifiers.ContainsKey($id) -or $Verifiers[$id] -isnot [scriptblock]) {
             throw "Recovery plan is incomplete: action and verifier are required for '$id'."
         }
+        if ($Dependencies.ContainsKey($id)) {
+            foreach ($dependency in @($Dependencies[$id])) {
+                if ($dependency -notin $ExpectedStepIds -or $dependency -eq $id) {
+                    throw "Recovery plan has an invalid prerequisite '$dependency' for '$id'."
+                }
+            }
+        }
     }
-    $operationLock = Enter-MBRecoveryOperationLock -Path $Path -TimeoutSeconds $LockTimeoutSeconds
+    $ownsOperationLock = $false
+    if ($OperationLock) {
+        $expectedLockPath = [IO.Path]::GetFullPath("$Path.operation.lock")
+        $actualLockPath = [IO.Path]::GetFullPath($OperationLock.Name)
+        if (-not $OperationLock.CanRead -or -not $OperationLock.CanWrite -or
+            -not [string]::Equals($expectedLockPath,$actualLockPath,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Supplied operation lock is not a live file handle for this recovery plan path.'
+        }
+    } else {
+        $OperationLock = Enter-MBRecoveryOperationLock -Path $Path -TimeoutSeconds $LockTimeoutSeconds
+        $ownsOperationLock = $true
+    }
     $failures = @()
     try {
-        $journal = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+        $null = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
         foreach ($id in $ExpectedStepIds) {
+            $current = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
+            $blockedBy = @()
+            foreach ($dependency in @($Dependencies[$id])) {
+                $dependencyStep = @($current.Steps | Where-Object { $_.Id -eq $dependency })[0]
+                if (-not $dependencyStep -or $dependencyStep.State -ne 'Completed') { $blockedBy += $dependency }
+            }
+            if ($blockedBy.Count -gt 0) {
+                $failures += [pscustomobject]@{ StepId=$id; Error=("Skipped because prerequisite(s) are not completed: " + ($blockedBy -join ', ')) }
+                continue
+            }
             try {
                 Invoke-MBRecoveryStep -Path $Path -StepId $id -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds -Action $Actions[$id] -Verify $Verifiers[$id]
             } catch {
-                # A failed step is recorded and does not suppress independent later
-                # restorations. The caller receives every failure after all steps run.
+                # Independent steps may proceed; declared dependants are skipped.
                 $failures += [pscustomobject]@{ StepId=$id; Error=$_.Exception.Message }
             }
         }
     } finally {
-        if ($operationLock) { $operationLock.Dispose() }
+        if ($ownsOperationLock -and $OperationLock) { $OperationLock.Dispose() }
     }
     if ($failures.Count -gt 0) {
         $summary = ($failures | ForEach-Object { "$($_.StepId): $($_.Error)" }) -join ' | '
