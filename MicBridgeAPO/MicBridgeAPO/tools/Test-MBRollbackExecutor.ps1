@@ -100,6 +100,7 @@ try {
     $fileResult=Invoke-MBInstallSupportFileRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
     if(-not $fileResult.Success -or -not $fileResult.MainTransactionStillPending) { throw 'FAIL: support-file executor returned an invalid result' }
     if(-not (Test-MBInstallSupportFilesRestored -State $state -InstallDirectory $install)) { throw 'FAIL: support-file executor did not restore the previous files' }
+    Import-Module $journalModule -Force -Global
     $fileJournal=Read-MBRecoveryJournal -Path $fileResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreInstallSupportFiles')
     if($fileJournal.Steps[0].State -ne 'Completed') { throw 'FAIL: support-file component journal did not complete' }
     $mainAfterFiles=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
