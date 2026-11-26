@@ -323,3 +323,7 @@ Assert-Contains $ui 'AudioDG التقريبي' 'UI reports estimated AudioDG CPU
 Assert-NotContains $ui 'الحزم منذ التشغيل' 'UI does not display cumulative packet totals'
 Assert-Contains $readme 'Uninstall.log' 'README documents the separate uninstall log'
 Assert-Contains $readme 'Recovery.log' 'README documents the separate recovery log'
+
+Assert-Contains $installer "Write-Host \"سجل فحص الترقية: \$upgradeLog\"" 'Installer announces the separate upgrade-audit log path'
+Assert-Contains $installer 'Write-UpgradeLog .INFO.' 'Installer writes legacy audit results to the dedicated upgrade log'
+Assert-Contains $readme 'Upgrade.log' 'README documents the dedicated upgrade audit log'
