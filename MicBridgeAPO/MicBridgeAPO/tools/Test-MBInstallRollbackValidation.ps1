@@ -7,6 +7,7 @@ $tx = Join-Path $root 'transactions-test'
 $data = Join-Path $root 'data'
 $files = Join-Path $tx 'install-files'
 $dlls = Join-Path $data 'dll-backups'
+$registryProviderPath = $null
 New-Item -ItemType Directory -Force -Path $files,$dlls | Out-Null
 try {
     $device = [guid]::NewGuid()
