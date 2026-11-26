@@ -28,21 +28,21 @@ try {
     }
     Restore-MBDllSnapshot @restoreArgs | Out-Null
     if (-not (Test-MBDllSnapshotRestored @restoreArgs)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
-    Restore-MBDllSnapshot @args | Out-Null
+    Restore-MBDllSnapshot @restoreArgs | Out-Null
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $originalHash) { throw 'FAIL: repeated recovery was not idempotent' }
 
     # Simulate a crash after the destination copy but before journal completion,
     # followed by loss of the backup file. A verified destination must be enough
     # to recognize that the action already completed.
     Remove-Item -LiteralPath $backup -Force
-    Restore-MBDllSnapshot @args | Out-Null
+    Restore-MBDllSnapshot @restoreArgs | Out-Null
     [IO.File]::WriteAllBytes($backup,$originalBytes)
     [IO.File]::WriteAllBytes($installed,$newBytes)
     # Rejected tampered backup must leave these exact destination bytes unchanged.
     $beforeTamperReject = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
     [IO.File]::AppendAllText($backup,'tampered')
     $rejected = $false
-    try { Restore-MBDllSnapshot @args | Out-Null } catch { $rejected = $_.Exception.Message -match 'backup hash mismatch' }
+    try { Restore-MBDllSnapshot @restoreArgs | Out-Null } catch { $rejected = $_.Exception.Message -match 'backup hash mismatch' }
     if (-not $rejected) { throw 'FAIL: tampered DLL backup was not rejected' }
     $afterTamperReject = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
     if (-not [string]::Equals($afterTamperReject,$beforeTamperReject,[StringComparison]::OrdinalIgnoreCase)) { throw ('FAIL: rejected tampered backup changed destination DLL (before=' + $beforeTamperReject + ', after=' + $afterTamperReject + ')') }
