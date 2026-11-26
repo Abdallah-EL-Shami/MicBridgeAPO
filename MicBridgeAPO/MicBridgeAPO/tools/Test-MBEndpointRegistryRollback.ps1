@@ -63,22 +63,24 @@ try {
     $device = (Read-MBRecoveryJournal -Path $journal).DeviceId
     $child = Join-Path $root 'crash-child.ps1'
     $childText = @'
-param([string]$Module,[string]$Journal,[string]$SnapshotJson,[string]$Device)
+param([string]$Module,[string]$Journal,[string]$SnapshotPath,[string]$Device)
 $ErrorActionPreference = 'Stop'
 Import-Module $Module -Force
 Import-Module (Join-Path (Split-Path $Module) 'MicBridge.RecoveryJournal.psm1') -Force
-$snapshot = $SnapshotJson | ConvertFrom-Json
+$snapshot = Get-Content -LiteralPath $SnapshotPath -Raw | ConvertFrom-Json
 $action = { Restore-MBEndpointRegistrySnapshot -Snapshot $snapshot | Out-Null; [Environment]::FailFast('Injected endpoint registry rollback interruption') }.GetNewClosure()
 $verify = { Test-MBEndpointRegistrySnapshot -Snapshot $snapshot }.GetNewClosure()
 Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointValues' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreEndpointValues') -Action $action -Verify $verify
 '@
     [IO.File]::WriteAllText($child,$childText,(New-Object Text.UTF8Encoding($false)))
-    $snapshotJson = ConvertTo-Json -InputObject $crashSnapshot -Depth 12 -Compress
+    $snapshotPath = Join-Path $root 'crash-snapshot.json'
+    ConvertTo-Json -InputObject $crashSnapshot -Depth 12 | Set-Content -LiteralPath $snapshotPath -Encoding utf8
     $powershell = (Get-Process -Id $PID).Path
-    $process = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$child,$modulePath,$journal,$snapshotJson,$device) -Wait -PassThru
+    $process = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$child,$modulePath,$journal,$snapshotPath,$device) -Wait -PassThru
     if ($process.ExitCode -eq 0) { throw 'FAIL: crash-injection child exited successfully' }
     $interrupted = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$device) -ExpectedStepIds @('RestoreEndpointValues')
-    if ($interrupted.Steps[0].State -ne 'Running' -or -not (Test-MBEndpointRegistrySnapshot $crashSnapshot)) { throw 'FAIL: crash did not leave a Running journal with restored registry state' }
+    $restoredAfterCrash = Test-MBEndpointRegistrySnapshot $crashSnapshot
+    if ($interrupted.Steps[0].State -ne 'Running' -or -not $restoredAfterCrash) { throw "FAIL: crash state mismatch (exit=$($process.ExitCode), journal=$($interrupted.Steps[0].State), restored=$restoredAfterCrash, attempts=$($interrupted.Steps[0].Attempts))" }
     Invoke-MBRecoveryStep -Path $journal -StepId 'RestoreEndpointValues' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$device) -ExpectedStepIds @('RestoreEndpointValues') -Action { throw 'Endpoint registry restore action repeated after interruption' } -Verify { Test-MBEndpointRegistrySnapshot $crashSnapshot }
     $resumed = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$device) -ExpectedStepIds @('RestoreEndpointValues')
     if ($resumed.Steps[0].State -ne 'Completed' -or $resumed.Steps[0].Attempts -ne 1) { throw 'FAIL: fresh-process recovery repeated the registry action or did not complete' }
