@@ -4,6 +4,7 @@ $installer = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 $uninstaller = Get-Content -LiteralPath (Join-Path $root 'uninstall.ps1') -Raw
 $rollbackModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
 $fullExecutor = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.FullInstallRollbackExecutor.psm1') -Raw
+$rollbackValidationModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw "FAIL: $Message" }
@@ -194,8 +195,8 @@ Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM re
 Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
 Assert-Contains $installer 'MicBridge.InstallRollbackValidation.psm1' 'Installer loads the rollback snapshot validator before recovery mutations'
-Assert-Contains $installer 'Test-MBInstallRollbackSnapshot' 'Installer validates the durable transaction snapshot before rollback'
-Assert-Contains $installer 'no rollback mutations were attempted' 'Installer fails closed when rollback snapshot validation fails'
+Assert-Contains $installer 'Test-MBInstallRollbackTransaction' 'Installer validates the durable transaction journal and snapshot before replay'
+Assert-Contains $fullExecutor 'no recovery actions attempted' 'Full executor fails closed before any recovery mutation when preflight fails'
 Assert-Contains $installer 'ClsidRegBackup' 'Transaction snapshot records the previous CLSID export path'
 Assert-Contains $installer 'ClsidRegSha256' 'Transaction snapshot records the previous CLSID export hash'
 Assert-Contains $installer 'ApoRegBackup' 'Transaction snapshot records the previous AudioEngine export path'
@@ -255,7 +256,7 @@ Write-Host 'All installer registration static checks passed.'
 
 Assert-Contains $installer 'TransactionId = \[string\]\$rollbackJournal\.TransactionId' 'Installer binds the durable snapshot to its rollback journal transaction identity'
 Assert-Contains $installer 'Test-MBInstallRollbackTransaction -JournalPath \$candidateJournal -StatePath \$candidateSnapshotPath' 'Installer rejects interrupted journals paired with an invalid or mismatched transaction snapshot through strict preflight'
-Assert-Contains $installer 'Rollback journal and snapshot belong to different transactions' 'Installer checks journal/snapshot transaction identity before rollback mutations'
+Assert-Contains $rollbackValidationModule '\$stateTransactionId -ne \$journalTransactionId' 'Snapshot validator rejects a journal from a different transaction'
 $rollbackCatchStart = $installer.IndexOf('    $failure = $_')
 $rollbackFinallyStart = $installer.IndexOf('} finally {', $rollbackCatchStart)
 if ($rollbackCatchStart -lt 0 -or $rollbackFinallyStart -le $rollbackCatchStart) { throw 'FAIL: Could not isolate installer rollback catch block for service-control safety check' }
