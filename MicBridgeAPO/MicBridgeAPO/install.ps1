@@ -28,6 +28,19 @@ $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Assoc
 $ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
+$installLog = Join-Path $dataDir 'Install.log'
+$recoveryLog = Join-Path $dataDir 'Recovery.log'
+function Write-RecoveryLog([string]$Level,[string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $recoveryLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Recovery.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
+    }
+}
+Write-Host "سجل التثبيت: $installLog"
+Write-Host "سجل الاستعادة: $recoveryLog"
 
 # Fail closed when a prior install rollback was interrupted. Until the full
 # replay handler is available, never start a new transaction over uncertain state.
@@ -69,6 +82,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
     }
     if ($pendingRollbackJournals.Count -eq 1) {
         $pendingJournalPath = [string]$pendingRollbackJournals[0]
+        Write-RecoveryLog 'WARN' "Interrupted rollback found. Journal='$pendingJournalPath'. Automatic replay is starting after strict read-only preflight."
         $pendingTransactionDirectory = Split-Path -Parent $pendingJournalPath
         $pendingJournal = Read-MBRecoveryJournal -Path $pendingJournalPath -ExpectedOperation InstallRollback -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
         $pendingDeviceId = [guid]::Parse([string]$pendingJournal.DeviceId)
@@ -92,6 +106,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         }
         # Re-acquire the installer lock before starting a new transaction.
         $operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+        Write-RecoveryLog 'INFO' "Interrupted rollback completed and verified. Journal='$pendingJournalPath'."
         Write-Host "Recovered the interrupted MicBridge installation transaction before starting a new installation."
     }
 }
@@ -647,8 +662,10 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 throw 'Full rollback executor returned before every durable main step reached Completed.'
             }
             Write-InstallLog 'INFO' 'Full transaction rollback completed and all durable endpoint, ACL, COM, DLL, file, configuration and shortcut postconditions were verified.'
+            Write-RecoveryLog 'INFO' "Install-failure rollback completed and verified. Transaction='$transactionStateFile'."
         } catch {
             Write-InstallLog 'CRITICAL' "Transaction rollback was incomplete: $($_.Exception.ToString())"
+            Write-RecoveryLog 'CRITICAL' "Install-failure rollback incomplete. Transaction='$transactionStateFile'. Error='$($_.Exception.ToString())'"
             Write-Warning "تعذر إكمال التراجع التلقائي: $($_.Exception.Message). احتفظ بمجلد المعاملة وbackup.json."
         }
     } else {
