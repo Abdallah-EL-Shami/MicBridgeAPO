@@ -62,6 +62,22 @@ namespace MicBridgeHandleLeaseHardLink {
         throw "FAIL: could not create hard-link test fixture (Win32 $win32)."
     }
 
+    # A junction whose target remains inside the install root must still be rejected.
+    $targetDir = Join-Path $root 'real-subdir'
+    $junctionDir = Join-Path $root 'junction-subdir'
+    New-Item -ItemType Directory -Path $targetDir | Out-Null
+    $junctionTargetFile = Join-Path $targetDir 'through-junction.dll'
+    [IO.File]::WriteAllBytes($junctionTargetFile,[byte[]](9,7,5,3))
+    $junctionHash = (Get-FileHash -LiteralPath $junctionTargetFile -Algorithm SHA256).Hash
+    $mklinkOutput = & cmd.exe /d /c mklink /J "$junctionDir" "$targetDir" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "FAIL: could not create junction fixture: $mklinkOutput" }
+    $junctionRejected = $false
+    try {
+        Open-MBLegacyExclusiveFileLease -CandidatePath (Join-Path $junctionDir 'through-junction.dll') -InstallRoot $root -ExpectedSha256 $junctionHash | Out-Null
+    } catch { $junctionRejected = $_.Exception.Message -match 'reparse point' }
+    if (-not $junctionRejected) { throw 'FAIL: candidate reached through an in-root junction was not rejected.' }
+    Remove-Item -LiteralPath $junctionDir -Force
+
     $outside = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeOutside-' + [guid]::NewGuid().ToString('N') + '.dll')
     [IO.File]::WriteAllBytes($outside,[byte[]](8,6,4,2))
     try {
