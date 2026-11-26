@@ -281,8 +281,21 @@ function Invoke-MBInstallRollbackRecovery([string]$JournalPath, [string]$Transac
                 } elseif ($tx.DllReplacementStarted -and (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))) { return $false }
                 foreach ($fileState in @($tx.InstallFiles)) {
                     $target = Join-Path $installDir $fileState.Name
-                    if ([bool]$fileState.Existed -ne [bool](Test-Path -LiteralPath $target)) { return $false }
+                    if ([bool]$fileState.Existed -ne [bool](Test-Path -LiteralPath $target -PathType Leaf)) { return $false }
+                    if ($fileState.Existed) {
+                        $targetHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash
+                        if (-not [string]::Equals($targetHash,[string]$fileState.Sha256,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+                    }
                 }
+                if ([bool]$tx.ShortcutExisted -ne [bool](Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
+                if ($tx.ShortcutExisted) {
+                    $restoredShortcutHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                    if (-not [string]::Equals($restoredShortcutHash,[string]$tx.ShortcutBackupHash,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+                }
+                if ([bool]$tx.IniExisted -ne [bool](Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -PathType Leaf)) { return $false }
+                if ([bool]$tx.ControlExisted -ne [bool](Test-Path -LiteralPath $controlPath -PathType Leaf)) { return $false }
+                if ($tx.DataDirSddl -and (Get-Acl -LiteralPath $dataDir).Sddl -ne [string]$tx.DataDirSddl) { return $false }
+                if ($tx.ControlSddl -and (Get-Acl -LiteralPath $controlPath).Sddl -ne [string]$tx.ControlSddl) { return $false }
                 return $true
     }
 }
