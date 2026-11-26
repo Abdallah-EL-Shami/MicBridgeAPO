@@ -126,7 +126,8 @@ try {
     $state.InstallFiles[0].Sha256 = (Get-FileHash $originalBackup -Algorithm SHA256).Hash
 
     $clsidExport = Join-Path $tx 'clsid.reg'
-    [IO.File]::WriteAllText($clsidExport,'Windows Registry Editor Version 5.00')
+    $validComExport = 'Windows Registry Editor Version 5.00' + [Environment]::NewLine + '[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}]' + [Environment]::NewLine
+    [IO.File]::WriteAllText($clsidExport,$validComExport)
     $state.ClsidRegExisted = $true
     $state.ClsidRegBackup = $clsidExport
     $state.ClsidRegSha256 = (Get-FileHash $clsidExport -Algorithm SHA256).Hash
@@ -137,6 +138,15 @@ try {
     $state.ClsidRegBackup = $wrongComPath
     $comValid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if (-not $comValid.IsValid) { throw "FAIL: valid transaction-bound COM export rejected: $($comValid.Errors -join '; ')" }
+
+    # A hash-valid export must still be rejected if it carries a foreign key.
+    $foreignComExport = $validComExport + '[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{99999999-9999-9999-9999-999999999999}]' + [Environment]::NewLine
+    [IO.File]::WriteAllText($clsidExport,$foreignComExport)
+    $state.ClsidRegSha256 = (Get-FileHash $clsidExport -Algorithm SHA256).Hash
+    $foreignComRejected = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if ($foreignComRejected.IsValid -or -not ($foreignComRejected.Errors -match 'keys outside')) { throw 'FAIL: COM export containing a foreign registry key was accepted' }
+    [IO.File]::WriteAllText($clsidExport,$validComExport)
+    $state.ClsidRegSha256 = (Get-FileHash $clsidExport -Algorithm SHA256).Hash
 
     $exportAction = {
         param($registryPath,$outputPath)
@@ -241,7 +251,7 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreCom' -ExpectedOperation Ins
     Remove-Item -LiteralPath $crashProviderPath -Recurse -Force -ErrorAction SilentlyContinue
 
     # Restore the deliberately tampered COM fixture before the valid-transaction test.
-    [IO.File]::WriteAllText($clsidExport,'Windows Registry Editor Version 5.00')
+    [IO.File]::WriteAllText($clsidExport,$validComExport)
     $state.ClsidRegSha256 = (Get-FileHash -LiteralPath $clsidExport -Algorithm SHA256).Hash
 
     # Validate the durable journal and state as one transaction before any replay.
