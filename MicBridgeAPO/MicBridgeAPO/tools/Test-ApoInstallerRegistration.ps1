@@ -299,6 +299,7 @@ Assert-Contains $installer 'ShortcutNewSha256' 'Installer persists the shortcut 
 Assert-Contains $workflow 'MicBridge.InstallMetadataRollback.psm1' 'Build package stages metadata rollback actions'
 Assert-Contains $workflow 'MicBridge.MetadataExecutor.psm1' 'Build package stages durable metadata recovery executor'
 Assert-Contains $workflow 'MicBridge.FullInstallRollbackExecutor.psm1' 'Build package stages the full transaction recovery executor'
+Assert-Contains $workflow 'MicBridge.ComRegistrationRollback.psm1' 'Build package stages the COM rollback dependency required by the full executor'
 
 Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor preserves the fixed main transaction step order'
 Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
