@@ -48,7 +48,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         }
         # Strict read-only preflight before classifying a transaction as pending.
         # This does not replay or mutate Registry, ACLs, COM, DLLs, or files.
-        $rollbackValidationModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallRollbackValidation.psm1'
+        $rollbackValidationModule = Join-Path $PSScriptRoot 'tools\MicBridge.InstallRollbackValidation.psm1'
         if (-not (Test-Path -LiteralPath $rollbackValidationModule -PathType Leaf)) {
             throw "Rollback validation module is missing; refusing to inspect pending transaction: $rollbackValidationModule"
         }
