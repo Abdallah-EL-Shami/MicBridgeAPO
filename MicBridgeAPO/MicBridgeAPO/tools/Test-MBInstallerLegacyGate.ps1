@@ -49,7 +49,7 @@ foreach ($moduleName in $moduleNames) {
     if (-not $source.Contains($moduleName)) { throw "FAIL: installer does not reference expected module '$moduleName'." }
     if (-not $workflowSource.Contains($moduleName)) { throw "FAIL: package staging omits installer dependency '$moduleName'." }
 }
-if (-not $workflowSource.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll' $package")) {
+if (-not $workflowSource.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll' `$package")) {
     throw 'FAIL: staged package does not include the freshly built APO DLL.'
 }
 
