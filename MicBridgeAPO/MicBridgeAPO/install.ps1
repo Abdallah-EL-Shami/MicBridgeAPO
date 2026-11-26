@@ -285,8 +285,8 @@ function Invoke-MBInstallRollbackRecovery([string]$JournalPath, [string]$Transac
                 if ($tx.FxSddl -and (Get-Sddl "$capSub\$($tx.DeviceId)\FxProperties") -ne [string]$tx.FxSddl) { return $false }
                 $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
                 $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
-                if ((Test-Path -LiteralPath $clsidPath) -ne [bool]$tx.ClsidRegExisted) { return $false }
-                if ((Test-Path -LiteralPath $apoPath) -ne [bool]$tx.ApoRegExisted) { return $false }
+                if (-not (Test-RegistryTreeSnapshot ("SOFTWARE\\Classes\\CLSID\\$clsid") ([bool]$tx.ClsidRegExisted) ([string]$tx.ClsidRegBackupHash))) { return $false }
+                if (-not (Test-RegistryTreeSnapshot ("SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid") ([bool]$tx.ApoRegExisted) ([string]$tx.ApoRegBackupHash))) { return $false }
                 if ($tx.DllExisted) {
                     if (-not (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -PathType Leaf)) { return $false }
                     if ($tx.DllReplacementStarted) {
