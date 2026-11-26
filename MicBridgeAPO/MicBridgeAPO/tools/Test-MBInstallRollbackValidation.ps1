@@ -20,6 +20,7 @@ try {
     [IO.File]::WriteAllText($shortcut,'shortcut')
     $state = [pscustomobject]@{
         DeviceId=$device.ToString('D')
+        TransactionId=([guid]::NewGuid().ToString('D'))
         FxEffect=[pscustomobject]@{KeyExists=$true;Exists=$false;Kind='String';Value=$null}
         FxAssociation=[pscustomobject]@{KeyExists=$true;Exists=$true;Kind='String';Value='{00000000-0000-0000-0000-000000000000}'}
         FxComposite=[pscustomobject]@{KeyExists=$true;Exists=$true;Kind='MultiString';Value=@('{11111111-1111-1111-1111-111111111111}')}
@@ -50,6 +51,11 @@ try {
 
     $wrongDevice = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId ([guid]::NewGuid())
     if ($wrongDevice.IsValid) { throw 'FAIL: wrong device identity accepted' }
+
+    $wrongTransaction = $state.PSObject.Copy()
+    $wrongTransaction.TransactionId = 'not-a-guid'
+    $invalidTransaction = Test-MBInstallRollbackSnapshot -State $wrongTransaction -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if ($invalidTransaction.IsValid -or -not ($invalidTransaction.Errors -match 'transaction identity')) { throw 'FAIL: invalid transaction identity accepted' }
 
     $originalBackup = $state.InstallFiles[0].Backup
     $state.InstallFiles[0].Backup = Join-Path $root 'outside.ps1'
