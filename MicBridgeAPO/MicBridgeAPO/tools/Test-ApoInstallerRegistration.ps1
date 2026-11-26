@@ -3,6 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $installer = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 $uninstaller = Get-Content -LiteralPath (Join-Path $root 'uninstall.ps1') -Raw
 $rollbackModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
+$fullExecutor = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.FullInstallRollbackExecutor.psm1') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw "FAIL: $Message" }
@@ -39,8 +40,6 @@ Assert-Contains $installer "'MicBridgeUI.bat'" 'Installer backs up and restores 
 Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagnostic logging'
 Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
-Assert-Contains $installer 'Restore-MBDllSnapshot @dllRollbackArgs' 'Installer invokes the isolated DLL snapshot rollback action after failure'
-Assert-Contains $installer "DLL rollback action completed and verified against transaction hashes." 'Installer logs successful DLL rollback verification'
 Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
 Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
 Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
@@ -58,24 +57,19 @@ Assert-Contains $uninstaller 'ownership marker is not a regular file' 'Uninstall
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$shortcutOwnershipFile -Force -ErrorAction Stop' 'Uninstaller removes the verified shortcut ownership marker'
 Assert-Contains $uninstaller '-not \(Test-Path -LiteralPath \$shortcutOwnershipFile\)' 'Uninstall verification requires the ownership marker to be absent'
 Assert-Contains $uninstaller 'Desktop shortcut is not a regular file; preserving it' 'Uninstaller preserves shortcut reparse points and directories'
-Assert-Contains $installer 'Get-FileHash\s+-LiteralPath\s+\$target\s+-Algorithm SHA256' 'Rollback verifies restored UI and uninstaller file contents'
-Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$dataDir' 'Rollback verifies restored ProgramData directory ACL'
-Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$controlPath' 'Rollback verifies restored control file ACL'
-Assert-Contains $installer 'ShortcutBackupSha256' 'Rollback verifies restored desktop shortcut contents'
 Assert-Contains $installer 'DllOriginalSha256\s*=\s*if \(Test-Path' 'Installer snapshots the original installed DLL hash before any replacement'
-Assert-Contains $installer 'Get-MBTransactionFxRegistrySnapshot' 'Rollback builds a complete endpoint Fx snapshot from the durable transaction record'
-Assert-Contains $installer "StepId 'RestoreEndpointFxValues'" 'Rollback journals endpoint Fx restoration as an independent recovery step'
-Assert-Contains $installer 'Test-MBEndpointRegistrySnapshot -Snapshot \(Get-MBTransactionFxRegistrySnapshot \$tx\)' 'Rollback verifies endpoint Fx values and key existence through the isolated registry module'
-Assert-Contains $installer "\$rollbackStepIds = @\('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState'\)" 'Rollback orders endpoint values, endpoint ACL, then remaining install-state restoration'
-Assert-Contains $installer "StepId 'RestoreEndpointAcl'" 'Rollback journals endpoint ACL restoration as an independent recovery step'
-Assert-Contains $installer 'MicBridge.RegistryAclRollback.psm1' 'Installer loads the tested endpoint ACL rollback module'
-Assert-Contains $installer 'Restore-Sddl "\$capSub\\\$\(\$tx\.DeviceId\)\\FxProperties"' 'Endpoint ACL step restores the original FxProperties security descriptor'
-Assert-Contains $installer 'Restore-Sddl "\$capSub\\\$\(\$tx\.DeviceId\)"' 'Endpoint ACL step restores the original capture endpoint security descriptor'
-Assert-Contains $installer 'Restore-MBEndpointRegistrySnapshot -Snapshot' 'Rollback uses the tested endpoint Fx restoration module'
-Assert-NotContains $installer 'Restore-RegistryValueSnapshot \$fxNowSub \$fxValue' 'The broad rollback action does not repeat the independently journaled endpoint Fx restoration'
-Assert-Contains $installer '\$tx\.IniExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original INI file existence'
-Assert-Contains $installer '\$tx\.ControlExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original control file existence'
-Assert-Contains $installer '\$tx\.InstallDirExisted -and \(Test-Path' 'Rollback verifies cleanup of an install directory created by the failed attempt'
+Assert-Contains $installer "\$rollbackStepIds = @\('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState'\)" 'Installer persists the fixed three-step rollback journal order'
+Assert-Contains $installer 'Invoke-MBInstallFullRollback' 'Installer startup recovery and failure handling use the full durable rollback executor'
+Assert-Contains $installer 'pendingRollbackJournals.Count -eq 1' 'Installer replays only one unambiguous pending transaction'
+Assert-Contains $installer 'Multiple interrupted MicBridge rollback transactions were found' 'Installer refuses automatic replay when transaction order is ambiguous'
+Assert-Contains $installer 'Full rollback executor did not complete' 'Installer blocks a new install if rollback replay does not finish'
+Assert-NotContains $installer 'Recovery replay is not yet automated' 'Installer no longer leaves validated pending transactions permanently blocked'
+Assert-Contains $fullExecutor 'Restore-MBEndpointRegistrySnapshot' 'Full executor restores the endpoint FX snapshot'
+Assert-Contains $fullExecutor 'Restore-MBRegistryAclSddl' 'Full executor restores capture endpoint ACLs'
+Assert-Contains $fullExecutor 'Restore-MBComRegistrySnapshot' 'Full executor restores both COM registrations'
+Assert-Contains $fullExecutor 'Restore-MBDllSnapshot' 'Full executor restores the previous DLL by hash'
+Assert-Contains $fullExecutor 'Restore-MBInstallSupportFiles' 'Full executor restores the four fixed support files'
+Assert-Contains $fullExecutor 'Restore-MBInstallMetadataSnapshot' 'Full executor restores configuration, shortcut and ProgramData ACL metadata'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
@@ -304,8 +298,8 @@ Assert-Contains $installer 'IniOriginalSha256' 'Installer records original confi
 Assert-Contains $installer 'ShortcutNewSha256' 'Installer persists the shortcut ownership hash before publishing the shortcut'
 Assert-Contains $workflow 'MicBridge.InstallMetadataRollback.psm1' 'Build package stages metadata rollback actions'
 Assert-Contains $workflow 'MicBridge.MetadataExecutor.psm1' 'Build package stages durable metadata recovery executor'
+Assert-Contains $workflow 'MicBridge.FullInstallRollbackExecutor.psm1' 'Build package stages the full transaction recovery executor'
 
-$fullExecutor = Get-Content -LiteralPath (Join-Path $root 'tools/MicBridge.FullInstallRollbackExecutor.psm1') -Raw
 Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor preserves the fixed main transaction step order'
 Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
 Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
