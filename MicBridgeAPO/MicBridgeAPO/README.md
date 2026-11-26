@@ -4,7 +4,7 @@
 ارفع المجلد، ثم Actions > build-dll > Run workflow، ونزّل MicBridgeAPO-dll.
 
 ## التثبيت
-1. نزّل ملف MicBridgeAPO-Install-Package من GitHub Actions وفك ضغطه كاملًا في مجلد واحد. لا تنقل الملفات منفردة ولا تحذف مجلد tools؛ يجب أن يبقى الملف tools\\MicBridge.RecoveryJournal.psm1 بجانب ملفات التثبيت.
+1. نزّل ملف MicBridgeAPO-Install-Package من GitHub Actions وفك ضغطه كاملًا في مجلد واحد. لا تنقل الملفات منفردة ولا تحذف مجلد tools؛ يجب أن يبقى الملفان tools\\MicBridge.RecoveryJournal.psm1 وtools\\MicBridge.InstallRollbackValidation.psm1 بجانب ملفات التثبيت.
 2. انقر مرتين على install.bat (يطلب صلاحيات المسؤول تلقائيًا).
    لتثبيت مايك آخر: powershell -ExecutionPolicy Bypass -File install.ps1 -DeviceName "الاسم"
 
