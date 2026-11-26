@@ -60,6 +60,8 @@ try {
     [IO.File]::AppendAllText($originalBackup,'tampered')
     $hashMismatch = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if ($hashMismatch.IsValid -or -not ($hashMismatch.Errors -match 'hash')) { throw 'FAIL: modified backup accepted' }
+    [IO.File]::WriteAllText($originalBackup,'snapshot:MicBridgeUI.ps1')
+    $state.InstallFiles[0].Sha256 = (Get-FileHash $originalBackup -Algorithm SHA256).Hash
 
     $clsidExport = Join-Path $tx 'clsid.reg'
     [IO.File]::WriteAllText($clsidExport,'Windows Registry Editor Version 5.00')
