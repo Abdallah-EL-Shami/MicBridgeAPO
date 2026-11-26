@@ -246,6 +246,18 @@ release did not already leave incorrect changes behind.
   absent before installation, backup tampering, preservation of externally
   modified files, and fresh-process executor re-entry. Windows CI run 948 passed
   these tests and the existing COM/DLL/endpoint/ACL suites.
+- Added `MicBridge.InstallMetadataRollback.psm1` and
+  `MicBridge.MetadataExecutor.psm1` for the two configuration files, the
+  desktop shortcut, and ProgramData/Control-file ACLs. The installer now records
+  hashes for pre-existing config files, exact hashes for new config content, and
+  the new shortcut hash before publishing it. Rollback removes only files whose
+  bytes match the transaction's recorded hash; it preserves unrelated edits.
+- Metadata tests cover created-file removal, shortcut ownership, restoration of
+  a missing pre-existing shortcut, ACL restoration (including Windows' derived
+  DACL auto-inherited marker), idempotence, and preservation of foreign edits.
+  The durable transaction fixture also re-enters metadata recovery from a new
+  PowerShell process. Windows CI run 978 passed the complete suite and staged
+  the updated installer package.
 - The support-file executor is not yet called by startup recovery or the
   installer failure handler.
 - The COM executor is still not called by `install.ps1` or startup recovery and
