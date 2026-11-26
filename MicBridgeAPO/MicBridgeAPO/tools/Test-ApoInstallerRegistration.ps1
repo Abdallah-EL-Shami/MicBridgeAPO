@@ -260,5 +260,5 @@ Write-Host 'PASS: No executable content follows the uninstall completion message
 Write-Host 'All installer registration static checks passed.'
 
 Assert-Contains $installer 'TransactionId = \[string\]\$rollbackJournal\.TransactionId' 'Installer binds the durable snapshot to its rollback journal transaction identity'
-Assert-Contains $installer 'snapshotTransactionId\.ToString\(''D''\) -ne \[string\]\$candidateState\.TransactionId' 'Installer rejects interrupted journals paired with a different transaction snapshot'
+Assert-Contains $installer 'Test-MBInstallRollbackTransaction -JournalPath \$candidateJournal -StatePath \$candidateSnapshotPath' 'Installer rejects interrupted journals paired with an invalid or mismatched transaction snapshot through strict preflight'
 Assert-Contains $installer 'Rollback journal and snapshot belong to different transactions' 'Installer checks journal/snapshot transaction identity before rollback mutations'
