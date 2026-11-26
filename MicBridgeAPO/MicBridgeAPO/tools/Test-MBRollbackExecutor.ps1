@@ -138,6 +138,7 @@ try {
     # have proven idempotent re-entry. Restore endpoint FX values and ACLs too.
     $fullResult=Invoke-MBInstallFullRollback -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -ExpectedDeviceId $device -RegistryHive HKCU
     if(-not $fullResult.Success -or @($fullResult.CompletedSteps).Count -ne 3) { throw 'FAIL: full install rollback executor did not complete all three main steps' }
+    Import-Module $journalModule -Force -Global
     $fullJournal=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
     if(@($fullJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: full install rollback journal retained a pending step' }
     $fxCheck=Get-MBEndpointRegistrySnapshot -RegistryPath "HKCU\$fxSub" -ValueNames @('{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15')
