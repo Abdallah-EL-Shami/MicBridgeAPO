@@ -58,7 +58,17 @@ function Test-MBRegistryAclSddl {
     )
     $actual = Get-MBRegistryAclSddl -Hive $Hive -SubKeyPath $SubKeyPath
     if ($null -eq $ExpectedSddl) { return ($null -eq $actual) }
-    return [string]::Equals([string]$actual,$ExpectedSddl,[StringComparison]::Ordinal)
+    # Windows may add the SDDL D:AI control marker when it materializes
+    # inherited registry ACEs. AI is descriptor bookkeeping; compare the
+    # owner/group and the complete ACE sequence without treating that marker
+    # alone as an ACL change.
+    $normalize = {
+        param([string]$value)
+        return [regex]::Replace($value, 'D:AI(?=\\()', 'D:')
+    }
+    $expectedCanonical = & $normalize ([string]$ExpectedSddl)
+    $actualCanonical = & $normalize ([string]$actual)
+    return [string]::Equals($actualCanonical,$expectedCanonical,[StringComparison]::Ordinal)
 }
 
 Export-ModuleMember -Function Get-MBRegistryAclSddl,Restore-MBRegistryAclSddl,Test-MBRegistryAclSddl
