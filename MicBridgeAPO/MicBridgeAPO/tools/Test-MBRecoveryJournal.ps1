@@ -337,6 +337,16 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId $StepId -ExpectedOperation Unin
         throw 'FAIL: dependent plan incorrectly marked a step completed'
     }
 
+    # A dependency must be ordered before the step that consumes it.
+    $orderPath = Join-Path $tempRoot 'dependency-order.json'
+    $orderSteps = @('RestoreAcl','RestoreRegistry')
+    New-MBRecoveryJournal -Path $orderPath -Operation Uninstall -DeviceId $device -StepIds $orderSteps | Out-Null
+    $orderRejected = $false
+    try {
+        Invoke-MBRecoveryPlan -Path $orderPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds $orderSteps -Actions @{ RestoreAcl={}; RestoreRegistry={} } -Verifiers @{ RestoreAcl={ $true }; RestoreRegistry={ $true } } -Dependencies @{ RestoreAcl=@('RestoreRegistry') }
+    } catch { if ($_.Exception.Message -like '*must appear before*') { $orderRejected = $true } else { throw } }
+    if (-not $orderRejected) { throw 'FAIL: recovery plan accepted a prerequisite ordered after its dependent step' }
+
     # The installer may hand its already-held operation lock to the plan.
     # The plan must neither reacquire nor dispose a lock owned by its caller.
     $heldPlanPath = Join-Path $tempRoot 'held-plan.json'
