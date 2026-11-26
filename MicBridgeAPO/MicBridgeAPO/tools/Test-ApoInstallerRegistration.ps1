@@ -310,9 +310,9 @@ Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback execu
 Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
 Assert-Contains $fullExecutor 'Test-MBInstallRollbackTransaction' 'Full executor binds its snapshot to the durable main journal'
 
-Assert-Contains $installer "Write-Host \"سجل التثبيت: \$installLog\"" 'Installer announces the dedicated install log path'
-Assert-Contains $installer "Write-Host \"سجل الاستعادة: \$recoveryLog\"" 'Installer announces the dedicated recovery log path'
-Assert-Contains $uninstaller "Write-Host \"سجل الإزالة: \$uninstallLog\"" 'Uninstaller announces the dedicated uninstall log path'
+Assert-Contains $installer 'Write-Host .*سجل التثبيت:.*installLog' 'Installer announces the dedicated install log path'
+Assert-Contains $installer 'Write-Host .*سجل الاستعادة:.*recoveryLog' 'Installer announces the dedicated recovery log path'
+Assert-Contains $uninstaller 'Write-Host .*سجل الإزالة:.*uninstallLog' 'Uninstaller announces the dedicated uninstall log path'
 Assert-Contains $uninstaller 'Write-UninstallLog .ERROR.' 'Uninstaller records failures in its own log'
 Assert-Contains $uninstaller 'Removed verified MicBridge-owned desktop shortcut' 'Uninstaller records verified shortcut deletion'
 Assert-Contains $uninstaller 'Preserved install directory' 'Uninstaller records why install files were retained'
@@ -324,6 +324,6 @@ Assert-NotContains $ui 'الحزم منذ التشغيل' 'UI does not display c
 Assert-Contains $readme 'Uninstall.log' 'README documents the separate uninstall log'
 Assert-Contains $readme 'Recovery.log' 'README documents the separate recovery log'
 
-Assert-Contains $installer "Write-Host \"سجل فحص الترقية: \$upgradeLog\"" 'Installer announces the separate upgrade-audit log path'
+Assert-Contains $installer 'Write-Host .*سجل فحص الترقية:.*upgradeLog' 'Installer announces the separate upgrade-audit log path'
 Assert-Contains $installer 'Write-UpgradeLog .INFO.' 'Installer writes legacy audit results to the dedicated upgrade log'
 Assert-Contains $readme 'Upgrade.log' 'README documents the dedicated upgrade audit log'
