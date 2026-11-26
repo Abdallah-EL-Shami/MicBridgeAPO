@@ -26,6 +26,9 @@ jobs:
       - name: Test isolated DLL rollback action
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackActions.ps1
+      - name: Test isolated durable DLL rollback executor
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRollbackExecutor.ps1
       - name: Test isolated endpoint registry rollback and crash recovery
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBEndpointRegistryRollback.ps1
