@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $installer = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 $uninstaller = Get-Content -LiteralPath (Join-Path $root 'uninstall.ps1') -Raw
+$rollbackModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw "FAIL: $Message" }
@@ -42,8 +43,9 @@ Assert-Contains $installer "DLL rollback action completed and verified against t
 Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
 Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
 Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
-Assert-Contains $installer 'DLL rollback backup path is missing or outside the protected backup directory' 'Rollback rejects DLL backups outside its dedicated directory'
-Assert-Contains $installer 'Restored DLL hash does not match the durable pre-install backup hash' 'Rollback verifies the restored DLL bytes against the durable snapshot'
+Assert-Contains $rollbackModule 'Test-MBPathWithinDirectory -Candidate \\$BackupPath -Root \\$BackupRoot' 'Rollback rejects DLL backups outside its dedicated directory'
+Assert-Contains $rollbackModule 'Test-MBNoReparsePath -Path \\$BackupPath -StopAt \\$BackupRoot' 'Rollback rejects DLL backups traversing reparse points'
+Assert-Contains $rollbackModule 'Restored DLL hash does not match the durable pre-transaction snapshot' 'Rollback verifies the restored DLL bytes against the durable snapshot'
 Assert-Contains $installer '\$backupHash\s*=\s*\(Get-FileHash\s+-LiteralPath\s+\$backupPath' 'Installer records SHA-256 for each existing UI and uninstaller file snapshot'
 Assert-Contains $installer 'ShortcutBackupSha256\s*=\s*\$shortcutBackupSha256' 'Installer records the original desktop shortcut hash'
 Assert-Contains $installer 'Get-FileHash\s+-LiteralPath\s+\$target\s+-Algorithm SHA256' 'Rollback verifies restored UI and uninstaller file contents'
