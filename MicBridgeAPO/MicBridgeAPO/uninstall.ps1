@@ -497,12 +497,27 @@ if (-not (Test-Path -LiteralPath $cleanupJournal -PathType Leaf)) {
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
 $shortcutOwnershipFile = Join-Path $dataDir 'desktop-shortcut.sha256'
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
-    # Remove only the exact shortcut whose hash was recorded immediately after MicBridge created it.
-    # Missing/malformed ownership data or a changed shortcut means preserve it, fail closed.
-    if ((Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -and
-        (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+    # Only delete the exact file whose SHA-256 was recorded by the installer.
+    if ((Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -and (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
         $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
-        if ($ownedHash -match '^[A-Fa-f0-9]{64}
+        if ($ownedHash.Length -eq 64 -and $ownedHash -match '^[0-9A-Fa-f]+$') {
+            $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ([string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)) {
+                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+            } else {
+                Write-Warning 'Desktop shortcut changed after MicBridge created it; preserving the user-modified shortcut.'
+            }
+        } else {
+            Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
+        }
+    }
+} -Verify {
+    if (-not (Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -or -not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $true }
+    $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
+    if ($ownedHash.Length -ne 64 -or $ownedHash -notmatch '^[0-9A-Fa-f]+$') { return $true }
+    $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    -not [string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)
+}
 
 $serviceRestartMarker = "$cleanupJournal.service-restarted"
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
@@ -543,7 +558,6 @@ Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت
         } else {
             Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
         }
-    }
     }
 } -Verify {
     if (-not (Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -or
