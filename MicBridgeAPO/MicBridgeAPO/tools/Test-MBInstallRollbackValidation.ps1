@@ -116,8 +116,8 @@ try {
 
     # Exercise the production restore primitive against an isolated HKCU key.
     $restoreLeaf = 'MicBridgeRollbackRestore-' + [guid]::NewGuid().ToString('N')
-    $restoreProviderPath = "Registry::HKEY_CURRENT_USER\\Software\\$restoreLeaf"
-    $restoreRegistryPath = "HKCU\\Software\\$restoreLeaf"
+    $restoreProviderPath = "Registry::HKEY_CURRENT_USER\Software\$restoreLeaf"
+    $restoreRegistryPath = "HKCU\Software\$restoreLeaf"
     $restoreSnapshot = Join-Path $tx 'restore-fixture.reg'
     New-Item -Path $restoreProviderPath -Force | Out-Null
     Set-ItemProperty -LiteralPath $restoreProviderPath -Name 'OriginalValue' -Value 'before' -Type String
