@@ -37,17 +37,31 @@ namespace MicBridge.LegacyFileHandleLease {
             SafeFileHandle handle, System.Text.StringBuilder path, uint length, uint flags);
     }
 
+    public sealed class DirectoryPinSet : IDisposable {
+        private System.Collections.Generic.List<SafeFileHandle> handles =
+            new System.Collections.Generic.List<SafeFileHandle>();
+        internal void Add(SafeFileHandle handle) { handles.Add(handle); }
+        public void Dispose() {
+            if (handles != null) {
+                for (int i = handles.Count - 1; i >= 0; --i) handles[i].Dispose();
+                handles = null;
+            }
+        }
+    }
+
     public sealed class Lease : IDisposable {
         private SafeFileHandle handle;
         private FileStream stream;
+        private DirectoryPinSet directoryPins;
         public string FinalPath { get; private set; }
         public string Sha256 { get; private set; }
         public string FileIdentity { get; private set; }
         public long Length { get; private set; }
         public bool IsOpen { get { return handle != null && !handle.IsClosed && !handle.IsInvalid; } }
 
-        internal Lease(SafeFileHandle h, string finalPath, BY_HANDLE_FILE_INFORMATION info) {
+        internal Lease(SafeFileHandle h, string finalPath, BY_HANDLE_FILE_INFORMATION info, DirectoryPinSet pins) {
             handle = h;
+            directoryPins = pins;
             FinalPath = finalPath;
             FileIdentity = info.VolumeSerialNumber.ToString("X8") + ":" +
                 info.FileIndexHigh.ToString("X8") + info.FileIndexLow.ToString("X8");
@@ -75,7 +89,8 @@ namespace MicBridge.LegacyFileHandleLease {
                 stream.Position = 0;
             } catch {
                 if (stream != null) { stream.Dispose(); stream = null; }
-                else if (handle != null) { handle.Dispose(); handle = null; }
+                if (handle != null) { handle.Dispose(); handle = null; }
+                if (directoryPins != null) { directoryPins.Dispose(); directoryPins = null; }
                 throw;
             }
         }
@@ -83,6 +98,7 @@ namespace MicBridge.LegacyFileHandleLease {
         public void Dispose() {
             if (stream != null) { stream.Dispose(); stream = null; }
             if (handle != null) { handle.Dispose(); handle = null; }
+            if (directoryPins != null) { directoryPins.Dispose(); directoryPins = null; }
         }
     }
 
@@ -117,60 +133,99 @@ namespace MicBridge.LegacyFileHandleLease {
             }
         }
 
-        private static void ValidateDirectoryComponent(string path) {
-            using (SafeFileHandle h = Native.CreateFile(path, 0x80, FILE_SHARE_ALL, IntPtr.Zero,
-                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
-                if (h.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        private static DirectoryPinSet PinDirectoryChain(string directoryPath) {
+            string full = Path.GetFullPath(directoryPath);
+            string volumeRoot = Path.GetPathRoot(full);
+            if (String.IsNullOrEmpty(volumeRoot))
+                throw new InvalidOperationException("Directory path has no supported volume root.");
+            DirectoryPinSet pins = new DirectoryPinSet();
+            try {
+                string current = volumeRoot;
+                PinDirectoryComponent(current, pins);
+                string remainder = full.Substring(volumeRoot.Length);
+                string[] parts = remainder.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string part in parts) {
+                    current = Path.Combine(current, part);
+                    PinDirectoryComponent(current, pins);
+                }
+                return pins;
+            } catch { pins.Dispose(); throw; }
+        }
+
+        private static void PinDirectoryComponent(string path, DirectoryPinSet pins) {
+            // Do not share write/delete: while the lease is alive, directory entries cannot be
+            // renamed, removed, or replaced through ordinary Win32 path operations.
+            SafeFileHandle h = Native.CreateFile(path, 0x80, 0x00000001, IntPtr.Zero,
+                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+            if (h.IsInvalid) {
+                int error = Marshal.GetLastWin32Error(); h.Dispose();
+                throw new System.ComponentModel.Win32Exception(error);
+            }
+            try {
                 BY_HANDLE_FILE_INFORMATION info;
                 if (!Native.GetFileInformationByHandle(h, out info))
                     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
                 if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
                     (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
                     throw new InvalidOperationException("A directory component is not a regular directory or is a reparse point: " + path);
-            }
+                pins.Add(h);
+                h = null;
+            } finally { if (h != null) h.Dispose(); }
         }
 
         public static Lease OpenExclusiveRegularFile(string candidatePath, string installRoot,
                                                      string expectedSha256, string expectedIdentity) {
             string fullCandidate = Path.GetFullPath(candidatePath);
             string fullRoot = Path.GetFullPath(installRoot);
-            ValidateDirectoryChain(fullRoot);
-            ValidateDirectoryChain(Path.GetDirectoryName(fullCandidate));
-            using (SafeFileHandle root = Native.CreateFile(fullRoot, 0x80, FILE_SHARE_ALL, IntPtr.Zero,
-                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
-                if (root.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                BY_HANDLE_FILE_INFORMATION ri;
-                if (!Native.GetFileInformationByHandle(root, out ri)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                if ((ri.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
-                    (ri.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
-                    throw new InvalidOperationException("Install root is not a regular directory.");
-                string rootFinal = FinalPath(root).TrimEnd('\\');
-                SafeFileHandle file = Native.CreateFile(fullCandidate, GENERIC_READ, 0, IntPtr.Zero,
+            DirectoryPinSet pins = new DirectoryPinSet();
+            SafeFileHandle file = null;
+            try {
+                DirectoryPinSet rootPins = PinDirectoryChain(fullRoot);
+                DirectoryPinSet parentPins = PinDirectoryChain(Path.GetDirectoryName(fullCandidate));
+                // Transfer both chains into one owner without releasing their handles.
+                pins.AddRange(rootPins);
+                pins.AddRange(parentPins);
+                rootPins.Dispose();
+                parentPins.Dispose();
+                string rootFinal;
+                using (SafeFileHandle root = Native.CreateFile(fullRoot, 0x80, FILE_SHARE_READ, IntPtr.Zero,
+                        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
+                    if (root.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    BY_HANDLE_FILE_INFORMATION ri;
+                    if (!Native.GetFileInformationByHandle(root, out ri)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    if ((ri.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                        (ri.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                        throw new InvalidOperationException("Install root is not a regular directory.");
+                    rootFinal = FinalPath(root).TrimEnd('\\');
+                }
+                file = Native.CreateFile(fullCandidate, GENERIC_READ, 0, IntPtr.Zero,
                     OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
                 if (file.IsInvalid) {
-                    int error = Marshal.GetLastWin32Error(); file.Dispose();
+                    int error = Marshal.GetLastWin32Error(); file.Dispose(); file = null;
                     throw new System.ComponentModel.Win32Exception(error);
                 }
+                BY_HANDLE_FILE_INFORMATION fi;
+                if (!Native.GetFileInformationByHandle(file, out fi)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                if ((fi.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+                    throw new InvalidOperationException("Candidate is a directory or reparse point.");
+                string candidateFinal = FinalPath(file);
+                string prefix = rootFinal + "\\";
+                if (!candidateFinal.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Opened file handle resolves outside the audited installation root.");
+                Lease lease = new Lease(file, candidateFinal, fi, pins);
+                file = null;
+                pins = null;
                 try {
-                    BY_HANDLE_FILE_INFORMATION fi;
-                    if (!Native.GetFileInformationByHandle(file, out fi)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                    if ((fi.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
-                        throw new InvalidOperationException("Candidate is a directory or reparse point.");
-                    string candidateFinal = FinalPath(file);
-                    string prefix = rootFinal + "\\";
-                    if (!candidateFinal.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Opened file handle resolves outside the audited installation root.");
-                    var lease = new Lease(file, candidateFinal, fi);
-                    file = null;
-                    try {
-                        if (!String.Equals(lease.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
-                            throw new InvalidOperationException("Opened file handle hash differs from signed approval.");
-                        if (!String.IsNullOrEmpty(expectedIdentity) &&
-                            !String.Equals(lease.FileIdentity, expectedIdentity, StringComparison.OrdinalIgnoreCase))
-                            throw new InvalidOperationException("Opened file identity differs from the approved identity.");
-                        return lease;
-                    } catch { lease.Dispose(); throw; }
-                } finally { if (file != null) file.Dispose(); }
+                    if (!String.Equals(lease.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Opened file handle hash differs from signed approval.");
+                    if (!String.IsNullOrEmpty(expectedIdentity) &&
+                        !String.Equals(lease.FileIdentity, expectedIdentity, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Opened file identity differs from the approved identity.");
+                    return lease;
+                } catch { lease.Dispose(); throw; }
+            } finally {
+                if (file != null) file.Dispose();
+                if (pins != null) pins.Dispose();
             }
         }
     }
