@@ -281,3 +281,12 @@ if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $c
 $repoRoot = Split-Path -Parent $root
 $workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -Raw
 Assert-Contains $workflow 'MicBridge.LegacyInstallAudit.psm1' 'Build package stages the legacy audit module beside the installer'
+
+Assert-Contains $uninstaller 'MicBridge.LegacyInstallAudit.psm1' 'Uninstaller loads the read-only legacy installation audit'
+Assert-Contains $uninstaller 'Test-MBLegacyInstallationState' 'Uninstaller validates permanent backup provenance before restoring Windows state'
+Assert-Contains $uninstaller 'Legacy installation audit requires manual review' 'Uninstaller preserves ambiguous legacy state without deleting files or registrations'
+$uninstallAuditPosition = $uninstaller.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
+$uninstallJournalPosition = $uninstaller.IndexOf('New-MBRecoveryJournal',[StringComparison]::Ordinal)
+if ($uninstallAuditPosition -lt 0 -or $uninstallJournalPosition -lt 0 -or $uninstallAuditPosition -gt $uninstallJournalPosition) {
+    throw 'FAIL: uninstall legacy audit must run before recovery journal creation and all mutations'
+}
