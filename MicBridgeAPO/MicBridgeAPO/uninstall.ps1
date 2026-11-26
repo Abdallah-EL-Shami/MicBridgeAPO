@@ -495,12 +495,93 @@ if (-not (Test-Path -LiteralPath $cleanupJournal -PathType Leaf)) {
 }
 
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
+$shortcutOwnershipFile = Join-Path $dataDir 'desktop-shortcut.sha256'
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
-    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
-        Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+    # Remove only the exact shortcut whose hash was recorded immediately after MicBridge created it.
+    # Missing/malformed ownership data or a changed shortcut means preserve it, fail closed.
+    if ((Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -and
+        (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+        $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
+        if ($ownedHash -match '^[A-Fa-f0-9]{64}
+
+$serviceRestartMarker = "$cleanupJournal.service-restarted"
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    Remove-Item -LiteralPath $serviceRestartMarker -Force -ErrorAction SilentlyContinue
+    Restart-Service -Name Audiosrv -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+    [IO.File]::WriteAllText($serviceRestartMarker,[DateTime]::UtcNow.ToString('o'),(New-Object Text.UTF8Encoding($false)))
+} -Verify {
+    $audioService = Get-Service -Name Audiosrv -ErrorAction Stop
+    (Test-Path -LiteralPath $serviceRestartMarker -PathType Leaf) -and ($audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running)
+}
+
+$preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists)
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    if ($preserveInstallDirectory) {
+        Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
+    } elseif (Test-Path -LiteralPath $installDir) {
+        Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction Stop
     }
 } -Verify {
-    -not (Test-Path -LiteralPath $shortcutPath)
+    if ($preserveInstallDirectory) {
+        Test-Path -LiteralPath $installDir -PathType Container
+    } else {
+        -not (Test-Path -LiteralPath $installDir)
+    }
+}
+} finally {
+    if ($operationLock) { $operationLock.Dispose() }
+}
+Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
+) {
+            $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ([string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)) {
+                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+            } else {
+                Write-Warning 'Desktop shortcut changed after MicBridge created it; preserving the user-modified shortcut.'
+            }
+        } else {
+            Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
+        }
+    }
+} -Verify {
+    if (-not (Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $true }
+    $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
+    if ($ownedHash -notmatch '^[A-Fa-f0-9]{64}
+
+$serviceRestartMarker = "$cleanupJournal.service-restarted"
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    Remove-Item -LiteralPath $serviceRestartMarker -Force -ErrorAction SilentlyContinue
+    Restart-Service -Name Audiosrv -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+    [IO.File]::WriteAllText($serviceRestartMarker,[DateTime]::UtcNow.ToString('o'),(New-Object Text.UTF8Encoding($false)))
+} -Verify {
+    $audioService = Get-Service -Name Audiosrv -ErrorAction Stop
+    (Test-Path -LiteralPath $serviceRestartMarker -PathType Leaf) -and ($audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running)
+}
+
+$preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists)
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    if ($preserveInstallDirectory) {
+        Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
+    } elseif (Test-Path -LiteralPath $installDir) {
+        Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction Stop
+    }
+} -Verify {
+    if ($preserveInstallDirectory) {
+        Test-Path -LiteralPath $installDir -PathType Container
+    } else {
+        -not (Test-Path -LiteralPath $installDir)
+    }
+}
+} finally {
+    if ($operationLock) { $operationLock.Dispose() }
+}
+Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
+) { return $true }
+    $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    -not [string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)
 }
 
 $serviceRestartMarker = "$cleanupJournal.service-restarted"

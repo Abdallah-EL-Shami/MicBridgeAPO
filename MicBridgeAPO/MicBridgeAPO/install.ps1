@@ -496,14 +496,30 @@ $efxList += $clsid
 Set-ItemProperty -LiteralPath "$capRoot\$($dev.Id)\FxProperties" -Name $fxCompositeValue -Value ([string[]]$efxList) -Type MultiString
 Write-InstallLog 'INFO' ("Registered composite EFX list: {0}" -f ($efxList -join '; '))
 
-# ---- 8) اختصار الواجهة على سطح المكتب
+# ---- 8) Create an owned desktop shortcut without overwriting a pre-existing user shortcut.
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
+$shortcutOwnershipFile = Join-Path $dataDir 'desktop-shortcut.sha256'
+$shortcutTempPath = Join-Path (Split-Path -Parent $shortcutPath) ('MicBridge.' + [guid]::NewGuid().ToString('N') + '.tmp.lnk')
 try {
-    $ws = New-Object -ComObject WScript.Shell
-    $lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'))
-    $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
-    $lnk.Save()
-} catch { Write-Warning "لم يُنشأ اختصار سطح المكتب: $($_.Exception.Message)" }
+    if (-not (Test-Path -LiteralPath $shortcutPath)) {
+        $ws = New-Object -ComObject WScript.Shell
+        $lnk = $ws.CreateShortcut($shortcutTempPath)
+        $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
+        $lnk.Save()
+        # File.Move without overwrite closes the race with another creator.
+        [IO.File]::Move($shortcutTempPath, $shortcutPath)
+        $shortcutHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        [IO.File]::WriteAllText($shortcutOwnershipFile, $shortcutHash, (New-Object Text.UTF8Encoding($false)))
+        Write-InstallLog 'INFO' 'Created and recorded ownership of the MicBridge desktop shortcut.'
+    } else {
+        Write-InstallLog 'INFO' 'Preserved an existing desktop shortcut; MicBridge did not overwrite it.'
+    }
+} catch {
+    Write-Warning "لم يُنشأ اختصار سطح المكتب أو تعذر تسجيل ملكيته: $($_.Exception.Message)"
+} finally {
+    if (Test-Path -LiteralPath $shortcutTempPath) { Remove-Item -LiteralPath $shortcutTempPath -Force -ErrorAction SilentlyContinue }
+}
 
 # ---- 9) إعادة تشغيل خدمة الصوت
 Write-InstallLog 'INFO' 'Restarting Audiosrv.'
