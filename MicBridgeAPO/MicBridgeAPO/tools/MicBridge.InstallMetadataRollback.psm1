@@ -148,7 +148,7 @@ function Restore-MBInstallMetadataSnapshot {
         $shortcutExists=Test-Path -LiteralPath (Join-Path $desktop 'MicBridge.lnk')
         $actualDataSddl=(Get-Acl -LiteralPath $data -ErrorAction Stop).Sddl
         $dataAclMatch=($actualDataSddl -eq [string]$State.DataDirSddl)
-        throw "Metadata rollback verification failed. IniExists=$iniExists; ControlExists=$controlExists; ShortcutExists=$shortcutExists; DataDirAclMatch=$dataAclMatch."
+        throw "Metadata rollback verification failed. IniExists=$iniExists; ControlExists=$controlExists; ShortcutExists=$shortcutExists; DataDirAclMatch=$dataAclMatch; ExpectedDataSddl=$($State.DataDirSddl); ActualDataSddl=$actualDataSddl."
     }
     return $true
 }
