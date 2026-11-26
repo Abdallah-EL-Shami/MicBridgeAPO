@@ -126,6 +126,7 @@ function Test-MBLegacyInstallationState {
         }
     }
 
+    $clsidProductCandidate=$false
     foreach($target in $registryTargets) {
         if(-not (Test-Path -LiteralPath $target.Path)) {
             $findings.Add([pscustomobject]@{Kind='Registration';Name=$target.Name;Classification='Absent';Path=$target.Path;ServerPath=$null;Sha256=$null})
@@ -143,6 +144,9 @@ function Test-MBLegacyInstallationState {
             }
         }
         $classification='Ambiguous'; $serverHash=$null
+        if([string]::IsNullOrWhiteSpace($serverPath) -and $target.Name -eq 'AudioEngine APO' -and $clsidProductCandidate) {
+            $classification='MicBridgeCandidate'
+        }
         if(-not [string]::IsNullOrWhiteSpace($serverPath)) {
             try {
                 $serverFull=[IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($serverPath.Trim('"')))
@@ -157,6 +161,7 @@ function Test-MBLegacyInstallationState {
                 } else { $classification='MissingOrUnresolvedServer' }
             } catch { $classification='InvalidServerPath' }
         }
+        if($target.Name -eq 'COM CLSID' -and $classification -eq 'MicBridgeCandidate') { $clsidProductCandidate=$true }
         $findings.Add([pscustomobject]@{Kind='Registration';Name=$target.Name;Classification=$classification;Path=$target.Path;ServerPath=$serverPath;Sha256=$serverHash})
     }
 
