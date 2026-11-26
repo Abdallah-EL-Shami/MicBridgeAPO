@@ -649,8 +649,7 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                                 $remaining = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
                                 if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue }
                             }
-                            try { Restart-Service -Name Audiosrv -Force -ErrorAction Stop; Write-InstallLog 'INFO' 'Audio service restarted after transaction rollback.' }
-                            catch { Write-InstallLog 'CRITICAL' "Audio service restart after rollback failed: $($_.Exception.Message)" }
+                            # Recovery deliberately does not restart or otherwise control Audiosrv.
                             Write-InstallLog 'INFO' 'Registry endpoint, COM registration, files, ACLs, and newly-created configuration state rolled back to the pre-attempt snapshot.'
                 
             } -Verify {
