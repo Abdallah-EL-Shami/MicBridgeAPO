@@ -28,6 +28,25 @@ $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Assoc
 $ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
+
+# Fail closed when a prior install rollback was interrupted. Until the full
+# replay handler is available, never start a new transaction over uncertain state.
+if (Test-Path -LiteralPath $dataDir -PathType Container) {
+    $pendingRollbackJournals = @()
+    foreach ($transactionFolder in @(Get-ChildItem -LiteralPath $dataDir -Directory -Filter 'transactions-*' -ErrorAction Stop)) {
+        $candidateJournal = Join-Path $transactionFolder.FullName 'rollback-recovery.json'
+        if (-not (Test-Path -LiteralPath $candidateJournal -PathType Leaf)) { continue }
+        $candidateState = Read-MBRecoveryJournal -Path $candidateJournal -ExpectedOperation InstallRollback
+        $unfinished = @($candidateState.Steps | Where-Object { $_.State -ne 'Completed' })
+        if ($unfinished.Count -gt 0) {
+            $pendingRollbackJournals += $candidateJournal
+        }
+    }
+    if ($pendingRollbackJournals.Count -gt 0) {
+        $paths = $pendingRollbackJournals -join '; '
+        throw "An interrupted MicBridge installation rollback was detected. A new installation is blocked to protect the previous device state. Recovery replay is not yet automated; preserve these transaction folders and use the recovery procedure: $paths"
+    }
+}
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $backupFile = Join-Path $dataDir 'backup.json'
 $installLog = Join-Path $dataDir 'Install.log'
