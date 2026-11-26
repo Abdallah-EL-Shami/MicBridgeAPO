@@ -72,7 +72,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         $pendingTransactionDirectory = Split-Path -Parent $pendingJournalPath
         $pendingJournal = Read-MBRecoveryJournal -Path $pendingJournalPath -ExpectedOperation InstallRollback -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
         $pendingDeviceId = [guid]::Parse([string]$pendingJournal.DeviceId)
-        $fullRollbackModule = Join-Path $PSScriptRoot 'tools\\MicBridge.FullInstallRollbackExecutor.psm1'
+        $fullRollbackModule = Join-Path $PSScriptRoot 'tools\MicBridge.FullInstallRollbackExecutor.psm1'
         if (-not (Test-Path -LiteralPath $fullRollbackModule -PathType Leaf)) {
             if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
             throw "Full rollback executor is missing; preserve the pending transaction: $fullRollbackModule"
