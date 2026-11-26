@@ -36,18 +36,28 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
     foreach ($transactionFolder in @(Get-ChildItem -LiteralPath $dataDir -Directory -Filter 'transactions-*' -ErrorAction Stop)) {
         $candidateJournal = Join-Path $transactionFolder.FullName 'rollback-recovery.json'
         if (-not (Test-Path -LiteralPath $candidateJournal -PathType Leaf)) { continue }
-        $candidateState = Read-MBRecoveryJournal -Path $candidateJournal -ExpectedOperation InstallRollback
+        $candidateStepIds = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+        $candidateState = Read-MBRecoveryJournal -Path $candidateJournal -ExpectedOperation InstallRollback -ExpectedStepIds $candidateStepIds
         $candidateSnapshotPath = Join-Path $transactionFolder.FullName 'state.json'
         if (-not (Test-Path -LiteralPath $candidateSnapshotPath -PathType Leaf)) {
             throw "Interrupted install rollback has no transaction snapshot: $candidateSnapshotPath"
         }
-        $candidateSnapshot = Get-Content -LiteralPath $candidateSnapshotPath -Raw | ConvertFrom-Json
-        $snapshotTransactionId = [guid]::Empty
-        if (-not [guid]::TryParse([string]$candidateSnapshot.TransactionId,[ref]$snapshotTransactionId) -or
-            $snapshotTransactionId.ToString('D') -ne [string]$candidateState.TransactionId) {
-            throw "Interrupted install rollback journal/snapshot transaction identity mismatch: $candidateJournal"
+        $candidateDeviceId = [guid]::Empty
+        if (-not [guid]::TryParse([string]$candidateState.DeviceId,[ref]$candidateDeviceId)) {
+            throw "Interrupted install rollback journal has an invalid endpoint identity: $candidateJournal"
         }
-        $unfinished = @($candidateState.Steps | Where-Object { $_.State -ne 'Completed' })
+        # Strict read-only preflight before classifying a transaction as pending.
+        # This does not replay or mutate Registry, ACLs, COM, DLLs, or files.
+        $rollbackValidationModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallRollbackValidation.psm1'
+        if (-not (Test-Path -LiteralPath $rollbackValidationModule -PathType Leaf)) {
+            throw "Rollback validation module is missing; refusing to inspect pending transaction: $rollbackValidationModule"
+        }
+        Import-Module -Name $rollbackValidationModule -Force -ErrorAction Stop
+        $candidateValidation = Test-MBInstallRollbackTransaction -JournalPath $candidateJournal -StatePath $candidateSnapshotPath -TransactionDirectory $transactionFolder.FullName -DataDirectory $dataDir -ExpectedDeviceId $candidateDeviceId -ExpectedStepIds $candidateStepIds
+        if (-not $candidateValidation.IsValid -or -not $candidateValidation.ReplaySafe) {
+            throw "Interrupted install rollback transaction failed read-only preflight; preserve it for manual recovery. $candidateJournal :: $($candidateValidation.Errors -join '; ')"
+        }
+        $unfinished = @($candidateValidation.Journal.Steps | Where-Object { $_.State -ne 'Completed' })
         if ($unfinished.Count -gt 0) {
             $pendingRollbackJournals += $candidateJournal
         }
