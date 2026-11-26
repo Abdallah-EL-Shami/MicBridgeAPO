@@ -127,9 +127,7 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     # Fallback restoration must honor the same writer lock as normal journal writes.
     $lockedFallbackPath = Join-Path $tempRoot 'locked-fallback.json'
     New-MBRecoveryJournal -Path $lockedFallbackPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreLocked') | Out-Null
-    $lockedFallbackSeed = Read-MBRecoveryJournal -Path $lockedFallbackPath
-    $lockedFallbackSeed.UpdatedUtc = [DateTime]::UtcNow.AddSeconds(1).ToString('o')
-    Write-MBRecoveryJsonAtomic -Path $lockedFallbackPath -Value $lockedFallbackSeed
+    Invoke-MBRecoveryStep -Path $lockedFallbackPath -StepId 'RestoreLocked' -Action { } -Verify { $true }
     [IO.File]::WriteAllText($lockedFallbackPath,'{corrupted')
     $corruptBytesBefore = [IO.File]::ReadAllBytes($lockedFallbackPath)
     $fallbackWriteLock = New-Object IO.FileStream("$lockedFallbackPath.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
@@ -148,9 +146,7 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
 
     $lockedMissingPath = Join-Path $tempRoot 'locked-missing.json'
     New-MBRecoveryJournal -Path $lockedMissingPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreMissingLocked') | Out-Null
-    $lockedMissingSeed = Read-MBRecoveryJournal -Path $lockedMissingPath
-    $lockedMissingSeed.UpdatedUtc = [DateTime]::UtcNow.AddSeconds(1).ToString('o')
-    Write-MBRecoveryJsonAtomic -Path $lockedMissingPath -Value $lockedMissingSeed
+    Invoke-MBRecoveryStep -Path $lockedMissingPath -StepId 'RestoreMissingLocked' -Action { } -Verify { $true }
     Remove-Item -LiteralPath $lockedMissingPath -Force
     $missingWriteLock = New-Object IO.FileStream("$lockedMissingPath.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     try {
