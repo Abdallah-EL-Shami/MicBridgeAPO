@@ -508,26 +508,21 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                         # Reload the durable snapshot: process-local variables are not recovery evidence.
                         $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
                         if ([bool]$tx.DllReplacementStarted) {
-                            $backupPath = [string]$tx.DllBackupPath
-                            $backupHash = [string]$tx.DllBackupSha256
-                            if ([bool]$tx.DllExisted) {
-                                $backupRoot = [IO.Path]::GetFullPath((Join-Path $dataDir 'dll-backups') + [IO.Path]::DirectorySeparatorChar)
-                                if ([string]::IsNullOrWhiteSpace($backupPath) -or -not [IO.Path]::GetFullPath($backupPath).StartsWith($backupRoot,[StringComparison]::OrdinalIgnoreCase)) {
-                                    throw 'DLL rollback backup path is missing or outside the protected backup directory.'
-                                }
-                                if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf) -or [string]::IsNullOrWhiteSpace($backupHash)) {
-                                    throw 'DLL rollback backup or its recorded hash is missing; refusing to continue.'
-                                }
-                                $actualBackupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash
-                                if ($actualBackupHash -ne $backupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
-                                Copy-Item -LiteralPath $backupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
-                                if ((Get-FileHash -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Algorithm SHA256).Hash -ne $backupHash) {
-                                    throw 'Restored DLL hash does not match the durable pre-install backup hash.'
-                                }
-                                Write-InstallLog 'INFO' "Previous DLL restored from verified backup '$backupPath'."
-                            } else {
-                                Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue
+                            $dllRollbackModule = Join-Path $PSScriptRoot 'tools\MicBridge.InstallRollbackActions.psm1'
+                            Import-Module -Name $dllRollbackModule -Force -ErrorAction Stop
+                            $dllRollbackArgs = @{
+                                InstalledDllPath=(Join-Path $installDir 'MicBridgeAPO.dll')
+                                DllExisted=[bool]$tx.DllExisted
+                                ReplacementStarted=$true
+                                OriginalSha256=[string]$tx.DllOriginalSha256
+                                BackupPath=[string]$tx.DllBackupPath
+                                BackupSha256=[string]$tx.DllBackupSha256
+                                BackupRoot=(Join-Path $dataDir 'dll-backups')
+                                NewDllSha256=[string]$tx.DllNewSha256
+                                InstallRoot=$installDir
                             }
+                            Restore-MBDllSnapshot @dllRollbackArgs | Out-Null
+                            Write-InstallLog 'INFO' 'DLL rollback action completed and verified against transaction hashes.'
                         }
                         # Roll back this installation attempt to the immediately preceding installed state.
                             $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
@@ -574,7 +569,6 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                                 $acl.SetSecurityDescriptorSddlForm([string]$tx.ControlSddl)
                                 Set-Acl -LiteralPath $controlPath -AclObject $acl
                             }
-                            if (-not $tx.DllExisted -and -not $dllBackupPath) { Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue }
                             if (-not $tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) {
                                 $remaining = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
                                 if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue }
