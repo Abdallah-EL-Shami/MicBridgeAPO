@@ -24,12 +24,15 @@ try {
         BackupPath=$backup
         BackupSha256=$backupHash
         BackupRoot=$backupRoot
+        InstallRoot=$installRoot
     }
     Restore-MBDllSnapshot @args | Out-Null
     if (-not (Test-MBDllSnapshotRestored @args)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
     Restore-MBDllSnapshot @args | Out-Null
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $originalHash) { throw 'FAIL: repeated recovery was not idempotent' }
 
+    # Tampered backup rejection must leave the currently installed bytes unchanged.
+    $beforeTamperReject = [Convert]::ToBase64String([IO.File]::ReadAllBytes($installed))
     # Simulate a crash after the destination copy but before journal completion,
     # followed by loss of the backup file. A verified destination must be enough
     # to recognize that the action already completed.
@@ -41,6 +44,7 @@ try {
     $rejected = $false
     try { Restore-MBDllSnapshot @args | Out-Null } catch { $rejected = $_.Exception.Message -match 'backup hash mismatch' }
     if (-not $rejected) { throw 'FAIL: tampered DLL backup was not rejected' }
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($installed)) -ne $beforeTamperReject) { throw 'FAIL: rejected tampered backup changed the destination DLL' }
 
     $newInstallDll = Join-Path $installRoot 'new-install.dll'
     [IO.File]::WriteAllBytes($newInstallDll,$newBytes)
@@ -49,10 +53,16 @@ try {
         DllExisted=$false
         ReplacementStarted=$true
         BackupRoot=$backupRoot
+        InstallRoot=$installRoot
     }
     Restore-MBDllSnapshot @removeArgs | Out-Null
     if (Test-Path -LiteralPath $newInstallDll) { throw 'FAIL: newly-created DLL remained after rollback' }
     Restore-MBDllSnapshot @removeArgs | Out-Null
+    $outsideFile = Join-Path $root 'unrelated.dll'
+    [IO.File]::WriteAllBytes($outsideFile,$newBytes)
+    $outsideRejected = $false
+    try { Restore-MBDllSnapshot @{ InstalledDllPath=$outsideFile; DllExisted=$false; ReplacementStarted=$true; InstallRoot=$installRoot } | Out-Null } catch { $outsideRejected = $true }
+    if (-not $outsideRejected -or -not (Test-Path -LiteralPath $outsideFile)) { throw 'FAIL: out-of-root DLL destination was not safely rejected' }
 
     $untouchedArgs = @{
         InstalledDllPath=$installed
@@ -60,6 +70,7 @@ try {
         ReplacementStarted=$false
         OriginalSha256=(Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
         BackupRoot=$backupRoot
+        InstallRoot=$installRoot
     }
     if (-not (Test-MBDllSnapshotRestored @untouchedArgs)) { throw 'FAIL: untouched original DLL did not verify' }
 
