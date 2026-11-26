@@ -43,4 +43,14 @@ if (-not $workflowSource.Contains('Test-MBInstallerLegacyGate.ps1')) {
     throw 'FAIL: CI workflow does not run this installer-gate contract test.'
 }
 
-Write-Host 'PASS: installer parses; first-install and upgrade legacy gates fail closed before snapshot/restore-point work; audit gate is read-only; package includes audit module.'
+# Verify every module imported from the installer's adjacent tools folder is staged.
+$moduleNames = @('MicBridge.RecoveryJournal.psm1','MicBridge.InstallRollbackValidation.psm1','MicBridge.FullInstallRollbackExecutor.psm1','MicBridge.LegacyInstallAudit.psm1','MicBridge.RegistryAclRollback.psm1')
+foreach ($moduleName in $moduleNames) {
+    if (-not $source.Contains($moduleName)) { throw "FAIL: installer does not reference expected module '$moduleName'." }
+    if (-not $workflowSource.Contains($moduleName)) { throw "FAIL: package staging omits installer dependency '$moduleName'." }
+}
+if (-not $workflowSource.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll' $package")) {
+    throw 'FAIL: staged package does not include the freshly built APO DLL.'
+}
+
+Write-Host 'PASS: installer parses; first-install and upgrade legacy gates fail closed before snapshot/restore-point work; audit gate is read-only; all imported modules and APO DLL are staged.'
