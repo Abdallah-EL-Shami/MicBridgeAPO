@@ -33,7 +33,6 @@ try {
     throw
 }
 try {
-try {
 
 $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
