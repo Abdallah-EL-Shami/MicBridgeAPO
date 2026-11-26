@@ -133,7 +133,7 @@ function Test-RegistryValueSnapshot([string]$sub, [string]$name, $snapshot) {
 }
 
 function Test-RegistryTreeSnapshot([string]$sub, [bool]$ExpectedExists, [string]$ExpectedHash) {
-    $registryPath = 'HKLM:\\' + $sub
+    $registryPath = 'HKLM:\' + $sub
     $exists = Test-Path -LiteralPath $registryPath
     if ($exists -ne $ExpectedExists) { return $false }
     if (-not $ExpectedExists) { return $true }
