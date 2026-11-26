@@ -5,6 +5,13 @@ function Get-MBMetadataHash {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
 }
 
+function ConvertTo-MBComparableSddl {
+    param([Parameter(Mandatory)][string]$Sddl)
+    # Windows may set the DACL auto-inherited control bit when applying an
+    # otherwise identical descriptor to a directory. Compare owner, group,
+    # ACEs and inheritance semantics, ignoring only that derived control bit.
+    return ($Sddl -replace 'D:AI','D:')
+}
 function Test-MBMetadataPathNoReparse {
     param([Parameter(Mandatory)][string]$Path)
     try {
@@ -147,7 +154,7 @@ function Restore-MBInstallMetadataSnapshot {
         $controlExists=Test-Path -LiteralPath $control
         $shortcutExists=Test-Path -LiteralPath (Join-Path $desktop 'MicBridge.lnk')
         $actualDataSddl=(Get-Acl -LiteralPath $data -ErrorAction Stop).Sddl
-        $dataAclMatch=($actualDataSddl -eq [string]$State.DataDirSddl)
+        $dataAclMatch=((ConvertTo-MBComparableSddl $actualDataSddl) -eq (ConvertTo-MBComparableSddl ([string]$State.DataDirSddl)))
         throw "Metadata rollback verification failed. IniExists=$iniExists; ControlExists=$controlExists; ShortcutExists=$shortcutExists; DataDirAclMatch=$dataAclMatch; ExpectedDataSddl=$($State.DataDirSddl); ActualDataSddl=$actualDataSddl."
     }
     return $true
@@ -174,8 +181,8 @@ function Test-MBInstallMetadataRestored {
     if([bool]$State.ShortcutExisted) {
         if(-not (Test-Path -LiteralPath $shortcut -PathType Leaf) -or (Get-MBMetadataHash $shortcut) -ne [string]$State.ShortcutBackupSha256) { return $false }
     } elseif(Test-Path -LiteralPath $shortcut) { return $false }
-    if((Get-Acl -LiteralPath $data -ErrorAction Stop).Sddl -ne [string]$State.DataDirSddl) { return $false }
-    if([bool]$State.ControlExisted -and (Get-Acl -LiteralPath (Join-Path $data 'control.ini') -ErrorAction Stop).Sddl -ne [string]$State.ControlSddl) { return $false }
+    if((ConvertTo-MBComparableSddl (Get-Acl -LiteralPath $data -ErrorAction Stop).Sddl) -ne (ConvertTo-MBComparableSddl ([string]$State.DataDirSddl))) { return $false }
+    if([bool]$State.ControlExisted -and (ConvertTo-MBComparableSddl (Get-Acl -LiteralPath (Join-Path $data 'control.ini') -ErrorAction Stop).Sddl) -ne (ConvertTo-MBComparableSddl ([string]$State.ControlSddl))) { return $false }
     return $true
 }
 
