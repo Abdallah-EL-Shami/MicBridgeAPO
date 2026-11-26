@@ -240,6 +240,10 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreCom' -ExpectedOperation Ins
     }
     Remove-Item -LiteralPath $crashProviderPath -Recurse -Force -ErrorAction SilentlyContinue
 
+    # Restore the deliberately tampered COM fixture before the valid-transaction test.
+    [IO.File]::WriteAllText($clsidExport,'Windows Registry Editor Version 5.00')
+    $state.ClsidRegSha256 = (Get-FileHash -LiteralPath $clsidExport -Algorithm SHA256).Hash
+
     # Validate the durable journal and state as one transaction before any replay.
     $preflightJournalPath = Join-Path $tx 'rollback-recovery.json'
     $preflightSteps = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
