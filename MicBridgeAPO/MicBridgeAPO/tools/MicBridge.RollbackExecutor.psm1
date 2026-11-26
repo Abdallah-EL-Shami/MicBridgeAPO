@@ -1,0 +1,103 @@
+Set-StrictMode -Version Latest
+
+function Invoke-MBInstallDllRecovery {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TransactionDirectory,
+        [Parameter(Mandatory)][string]$DataDirectory,
+        [Parameter(Mandatory)][string]$InstallDirectory,
+        [Parameter(Mandatory)][guid]$ExpectedDeviceId
+    )
+
+    $ErrorActionPreference = 'Stop'
+    $transactionRoot = [IO.Path]::GetFullPath($TransactionDirectory).TrimEnd('\')
+    $dataRoot = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
+    $installRoot = [IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')
+    $expectedTransactionName = [IO.Path]::GetFileName($transactionRoot)
+    if ($expectedTransactionName -notmatch '^transactions-[A-Za-z0-9-]+$') {
+        throw 'DLL recovery requires a transaction-owned transactions-* directory.'
+    }
+    if (-not (Test-Path -LiteralPath $transactionRoot -PathType Container) -or
+        -not (Test-Path -LiteralPath $dataRoot -PathType Container) -or
+        -not (Test-Path -LiteralPath $installRoot -PathType Container)) {
+        throw 'Transaction, ProgramData, or installation directory is missing.'
+    }
+
+    $validationModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1'
+    $journalModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
+    $dllModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'
+    foreach ($modulePath in @($validationModule,$journalModule,$dllModule)) {
+        if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
+            throw "Required rollback module is missing: $modulePath"
+        }
+    }
+    Import-Module $journalModule -Force -ErrorAction Stop
+
+    # Use the same exclusive operation lock as install.ps1 across the full
+    # preflight, DLL side effect, verification, and journal completion.
+    $operationLockPath = Join-Path $dataRoot 'operation'
+    $operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+    try {
+        $primaryJournal = Join-Path $transactionRoot 'rollback-recovery.json'
+        $statePath = Join-Path $transactionRoot 'state.json'
+        $legacyStepIds = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+
+        # Existing transaction format only. Never reinterpret its grouped
+        # RestorePreviousInstallState step or mark it complete here.
+        Import-Module $validationModule -Force -ErrorAction Stop
+        $preflight = Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $transactionRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $legacyStepIds
+        if (-not $preflight.IsValid -or -not $preflight.ReplaySafe) {
+            throw "DLL recovery preflight failed; no DLL changes were attempted. $($preflight.Errors -join '; ')"
+        }
+
+        $state = $preflight.State
+        $dllArgs = @{
+            InstalledDllPath=(Join-Path $installRoot 'MicBridgeAPO.dll')
+            DllExisted=[bool]$state.DllExisted
+            ReplacementStarted=[bool]$state.DllReplacementStarted
+            OriginalSha256=[string]$state.DllOriginalSha256
+            BackupPath=[string]$state.DllBackupPath
+            BackupSha256=[string]$state.DllBackupSha256
+            BackupRoot=(Join-Path $dataRoot 'dll-backups')
+            NewDllSha256=[string]$state.DllNewSha256
+            InstallRoot=$installRoot
+        }
+
+        # A separate journal records only this independently verifiable
+        # component. The main three-step journal remains pending and fail-closed.
+        $dllJournalPath = Join-Path $transactionRoot 'dll-recovery.json'
+        $dllStepIds = @('RestoreDll')
+        if (Test-Path -LiteralPath $dllJournalPath -PathType Leaf) {
+            $dllJournal = Read-MBRecoveryJournal -Path $dllJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $dllStepIds
+            if ([string]$dllJournal.TransactionId -ne [string]$preflight.Journal.TransactionId) {
+                throw 'DLL recovery journal belongs to another transaction.'
+            }
+        } elseif (Test-Path -LiteralPath $dllJournalPath) {
+            throw 'DLL recovery journal path is not a regular file.'
+        } else {
+            New-MBRecoveryJournal -Path $dllJournalPath -Operation InstallRollback -DeviceId $ExpectedDeviceId -StepIds $dllStepIds -TransactionId ([guid]$preflight.Journal.TransactionId) | Out-Null
+        }
+
+        Import-Module $dllModule -Force -ErrorAction Stop
+        $action = { Restore-MBDllSnapshot @dllArgs | Out-Null }.GetNewClosure()
+        $verify = { Test-MBDllSnapshotRestored @dllArgs }.GetNewClosure()
+        Invoke-MBRecoveryStep -Path $dllJournalPath -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $dllStepIds -Action $action -Verify $verify
+
+        $completed = Read-MBRecoveryJournal -Path $dllJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $dllStepIds
+        if ($completed.Steps[0].State -ne 'Completed') {
+            throw 'DLL recovery journal did not reach Completed after verification.'
+        }
+
+        return [pscustomobject]@{
+            Success = $true
+            Component = 'RestoreDll'
+            TransactionId = [string]$preflight.Journal.TransactionId
+            JournalPath = $dllJournalPath
+            MainTransactionStillPending = $true
+        }
+    } finally {
+        if ($operationLock) { $operationLock.Dispose() }
+    }
+}
+
+Export-ModuleMember -Function Invoke-MBInstallDllRecovery
