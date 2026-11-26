@@ -120,7 +120,7 @@ function Invoke-MBInstallFullRollback {
         if(-not $preflight.IsValid -or -not $preflight.ReplaySafe) { throw "Full rollback preflight failed; no recovery actions attempted. $($preflight.Errors -join '; ')" }
         $state=$preflight.State
         if([bool]$state.InstallDirExisted -and -not (Test-Path -LiteralPath $install -PathType Container)) {
-            New-Item -ItemType Directory -Force -Path $install | Out-Null
+            throw 'The pre-existing installation directory is missing and its original ACL was not captured; refusing to recreate it from assumptions.'
         }
         if((Test-Path -LiteralPath $install -PathType Container) -and -not (Test-MBFullRollbackNoReparse $install)) {
             throw 'Installation directory traverses a reparse point; refusing full rollback.'
