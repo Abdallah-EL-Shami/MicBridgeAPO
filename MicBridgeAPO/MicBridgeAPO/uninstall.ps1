@@ -87,6 +87,18 @@ function Test-MBRegistrySnapshot([string]$RegistrySubKey, [string]$SnapshotPath,
     finally { Remove-Item -LiteralPath $currentExport -Force -ErrorAction SilentlyContinue }
 }
 
+function Test-MBEndpointAclSnapshot([string]$DeviceSubKey, [string]$FxSubKey, [string]$ExpectedDeviceSddl, [string]$ExpectedFxSddl) {
+    try {
+        $actualDeviceSddl = Get-Sddl $DeviceSubKey
+        if (-not $actualDeviceSddl -or -not [string]::Equals($actualDeviceSddl,$ExpectedDeviceSddl,[StringComparison]::Ordinal)) { return $false }
+        if ($ExpectedFxSddl) {
+            $actualFxSddl = Get-Sddl $FxSubKey
+            if (-not $actualFxSddl -or -not [string]::Equals($actualFxSddl,$ExpectedFxSddl,[StringComparison]::Ordinal)) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
 # Fail closed before any mutation if the original recovery snapshot is unavailable.
 if (-not (Test-Path -LiteralPath $backupFile)) {
     throw 'backup.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
@@ -254,6 +266,15 @@ foreach ($endpointId in $preflightIds) {
     } finally { $key.Close() }
 }
 
+# Create the uninstall recovery plan after all read-only preflight checks and before the first mutation.
+$uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
+$uninstallStepIds = @('RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
+if (-not (Test-Path -LiteralPath $uninstallJournal -PathType Leaf)) {
+    New-MBRecoveryJournal -Path $uninstallJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $uninstallStepIds | Out-Null
+} else {
+    Read-MBRecoveryJournal -Path $uninstallJournal -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds | Out-Null
+}
+
 if (Test-Path $backupFile) {
     $b = Get-Content $backupFile -Raw | ConvertFrom-Json
     $devSub = "$capSub\$($b.DeviceId)"
@@ -352,15 +373,14 @@ if (Test-Path $backupFile) {
         Write-Warning 'Backup has no DisableProtectedAudioDG snapshot; leaving the current Windows audio security setting unchanged.'
     }
 
-    # 2) إرجاع المالك والصلاحيات الأصلية (الداخلي أولًا ثم المفتاح الأب)
-    try {
+    # Restore endpoint ACLs as a durable, independently verifiable recovery step.
+    Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreEndpointAcl' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
         if ($b.FxKeySddl -and (Test-Path $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
         Restore-Sddl $devSub $b.DevKeySddl
-        Write-Host 'أُعيد مالك المفتاح وصلاحياته كما كانت.'
-    } catch {
-        Write-Warning "تعذر إرجاع الصلاحيات الأصلية: $($_.Exception.Message)"
-        throw 'Uninstall stopped before COM/DLL removal because endpoint ACL restoration failed. Keep backup.json and retry after resolving the permission error.'
+    } -Verify {
+        Test-MBEndpointAclSnapshot -DeviceSubKey $devSub -FxSubKey $fxSub -ExpectedDeviceSddl ([string]$b.DevKeySddl) -ExpectedFxSddl ([string]$b.FxKeySddl)
     }
+    Write-Host 'أُعيد مالك المفتاح وصلاحياته كما كانت.'
 } else { Write-Warning 'لم أجد backup.json، سأزيل التسجيل فقط.' }
 
 
@@ -397,16 +417,7 @@ if ($remainingReferences.Count -gt 0 -and -not ($b.PrevClsidRegistrationExists -
 # registration; remove only MicBridge's registration when no prior registration existed.
 $apoRegistrationPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
 $comRegistrationPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
-# Persist the COM restoration plan before changing either registration.
-# Re-running uninstall resumes this exact endpoint-bound plan; completed steps are verified.
-$uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
-$uninstallStepIds = @('RestoreAudioEngineApo','RestoreComClsid')
-if (-not (Test-Path -LiteralPath $uninstallJournal -PathType Leaf)) {
-    New-MBRecoveryJournal -Path $uninstallJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $uninstallStepIds | Out-Null
-} else {
-    Read-MBRecoveryJournal -Path $uninstallJournal -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds | Out-Null
-}
-
+# The journal was created before endpoint ACL restoration; COM steps continue the same plan.
 Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreAudioEngineApo' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
     if (Test-Path -LiteralPath $apoRegistrationPath) { Remove-Item -LiteralPath $apoRegistrationPath -Recurse -Force -ErrorAction Stop }
     if ($b.PrevApoRegistrationExists) {
