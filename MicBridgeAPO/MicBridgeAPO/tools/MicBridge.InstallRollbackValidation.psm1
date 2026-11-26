@@ -52,7 +52,7 @@ function Test-MBInstallRollbackSnapshot {
     $required = @(
         'DeviceId','FxEffect','FxAssociation','FxComposite','DevSddl','FxSddl',
         'FxKeyExisted','ClsidRegExisted','ApoRegExisted','DllExisted',
-        'DllOriginalSha256','IniExisted','ControlExisted','DataDirSddl',
+        'DllOriginalSha256','ClsidRegExisted','ClsidRegBackup','ClsidRegSha256','ApoRegExisted','ApoRegBackup','ApoRegSha256','IniExisted','ControlExisted','DataDirSddl',
         'ControlSddl','InstallFiles','ShortcutExisted','ShortcutBackup',
         'ShortcutBackupSha256','InstallDirExisted'
     )
@@ -135,10 +135,13 @@ function Test-MBInstallRollbackSnapshot {
         }
     }
 
-    # The current transaction schema has no durable hashes for exported COM
-    # snapshots. Their existence alone cannot establish trusted provenance.
-    if ($State.ClsidRegExisted -or $State.ApoRegExisted) {
-        [void]$errors.Add('COM registration snapshot lacks a durable transaction-bound SHA-256; automatic replay is not authorized.')
+    foreach ($com in @(
+        [pscustomobject]@{ Name='CLSID'; Existed=[bool]$State.ClsidRegExisted; Path=[string]$State.ClsidRegBackup; Hash=[string]$State.ClsidRegSha256 },
+        [pscustomobject]@{ Name='AudioEngine APO'; Existed=[bool]$State.ApoRegExisted; Path=[string]$State.ApoRegBackup; Hash=[string]$State.ApoRegSha256 }
+    )) {
+        if ($com.Existed) {
+            Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+        }
     }
 
     return [pscustomobject]@{
