@@ -44,7 +44,7 @@ try {
     # Mutate both registration trees to simulate a partial installer replacement.
     $clsidKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($clsidSub,$true)
     $inproc=$clsidKey.OpenSubKey('InprocServer32',$true)
-    $inproc.SetValue('',(Join-Path $install 'wrong.dll'),[Microsoft.Win32.RegistryValueKind]::String)
+    $inproc.SetValue('ThreadingModel','Both',[Microsoft.Win32.RegistryValueKind]::String)
     $inproc.Dispose(); $inproc=$null; $clsidKey.Dispose(); $clsidKey=$null
     $apoKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($apoSub,$true)
     $apoKey.SetValue('FriendlyName','MicBridge replacement',[Microsoft.Win32.RegistryValueKind]::String)
@@ -70,7 +70,7 @@ try {
         ApoRegExisted=$false; ApoRegBackup=$null; ApoRegSha256=$null
     }
     $crashKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$clsidSub\InprocServer32",$true)
-    try { $crashKey.SetValue('',(Join-Path $install 'crash-new.dll'),[Microsoft.Win32.RegistryValueKind]::String) } finally { $crashKey.Dispose() }
+    try { $crashKey.SetValue('ThreadingModel','Both',[Microsoft.Win32.RegistryValueKind]::String) } finally { $crashKey.Dispose() }
     $crashJournal=Join-Path $crashTx 'com-crash-recovery.json'
     $crashDevice=[guid]::NewGuid()
     $crashSteps=@('RestoreComCLSID')
