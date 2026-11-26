@@ -41,6 +41,12 @@ Write-Host "سجل التثبيت: $installLog"
 Write-Host "سجل الاستعادة: $recoveryLog"
 Write-Host "سجل فحص الترقية: $upgradeLog"
 Write-EarlyInstallLog 'INFO' "Installer process started. DeviceName='$DeviceName'; DllSource='$DllSource'."
+$clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+$iidApo     = '{FD7F2B29-24D0-4B5C-B177-592C39F9CA10}'
+$fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'   # PKEY_FX_EndpointEffectClsid
+$fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15' # PKEY_CompositeFX_EndpointEffectClsid (REG_MULTI_SZ)
+$fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0' # PKEY_FX_Association
+$ksNodeTypeAny = '{00000000-0000-0000-0000-000000000000}'
 $recoveryModule = Join-Path $PSScriptRoot 'tools\MicBridge.RecoveryJournal.psm1'
 try {
     Import-Module -Name $recoveryModule -Force -ErrorAction Stop
