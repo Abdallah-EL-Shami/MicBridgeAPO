@@ -281,13 +281,21 @@ foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninsta
     $target = Join-Path $installDir $name
     $backupPath = Join-Path $installFilesDir $name
     $existed = Test-Path -LiteralPath $target
-    if ($existed) { Copy-Item -LiteralPath $target -Destination $backupPath -Force }
-    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath }
+    $backupHash = $null
+    if ($existed) {
+        Copy-Item -LiteralPath $target -Destination $backupPath -Force -ErrorAction Stop
+        $backupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    }
+    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath; Sha256=$backupHash }
 }
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
 $shortcutBackup = Join-Path $transactionDir 'MicBridge.lnk'
 $shortcutExisted = Test-Path -LiteralPath $shortcutPath
-if ($shortcutExisted) { Copy-Item -LiteralPath $shortcutPath -Destination $shortcutBackup -Force }
+$shortcutBackupSha256 = $null
+if ($shortcutExisted) {
+    Copy-Item -LiteralPath $shortcutPath -Destination $shortcutBackup -Force -ErrorAction Stop
+    $shortcutBackupSha256 = (Get-FileHash -LiteralPath $shortcutBackup -Algorithm SHA256 -ErrorAction Stop).Hash
+}
 $controlPath = Join-Path $dataDir 'control.ini'
 $controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath $controlPath).Sddl } else { $null }
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
@@ -309,6 +317,7 @@ $transactionState = [pscustomobject]@{
     InstallFiles = $installFilesBackup
     ShortcutExisted = $shortcutExisted
     ShortcutBackup = $shortcutBackup
+    ShortcutBackupSha256 = $shortcutBackupSha256
     InstallDirExisted = (Test-Path -LiteralPath $installDir)
 }
 if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxComposite.Kind -ne 'MultiString') {
@@ -525,12 +534,30 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
                 if ((Test-Path -LiteralPath $clsidPath) -ne [bool]$tx.ClsidRegExisted) { return $false }
                 if ((Test-Path -LiteralPath $apoPath) -ne [bool]$tx.ApoRegExisted) { return $false }
-                if ($tx.DllExisted -and -not (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))) { return $false }
-                if (-not $tx.DllExisted -and -not (Test-Path -LiteralPath $dllBackupPath) -and (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))) { return $false }
+                $installedDllPath = Join-Path $installDir 'MicBridgeAPO.dll'
+                if ([bool]$tx.DllExisted) {
+                    if (-not (Test-Path -LiteralPath $installedDllPath -PathType Leaf)) { return $false }
+                    if ([bool]$tx.DllReplacementStarted) {
+                        $expectedDllHash = [string]$tx.DllBackupSha256
+                        if ([string]::IsNullOrWhiteSpace($expectedDllHash) -or (Get-FileHash -LiteralPath $installedDllPath -Algorithm SHA256).Hash -ne $expectedDllHash) { return $false }
+                    }
+                } elseif ([bool]$tx.DllReplacementStarted -and (Test-Path -LiteralPath $installedDllPath)) { return $false }
                 foreach ($fileState in @($tx.InstallFiles)) {
                     $target = Join-Path $installDir $fileState.Name
                     if ([bool]$fileState.Existed -ne [bool](Test-Path -LiteralPath $target)) { return $false }
+                    if ([bool]$fileState.Existed) {
+                        if ([string]::IsNullOrWhiteSpace([string]$fileState.Sha256) -or (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne [string]$fileState.Sha256) { return $false }
+                    }
                 }
+                if ([bool]$tx.ShortcutExisted) {
+                    if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
+                    if ([string]::IsNullOrWhiteSpace([string]$tx.ShortcutBackupSha256) -or (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256).Hash -ne [string]$tx.ShortcutBackupSha256) { return $false }
+                } elseif (Test-Path -LiteralPath $shortcutPath) { return $false }
+                if ($tx.DataDirSddl -and (Get-Acl -LiteralPath $dataDir).Sddl -ne [string]$tx.DataDirSddl) { return $false }
+                if ($tx.ControlSddl) {
+                    if (-not (Test-Path -LiteralPath $controlPath -PathType Leaf)) { return $false }
+                    if ((Get-Acl -LiteralPath $controlPath).Sddl -ne [string]$tx.ControlSddl) { return $false }
+                } elseif (-not [bool]$tx.ControlExisted -and (Test-Path -LiteralPath $controlPath)) { return $false }
                 return $true
             }
         } catch {
