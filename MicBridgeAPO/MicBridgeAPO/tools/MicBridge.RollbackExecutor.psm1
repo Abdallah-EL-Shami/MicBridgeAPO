@@ -82,7 +82,8 @@ function Invoke-MBInstallDllRecovery {
             New-MBRecoveryJournal -Path $dllJournalPath -Operation InstallRollback -DeviceId $ExpectedDeviceId -StepIds $dllStepIds -TransactionId ([guid]$preflight.Journal.TransactionId) | Out-Null
         }
 
-        Import-Module $dllModule -Force -ErrorAction Stop
+        # Import into the global session so the journal's deferred ScriptBlocks can resolve the exported commands after this function returns.
+        Import-Module $dllModule -Force -Global -ErrorAction Stop
         $action = { Restore-MBDllSnapshot @dllArgs | Out-Null }.GetNewClosure()
         $verify = { Test-MBDllSnapshotRestored @dllArgs }.GetNewClosure()
         Invoke-MBRecoveryStep -Path $dllJournalPath -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $dllStepIds -Action $action -Verify $verify
