@@ -53,6 +53,26 @@ try {
     $valid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if (-not $valid.IsValid -or -not $valid.ReplaySafe) { throw "FAIL: valid fixture rejected: $($valid.Errors -join '; ')" }
 
+    # A reparse point at the transaction root must be rejected even if no
+    # snapshot entry currently requires an individual backup file.
+    $rootTarget = Join-Path $root 'transaction-root-target'
+    $rootLink = Join-Path $root 'transaction-root-link'
+    New-Item -ItemType Directory -Force -Path $rootTarget | Out-Null
+    $rootJunctionCreated = $false
+    try {
+        New-Item -ItemType Junction -Path $rootLink -Target $rootTarget -ErrorAction Stop | Out-Null
+        $rootJunctionCreated = $true
+    } catch {
+        Write-Host 'INFO: Transaction-root junction test skipped; junction creation unavailable.'
+    }
+    if ($rootJunctionCreated) {
+        $rootRejected = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $rootLink -DataDirectory $data -ExpectedDeviceId $device
+        if ($rootRejected.IsValid -or -not ($rootRejected.Errors -match 'Transaction directory')) {
+            throw 'FAIL: rollback validator accepted a reparse-point transaction root'
+        }
+        Remove-Item -LiteralPath $rootLink -Force
+    }
+
     $missingNewDllHash = $state.PSObject.Copy()
     $missingNewDllHash.DllNewSha256 = 'bad-hash'
     $invalidNewDllHash = Test-MBInstallRollbackSnapshot -State $missingNewDllHash -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
