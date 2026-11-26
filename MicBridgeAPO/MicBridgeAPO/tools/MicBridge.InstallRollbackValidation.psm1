@@ -81,7 +81,13 @@ function Test-MBInstallRollbackSnapshot {
 
     foreach ($name in @('FxEffect','FxAssociation','FxComposite')) {
         $snapshot = $State.$name
-        if ($null -eq $snapshot) {`n            [void]$errors.Add("Registry snapshot '$name' is missing.")`n            continue`n        }`n        $requiredSnapshotFields = @('KeyExists','Exists','Kind','Value')`n        $missingSnapshotFields = @($requiredSnapshotFields | Where-Object { $snapshot.PSObject.Properties.Name -notcontains $_ })`n        if ($missingSnapshotFields.Count -gt 0) {
+        if ($null -eq $snapshot) {
+            [void]$errors.Add("Registry snapshot '$name' is missing.")
+            continue
+        }
+        $requiredSnapshotFields = @('KeyExists','Exists','Kind','Value')
+        $missingSnapshotFields = @($requiredSnapshotFields | Where-Object { $snapshot.PSObject.Properties.Name -notcontains $_ })
+        if ($missingSnapshotFields.Count -gt 0) {
             [void]$errors.Add("Registry snapshot '$name' is incomplete.")
             continue
         }
