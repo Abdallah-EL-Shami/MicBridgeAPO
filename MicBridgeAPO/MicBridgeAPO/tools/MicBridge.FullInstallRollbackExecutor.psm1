@@ -22,6 +22,22 @@ foreach($moduleName in @(
     Import-Module (Join-Path $PSScriptRoot $moduleName) -Force -Global -ErrorAction Stop
 }
 
+function Test-MBFullRollbackNoReparse {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $current=[IO.Path]::GetFullPath($Path)
+        while($true) {
+            if(Test-Path -LiteralPath $current) {
+                $item=Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            }
+            $parent=[IO.Directory]::GetParent($current)
+            if(-not $parent) { return $true }
+            $current=$parent.FullName
+        }
+    } catch { return $false }
+}
+
 function Get-MBFullRollbackEndpointSnapshot {
     param([Parameter(Mandatory)][object]$State,[Parameter(Mandatory)][ValidateSet('HKLM','HKCU')][string]$RegistryHive)
     $device=[guid]::Parse([string]$State.DeviceId).ToString('D')
@@ -106,7 +122,7 @@ function Invoke-MBInstallFullRollback {
         if([bool]$state.InstallDirExisted -and -not (Test-Path -LiteralPath $install -PathType Container)) {
             New-Item -ItemType Directory -Force -Path $install | Out-Null
         }
-        if(Test-Path -LiteralPath $install -PathType Container -and -not (Test-MBMetadataPathNoReparse $install)) {
+        if(Test-Path -LiteralPath $install -PathType Container -and -not (Test-MBFullRollbackNoReparse $install)) {
             throw 'Installation directory traverses a reparse point; refusing full rollback.'
         }
         $device=[guid]$state.DeviceId
