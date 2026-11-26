@@ -64,6 +64,28 @@ try {
         throw 'FAIL: tampered inventory enabled cleanup or installation.'
     }
 
+    # A COM registration must also be rejected when its server DLL hash is stale.
+    $tamperedRegistrationAudit = [pscustomobject]@{
+        IsReadOnly = $true
+        CleanupAllowed = $false
+        OriginalWindowsBaselineProven = $false
+        Outcome = 'InventoryOnly'
+        Findings = @([pscustomobject]@{
+            Kind='Registration'; Name='COM CLSID'; Classification='MicBridgeCandidate'
+            Path='HKCU:\Software\Test\CLSID'; ServerPath=$dll; Sha256=('0' * 64)
+        })
+    }
+    $tamperedRegistrationPlan = New-MBLegacyCleanupPlan -Audit $tamperedRegistrationAudit -InstallDirectory $install
+    if (-not ($tamperedRegistrationPlan.Items | Where-Object { $_.Name -eq 'COM CLSID' -and $_.ProposedAction -eq 'Preserve' })) {
+        throw 'FAIL: COM registration with a stale server hash was not preserved.'
+    }
+    if ($tamperedRegistrationPlan.CanProceedToCleanupReview) {
+        throw 'FAIL: stale COM server hash did not block cleanup review.'
+    }
+    if ($tamperedRegistrationPlan.CleanupExecutionAllowed -or $tamperedRegistrationPlan.InstallAllowed) {
+        throw 'FAIL: stale COM server hash enabled cleanup or installation.'
+    }
+
     $cleanAudit = [pscustomobject]@{
         IsReadOnly = $true
         CleanupAllowed = $false
