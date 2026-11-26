@@ -124,9 +124,9 @@ namespace MicBridge.LegacyFileHandleLease {
         }
 
         private static string NormalizeFinalPath(string path) {
-            if (path.StartsWith(@"\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
-                return @"\\\\" + path.Substring(8);
-            if (path.StartsWith(@"\\?\\", StringComparison.OrdinalIgnoreCase))
+            if (path.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
+                return "\\\\" + path.Substring(8);
+            if (path.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase))
                 return path.Substring(4);
             return path;
         }
