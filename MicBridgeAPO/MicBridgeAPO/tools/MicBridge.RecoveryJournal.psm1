@@ -69,46 +69,79 @@ function Read-MBRecoveryJournal {
         [Parameter(Mandatory)][string]$Path,
         [ValidateSet('InstallRollback','Uninstall')][string]$ExpectedOperation,
         [guid]$ExpectedDeviceId,
-        [string[]]$ExpectedStepIds
+        [string[]]$ExpectedStepIds,
+        [switch]$NoPreviousFallback
     )
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "Recovery journal is missing: $Path"
+    $sourcePath = $Path
+    $usedPrevious = $false
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        if (-not $NoPreviousFallback -and (Test-Path -LiteralPath "$Path.previous" -PathType Leaf)) {
+            $sourcePath = "$Path.previous"
+            $usedPrevious = $true
+        } else {
+            throw "Recovery journal is missing: $Path"
+        }
     }
     try {
-        $j = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $j = Get-Content -LiteralPath $sourcePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $parsedDeviceId = [guid]::Empty
+        $parsedTransactionId = [guid]::Empty
+        $created = [DateTime]::MinValue
+        $updated = [DateTime]::MinValue
+        if ($j.SchemaVersion -ne 1 -or $j.Operation -notin @('InstallRollback','Uninstall') -or
+            -not [guid]::TryParse([string]$j.DeviceId,[ref]$parsedDeviceId) -or
+            -not [guid]::TryParse([string]$j.TransactionId,[ref]$parsedTransactionId) -or
+            -not [DateTime]::TryParse([string]$j.CreatedUtc,[ref]$created) -or
+            -not [DateTime]::TryParse([string]$j.UpdatedUtc,[ref]$updated) -or
+            $null -eq $j.Steps -or @($j.Steps).Count -eq 0) {
+            throw 'Recovery journal schema, timestamps, or identity are invalid.'
+        }
+        foreach ($entry in @($j.Steps)) {
+            if ($entry.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' -or
+                $entry.State -notin @('Pending','Running','Completed') -or [int]$entry.Attempts -lt 0) {
+                throw 'Recovery journal contains invalid step data.'
+            }
+        }
+        $ids = @($j.Steps | ForEach-Object { [string]$_.Id })
+        if (@($ids | Select-Object -Unique).Count -ne $ids.Count) {
+            throw 'Recovery journal contains duplicate step IDs.'
+        }
     } catch {
-        throw "Recovery journal is unreadable: $($_.Exception.Message)"
-    }
-    $parsedDeviceId = [guid]::Empty
-    $parsedTransactionId = [guid]::Empty
-    $created = [DateTime]::MinValue
-    $updated = [DateTime]::MinValue
-    if ($j.SchemaVersion -ne 1 -or $j.Operation -notin @('InstallRollback','Uninstall') -or
-        -not [guid]::TryParse([string]$j.DeviceId,[ref]$parsedDeviceId) -or
-        -not [guid]::TryParse([string]$j.TransactionId,[ref]$parsedTransactionId) -or
-        -not [DateTime]::TryParse([string]$j.CreatedUtc,[ref]$created) -or
-        -not [DateTime]::TryParse([string]$j.UpdatedUtc,[ref]$updated)) {
-        throw 'Recovery journal schema, timestamps, or identity are invalid; refusing recovery.'
+        if ($NoPreviousFallback -or $usedPrevious -or -not (Test-Path -LiteralPath "$Path.previous" -PathType Leaf)) {
+            throw "Recovery journal and its fallback are invalid or unreadable: $($_.Exception.Message)"
+        }
+        # Validate the fallback independently; never trust it merely because it exists.
+        $fallbackArgs = @{ Path="$Path.previous"; NoPreviousFallback=$true }
+        if ($ExpectedOperation) { $fallbackArgs.ExpectedOperation=$ExpectedOperation }
+        if ($PSBoundParameters.ContainsKey('ExpectedDeviceId')) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
+        $fallback = Read-MBRecoveryJournal @fallbackArgs
+        # Restore the last-known-good bytes through a flushed temporary file. Keep
+        # the corrupt primary as a separate forensic artifact.
+        $directory = Split-Path -Parent $Path
+        $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.restore.tmp')
+        $corrupt = "$Path.corrupt.$([guid]::NewGuid().ToString('N'))"
+        $bytes = [IO.File]::ReadAllBytes("$Path.previous")
+        $restore = $null
+        try {
+            $restore = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
+            $restore.Write($bytes,0,$bytes.Length)
+            $restore.Flush($true)
+            $restore.Dispose()
+            $restore = $null
+            if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp,$Path,$corrupt,$true) }
+            else { [IO.File]::Move($temp,$Path) }
+        } finally {
+            if ($restore) { $restore.Dispose() }
+            if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        }
+        return $fallback
     }
     if ($ExpectedOperation -and $j.Operation -ne $ExpectedOperation) {
         throw 'Recovery journal operation does not match the requested operation; refusing recovery.'
     }
     if ($PSBoundParameters.ContainsKey('ExpectedDeviceId') -and $parsedDeviceId -ne $ExpectedDeviceId) {
         throw 'Recovery journal endpoint identity does not match the requested device; refusing recovery.'
-    }
-    if ($null -eq $j.Steps -or @($j.Steps).Count -eq 0) {
-        throw 'Recovery journal has no steps; refusing recovery.'
-    }
-    foreach ($entry in @($j.Steps)) {
-        if ($entry.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' -or
-            $entry.State -notin @('Pending','Running','Completed') -or
-            [int]$entry.Attempts -lt 0) {
-            throw 'Recovery journal contains invalid step data; refusing recovery.'
-        }
-    }
-    $ids = @($j.Steps | ForEach-Object { [string]$_.Id })
-    if (@($ids | Select-Object -Unique).Count -ne $ids.Count) {
-        throw 'Recovery journal contains duplicate step IDs; refusing recovery.'
     }
     if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) {
         if (@($ExpectedStepIds).Count -ne $ids.Count) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
