@@ -50,6 +50,39 @@ try {
         throw 'FAIL: unapproved candidate passed preflight.'
     }
 
+    # A junction in an ancestor of the audited installation root must also block.
+    $realRoot = Join-Path $root 'real-install'
+    $realInstall = Join-Path $realRoot 'install'
+    $junction = Join-Path $root 'redirected'
+    New-Item -ItemType Directory -Path $realInstall -Force | Out-Null
+    $junctionCreated = $false
+    try {
+        New-Item -ItemType Junction -Path $junction -Target $realRoot -ErrorAction Stop | Out-Null
+        $junctionCreated = $true
+        $redirectedInstall = Join-Path $junction 'install'
+        $redirectedDll = Join-Path $redirectedInstall 'MicBridgeAPO.dll'
+        [IO.File]::WriteAllBytes($redirectedDll, [byte[]](7,7,7,7))
+        $redirectedHash = (Get-FileHash -LiteralPath $redirectedDll -Algorithm SHA256).Hash
+        $redirectedPlan = [pscustomobject]@{
+            IsReadOnly=$true; InstallDirectory=$redirectedInstall; CanProceedToCleanupReview=$true
+            CleanupExecutionAllowed=$false; InstallAllowed=$false
+            Items=@([pscustomobject]@{
+                Kind='File'; Name='MicBridgeAPO.dll'; Path=$redirectedDll
+                Classification='MicBridgeBinaryCandidate'; ProposedAction='CandidateForReviewedRemoval'; Sha256=$redirectedHash
+            })
+        }
+        $redirectedJournalPath = Join-Path $root 'redirected.json'
+        $redirectedJournal = New-MBLegacyCleanupJournal -Plan $redirectedPlan -Path $redirectedJournalPath
+        Set-MBLegacyCleanupReviewDecision -Path $redirectedJournalPath -ItemId $redirectedJournal.Entries[0].Id -Reviewer 'test-reviewer' -Approve $true | Out-Null
+        $redirectedResult = Test-MBLegacyCleanupPreflight -JournalPath $redirectedJournalPath
+        if ($redirectedResult.CanProceedToManualReview -or $redirectedResult.Blockers.Count -eq 0) {
+            throw 'FAIL: install root beneath a junction ancestor passed preflight.'
+        }
+    } catch {
+        if ($junctionCreated) { throw }
+        Write-Warning ("SKIP: junction ancestor fixture could not be created: " + $_.Exception.Message)
+    }
+
     Write-Host 'PASS: preflight revalidates reviewed candidates, rejects stale/unapproved items, and performs no mutation.'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
