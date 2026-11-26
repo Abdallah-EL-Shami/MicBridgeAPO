@@ -38,6 +38,11 @@ Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagno
 Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
 Assert-Contains $installer 'Previous DLL restored' 'Installer attempts DLL restoration after failure'
+Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
+Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
+Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
+Assert-Contains $installer 'DLL rollback backup path is missing or outside the protected backup directory' 'Rollback rejects DLL backups outside its dedicated directory'
+Assert-Contains $installer 'Restored DLL hash does not match the durable pre-install backup hash' 'Rollback verifies the restored DLL bytes against the durable snapshot'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
