@@ -233,7 +233,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1','tools/MicBridge.LegacyInstallAudit.psm1','tools/Test-MBLegacyInstallationAudit.ps1','tools/MicBridge.ComRegistrationRollback.psm1','tools/MicBridge.ComRegistrationExecutor.psm1','tools/Test-MBComRegistrationRollback.ps1','tools/MicBridge.RollbackExecutor.psm1','tools/Test-MBRollbackExecutor.ps1','tools/MicBridge.InstallFileRollback.psm1','tools/MicBridge.InstallFileExecutor.psm1','tools/Test-MBInstallFileRollback.ps1','tools/MicBridge.InstallMetadataRollback.psm1','tools/MicBridge.MetadataExecutor.psm1','tools/Test-MBInstallMetadataRollback.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1','tools/MicBridge.LegacyInstallAudit.psm1','tools/Test-MBLegacyInstallationAudit.ps1','tools/MicBridge.ComRegistrationRollback.psm1','tools/MicBridge.ComRegistrationExecutor.psm1','tools/Test-MBComRegistrationRollback.ps1','tools/MicBridge.RollbackExecutor.psm1','tools/Test-MBRollbackExecutor.ps1','tools/MicBridge.InstallFileRollback.psm1','tools/MicBridge.InstallFileExecutor.psm1','tools/Test-MBInstallFileRollback.ps1','tools/MicBridge.InstallMetadataRollback.psm1','tools/MicBridge.MetadataExecutor.psm1','tools/Test-MBInstallMetadataRollback.ps1','tools/MicBridge.FullInstallRollbackExecutor.psm1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -304,3 +304,8 @@ Assert-Contains $installer 'IniOriginalSha256' 'Installer records original confi
 Assert-Contains $installer 'ShortcutNewSha256' 'Installer persists the shortcut ownership hash before publishing the shortcut'
 Assert-Contains $workflow 'MicBridge.InstallMetadataRollback.psm1' 'Build package stages metadata rollback actions'
 Assert-Contains $workflow 'MicBridge.MetadataExecutor.psm1' 'Build package stages durable metadata recovery executor'
+
+$fullExecutor = Get-Content -LiteralPath (Join-Path $root 'tools/MicBridge.FullInstallRollbackExecutor.psm1') -Raw
+Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor preserves the fixed main transaction step order'
+Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
+Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
