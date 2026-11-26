@@ -361,7 +361,7 @@ function Invoke-MBRecoveryPlan {
             $current = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
             $blockedBy = @()
             foreach ($dependency in @($Dependencies[$id])) {
-                $dependencyStep = @($current.Steps | Where-Object { $_.Id -eq $dependency })[0]
+                $dependencyStep = $current.Steps | Where-Object { $_.Id -eq $dependency } | Select-Object -First 1
                 if (-not $dependencyStep -or $dependencyStep.State -ne 'Completed') { $blockedBy += $dependency }
             }
             if ($blockedBy.Count -gt 0) {
