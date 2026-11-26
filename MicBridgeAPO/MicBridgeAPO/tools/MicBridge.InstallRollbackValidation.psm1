@@ -232,28 +232,7 @@ function Restore-MBRegistryExportSnapshot {
     $registrySubKey = $RegistryPath.Substring(5)
     $expectedRoot = "$registryHive\$registrySubKey"
     $snapshotText = [IO.File]::ReadAllText($SnapshotPath)
-    $snapshotKeys = @($snapshotText -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -match '^\[HKEY_[^\]]+\]
-    if ($snapshotKeys.Count -eq 0 -or -not ($snapshotKeys -contains $expectedRoot)) {
-        throw 'Registry snapshot does not contain the exact requested root key.'
-    }
-    foreach ($snapshotKey in $snapshotKeys) {
-        if (-not ($snapshotKey.Equals($expectedRoot,[StringComparison]::OrdinalIgnoreCase) -or $snapshotKey.StartsWith($expectedRoot + '\',[StringComparison]::OrdinalIgnoreCase))) {
-            throw 'Registry snapshot contains a key outside the requested recovery root.'
-        }
-    }
-
-    & reg.exe import $SnapshotPath | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "reg.exe import failed for the fixed recovery target '$RegistryPath' (exit $LASTEXITCODE)."
-    }
-    if (-not (Test-MBRegistryExportSnapshot -RegistryPath $RegistryPath -ExpectedSha256 $ExpectedSha256 -TemporaryDirectory $TemporaryDirectory)) {
-        throw "Registry restore verification failed for '$RegistryPath'."
-    }
-    return $true
-}
-
-Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot
- } | ForEach-Object { $_.Substring(1, $_.Length - 2) })
+    $snapshotKeys = @($snapshotText -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -match "^\[HKEY_.+\]$" } | ForEach-Object { $_.Substring(1, $_.Length - 2) })
     if ($snapshotKeys.Count -eq 0 -or -not ($snapshotKeys -contains $expectedRoot)) {
         throw 'Registry snapshot does not contain the exact requested root key.'
     }
