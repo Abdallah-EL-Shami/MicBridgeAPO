@@ -59,6 +59,42 @@ try {
     Restore-MBComRegistrySnapshot -Target CLSID -State $state -TransactionDirectory $tx -InstallDirectory $install -RegistryHive HKCU | Out-Null
     Restore-MBComRegistrySnapshot -Target AudioEngineAPO -State $state -TransactionDirectory $tx -InstallDirectory $install -RegistryHive HKCU | Out-Null
 
+    # Kill a child PowerShell after registry import but before journal completion.
+    $crashTx=Join-Path $root ('transactions-crash-'+[guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $crashTx | Out-Null
+    $crashBackup=Join-Path $crashTx 'clsid.reg'
+    & $regExe export $clsidFull $crashBackup /y | Out-Null
+    if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export crash-resume CLSID baseline' }
+    $crashState=[pscustomobject]@{
+        ClsidRegExisted=$true; ClsidRegBackup=$crashBackup; ClsidRegSha256=(Get-FileHash $crashBackup -Algorithm SHA256).Hash
+        ApoRegExisted=$false; ApoRegBackup=$null; ApoRegSha256=$null
+    }
+    $crashKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$clsidSub\InprocServer32",$true)
+    try { $crashKey.SetValue('',(Join-Path $install 'crash-new.dll'),[Microsoft.Win32.RegistryValueKind]::String) } finally { $crashKey.Dispose() }
+    $crashJournal=Join-Path $crashTx 'com-crash-recovery.json'
+    $crashDevice=[guid]::NewGuid()
+    $crashSteps=@('RestoreComCLSID')
+    New-MBRecoveryJournal -Path $crashJournal -Operation InstallRollback -DeviceId $crashDevice -StepIds $crashSteps | Out-Null
+    $childScript=Join-Path $crashTx 'com-crash-child.ps1'
+    $childSource=@'
+param([string]$ActionModule,[string]$JournalModule,[string]$Journal,[string]$Tx,[string]$Install,[string]$Backup,[string]$Hash,[string]$Device)
+$ErrorActionPreference='Stop'
+Import-Module $ActionModule -Force
+Import-Module $JournalModule -Force
+$state=[pscustomobject]@{ClsidRegExisted=$true;ClsidRegBackup=$Backup;ClsidRegSha256=$Hash;ApoRegExisted=$false;ApoRegBackup=$null;ApoRegSha256=$null}
+$action={ Restore-MBComRegistrySnapshot -Target CLSID -State $state -TransactionDirectory $Tx -InstallDirectory $Install -RegistryHive HKCU | Out-Null; [Environment]::FailFast('Injected process death after COM registry restore') }.GetNewClosure()
+$verify={ Test-MBComRegistrySnapshotRestored -Target CLSID -State $state -TransactionDirectory $Tx -RegistryHive HKCU }.GetNewClosure()
+Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreComCLSID' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreComCLSID') -Action $action -Verify $verify
+'@
+    [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $child=Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,$module,$journalModule,$crashJournal,$crashTx,$install,$crashBackup,$crashState.ClsidRegSha256,$crashDevice.ToString('D')) -Wait -PassThru
+    if($child.ExitCode -eq 0) { throw 'FAIL: COM crash-injection child unexpectedly exited successfully' }
+    $interrupted=Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds $crashSteps
+    if($interrupted.Steps[0].State -ne 'Running' -or -not (Test-MBComRegistrySnapshotRestored -Target CLSID -State $crashState -TransactionDirectory $crashTx -RegistryHive HKCU)) { throw 'FAIL: COM crash did not leave Running journal plus verified registry side effect' }
+    Invoke-MBRecoveryStep -Path $crashJournal -StepId 'RestoreComCLSID' -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds $crashSteps -Action { throw 'COM registry import repeated after process restart' } -Verify { Test-MBComRegistrySnapshotRestored -Target CLSID -State $crashState -TransactionDirectory $crashTx -RegistryHive HKCU }
+    $resumed=Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds $crashSteps
+    if($resumed.Steps[0].State -ne 'Completed' -or $resumed.Steps[0].Attempts -ne 1) { throw 'FAIL: fresh-process COM recovery did not complete without repeating import' }
+
     # Missing original keys are removed only when the live CLSID proves product ownership.
     $absentState=[pscustomobject]@{
         ClsidRegExisted=$false; ClsidRegBackup=$null; ClsidRegSha256=$null
