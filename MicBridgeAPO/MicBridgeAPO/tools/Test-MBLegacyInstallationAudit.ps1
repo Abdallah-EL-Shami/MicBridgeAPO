@@ -58,6 +58,10 @@ try {
         PrevApoRegistrationFile=$apoExport
         PrevClsidRegistrationSha256=(Get-FileHash $clsidExport -Algorithm SHA256).Hash
         PrevApoRegistrationSha256=(Get-FileHash $apoExport -Algorithm SHA256).Hash
+        DevKeySddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
+        FxKeySddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
+        CreatedFx=$false
+        PrevEndpointEffect=$null
     }
     $backupJson=Join-Path $data 'backup.json'
     [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
