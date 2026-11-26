@@ -41,6 +41,10 @@ namespace MicBridge.LegacyFileHandleLease {
         private System.Collections.Generic.List<SafeFileHandle> handles =
             new System.Collections.Generic.List<SafeFileHandle>();
         internal void Add(SafeFileHandle handle) { handles.Add(handle); }
+        internal void AddRange(DirectoryPinSet other) {
+            foreach (SafeFileHandle handle in other.handles) handles.Add(handle);
+            other.handles.Clear();
+        }
         public void Dispose() {
             if (handles != null) {
                 for (int i = handles.Count - 1; i >= 0; --i) handles[i].Dispose();
@@ -66,9 +70,9 @@ namespace MicBridge.LegacyFileHandleLease {
             FileIdentity = info.VolumeSerialNumber.ToString("X8") + ":" +
                 info.FileIndexHigh.ToString("X8") + info.FileIndexLow.ToString("X8");
             Length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
-            if (info.NumberOfLinks != 1)
-                throw new InvalidOperationException("Candidate has multiple hard links; exclusive path validation is insufficient.");
             try {
+                if (info.NumberOfLinks != 1)
+                    throw new InvalidOperationException("Candidate has multiple hard links; exclusive path validation is insufficient.");
                 stream = new FileStream(handle, FileAccess.Read, 4096, false);
                 using (SHA256 sha = SHA256.Create()) {
                     byte[] digest = sha.ComputeHash(stream);
@@ -107,6 +111,7 @@ namespace MicBridge.LegacyFileHandleLease {
         private const uint OPEN_EXISTING = 3;
         private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
         private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+        private const uint FILE_SHARE_READ = 0x00000001;
         private const uint FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004;
         private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
         private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
@@ -118,13 +123,15 @@ namespace MicBridge.LegacyFileHandleLease {
             return b.ToString();
         }
 
-        private static void ValidateDirectoryChain(string directoryPath) {
+        private static DirectoryPinSet PinDirectoryChain(string directoryPath) {
             string full = Path.GetFullPath(directoryPath);
             string volumeRoot = Path.GetPathRoot(full);
             if (String.IsNullOrEmpty(volumeRoot))
                 throw new InvalidOperationException("Directory path has no supported volume root.");
             string current = volumeRoot;
-            ValidateDirectoryComponent(current);
+            DirectoryPinSet pins = new DirectoryPinSet();
+            try {
+                PinDirectoryComponent(current, pins);
             string remainder = full.Substring(volumeRoot.Length);
             string[] parts = remainder.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string part in parts) {
@@ -185,8 +192,6 @@ namespace MicBridge.LegacyFileHandleLease {
                 // Transfer both chains into one owner without releasing their handles.
                 pins.AddRange(rootPins);
                 pins.AddRange(parentPins);
-                rootPins.Dispose();
-                parentPins.Dispose();
                 string rootFinal;
                 using (SafeFileHandle root = Native.CreateFile(fullRoot, 0x80, FILE_SHARE_READ, IntPtr.Zero,
                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
