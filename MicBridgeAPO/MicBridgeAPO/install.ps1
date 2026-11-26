@@ -633,6 +633,9 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 throw "Full rollback executor is missing: $fullRollbackModule"
             }
             Import-Module -Name $fullRollbackModule -Force -ErrorAction Stop
+            # The installer already owns this lock; release it before the
+            # full executor acquires the same operation lock for replay.
+            if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
             $rollbackResult = Invoke-MBInstallFullRollback -TransactionDirectory (Split-Path -Parent $transactionStateFile) -DataDirectory $dataDir -InstallDirectory $installDir -ExpectedDeviceId $rollbackDeviceId
             if (-not $rollbackResult.Success) { throw 'Full rollback executor did not report success.' }
             Import-Module -Name $recoveryModule -Force -Global -ErrorAction Stop
