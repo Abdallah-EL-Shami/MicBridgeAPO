@@ -23,6 +23,9 @@ jobs:
       - name: Test install rollback snapshot validation
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackValidation.ps1
+      - name: Test read-only legacy installation audit (HKCU fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyInstallationAudit.ps1
       - name: Test isolated DLL rollback action
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackActions.ps1
