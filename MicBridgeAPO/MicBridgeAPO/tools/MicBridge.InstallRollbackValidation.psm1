@@ -136,11 +136,24 @@ function Test-MBInstallRollbackSnapshot {
     }
 
     foreach ($com in @(
-        [pscustomobject]@{ Name='CLSID'; Existed=[bool]$State.ClsidRegExisted; Path=[string]$State.ClsidRegBackup; Hash=[string]$State.ClsidRegSha256 },
-        [pscustomobject]@{ Name='AudioEngine APO'; Existed=[bool]$State.ApoRegExisted; Path=[string]$State.ApoRegBackup; Hash=[string]$State.ApoRegSha256 }
+        [pscustomobject]@{ Name='CLSID'; Existed=[bool]$State.ClsidRegExisted; Path=[string]$State.ClsidRegBackup; Hash=[string]$State.ClsidRegSha256; ExpectedName='clsid.reg' },
+        [pscustomobject]@{ Name='AudioEngine APO'; Existed=[bool]$State.ApoRegExisted; Path=[string]$State.ApoRegBackup; Hash=[string]$State.ApoRegSha256; ExpectedName='audioengine-apo.reg' }
     )) {
         if ($com.Existed) {
+            $expectedPath = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory $com.ExpectedName))
+            $recordedPath = ''
+            try { $recordedPath = [IO.Path]::GetFullPath($com.Path) } catch {}
+            if (-not [string]::Equals($recordedPath,$expectedPath,[StringComparison]::OrdinalIgnoreCase)) {
+                [void]$errors.Add("$($com.Name) COM export path does not match its fixed transaction-owned filename.")
+                continue
+            }
             Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+            if (Test-Path -LiteralPath $com.Path -PathType Leaf) {
+                $item = Get-Item -LiteralPath $com.Path -Force
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    [void]$errors.Add("$($com.Name) COM export must not be a reparse point.")
+                }
+            }
         }
     }
 
