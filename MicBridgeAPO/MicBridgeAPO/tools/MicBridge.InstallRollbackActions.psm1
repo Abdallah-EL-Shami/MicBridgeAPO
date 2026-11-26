@@ -21,17 +21,22 @@ function Test-MBNoReparsePath {
         $stopFull = Get-MBCanonicalPath $StopAt
         if (-not [string]::Equals($pathFull,$stopFull,[StringComparison]::OrdinalIgnoreCase) -and
             -not (Test-MBPathWithinDirectory -Candidate $pathFull -Root $stopFull)) { return $false }
+        # Inspect every existing component up to the volume root, including parents
+        # of BackupRoot/InstallRoot; a reparse parent can redirect an apparently safe child.
         $current = $pathFull
+        $volumeRoot = [IO.Path]::GetPathRoot($pathFull)
         while ($true) {
             if (Test-Path -LiteralPath $current) {
                 $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
                 if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
             }
-            if ([string]::Equals($current,$stopFull,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+            if ([string]::Equals($current.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar),
+                $volumeRoot.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { break }
             $parent = [IO.Directory]::GetParent($current)
             if (-not $parent) { return $false }
             $current = $parent.FullName
         }
+        return $true
     } catch { return $false }
 }
 
@@ -81,7 +86,7 @@ function Restore-MBDllSnapshot {
     if (-not $DllExisted) {
         if (Test-Path -LiteralPath $InstalledDllPath) {
             $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $item.PSIsContainer -eq $false) {
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.PSIsContainer) {
                 throw 'Refusing to remove a reparse point or non-file at the installed DLL destination.'
             }
             Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
