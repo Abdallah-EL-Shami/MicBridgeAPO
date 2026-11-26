@@ -121,6 +121,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
     }
 }
 } catch {
+    if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
     Write-EarlyInstallLog 'ERROR' "Install preflight stopped before a new install transaction began. $($_.Exception.ToString())"
     Write-RecoveryLog 'ERROR' "Pre-install recovery/rollback preflight failed; new installation did not start. $($_.Exception.ToString())"
     throw
