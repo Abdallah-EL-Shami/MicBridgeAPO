@@ -262,3 +262,9 @@ Write-Host 'All installer registration static checks passed.'
 Assert-Contains $installer 'TransactionId = \[string\]\$rollbackJournal\.TransactionId' 'Installer binds the durable snapshot to its rollback journal transaction identity'
 Assert-Contains $installer 'Test-MBInstallRollbackTransaction -JournalPath \$candidateJournal -StatePath \$candidateSnapshotPath' 'Installer rejects interrupted journals paired with an invalid or mismatched transaction snapshot through strict preflight'
 Assert-Contains $installer 'Rollback journal and snapshot belong to different transactions' 'Installer checks journal/snapshot transaction identity before rollback mutations'
+$rollbackCatchStart = $installer.IndexOf('    $failure = $_')
+$rollbackFinallyStart = $installer.IndexOf('} finally {', $rollbackCatchStart)
+if ($rollbackCatchStart -lt 0 -or $rollbackFinallyStart -le $rollbackCatchStart) { throw 'FAIL: Could not isolate installer rollback catch block for service-control safety check' }
+$rollbackCatch = $installer.Substring($rollbackCatchStart, $rollbackFinallyStart - $rollbackCatchStart)
+if ($rollbackCatch -match '(?im)Restart-Service\s+-Name\s+Audiosrv') { throw 'FAIL: Install rollback must not restart or otherwise control Audiosrv' }
+Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
