@@ -110,7 +110,7 @@ namespace MicBridge.LegacyFileHandleLease {
             string current = volumeRoot;
             ValidateDirectoryComponent(current);
             string remainder = full.Substring(volumeRoot.Length);
-            string[] parts = remainder.Split(new char[] { '\\\\' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = remainder.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string part in parts) {
                 current = Path.Combine(current, part);
                 ValidateDirectoryComponent(current);
