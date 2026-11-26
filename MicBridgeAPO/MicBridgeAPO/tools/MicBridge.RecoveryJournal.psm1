@@ -9,7 +9,7 @@ function Write-MBRecoveryJsonAtomic {
     }
     $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
     # Never delete the last known-good journal before the replacement is durable.
-    $backup = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.previous')
+    $backup = "$Path.previous"
     $json = ConvertTo-Json -InputObject $Value -Depth 20
     $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json)
     $stream = $null

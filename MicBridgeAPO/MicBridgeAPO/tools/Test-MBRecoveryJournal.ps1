@@ -44,6 +44,16 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     $step = @($afterResume.Steps | Where-Object Id -eq 'RestoreEndpointValues')[0]
     if ($step.State -ne 'Completed' -or $step.Attempts -ne 1) { throw 'FAIL: recovery did not recognize the already-applied effect' }
 
+    # Each atomic replacement keeps a deterministic last-known-good journal.
+    $stablePrevious = "$journalPath.previous"
+    if (-not (Test-Path -LiteralPath $stablePrevious -PathType Leaf)) {
+        throw 'FAIL: atomic journal replacement did not retain a stable .previous file'
+    }
+    $previousState = Get-Content -LiteralPath $stablePrevious -Raw | ConvertFrom-Json
+    if ($previousState.SchemaVersion -ne 1 -or $previousState.TransactionId -ne $journal.TransactionId) {
+        throw 'FAIL: stable .previous file is not a valid snapshot of this transaction'
+    }
+
     # Idempotent retry after an action failed before its effect.
     $retryPath = Join-Path $tempRoot 'retry.json'
     New-MBRecoveryJournal -Path $retryPath -Operation InstallRollback -DeviceId $device -StepIds @('RestoreFiles') | Out-Null
