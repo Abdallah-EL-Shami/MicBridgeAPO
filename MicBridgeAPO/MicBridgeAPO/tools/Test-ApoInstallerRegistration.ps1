@@ -119,6 +119,15 @@ Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer
 Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
 Assert-Contains $installer 'function Invoke-MBInstallRollbackRecovery' 'Installer can resume an interrupted rollback from its durable snapshot'
+Assert-Contains $installer "TransactionOutcome = 'Pending'" 'Install transaction begins in a durable pending state'
+Assert-Contains $installer "TransactionOutcome = 'Committed'" 'Successful install persists a committed outcome'
+Assert-Contains $installer 'Committed installation' 'Startup skips rollback for a committed installation'
+Assert-Contains $installer 'TransactionId = $transactionId' 'Install snapshot is bound to its transaction folder identity'
+$commitIndex = $installer.IndexOf("`$transactionState.TransactionOutcome = 'Committed'")
+$commitPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $commitIndex)
+$cleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force', $commitPersistIndex)
+if ($commitIndex -lt 0 -or $commitPersistIndex -le $commitIndex -or $cleanupIndex -le $commitPersistIndex) { throw 'FAIL: committed outcome must be durably persisted before transaction cleanup.' }
+Write-Host 'PASS: committed installation outcome is durable before cleanup'
 Assert-Contains $installer 'ExpectedOperation InstallRollback -ExpectedDeviceId' 'Rollback replay binds the journal to the original capture endpoint'
 Assert-Contains $installer 'DllBackupPath\s*=\s*\$null' 'Transaction snapshot defines durable previous-DLL metadata'
 Assert-Contains $installer 'The previous-DLL backup path is outside the MicBridge-owned backup directory' 'Rollback rejects DLL backup paths outside ProgramData ownership'
