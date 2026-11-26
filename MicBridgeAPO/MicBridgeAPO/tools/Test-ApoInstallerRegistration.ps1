@@ -278,5 +278,6 @@ $checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison
 if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $checkpointPosition) {
     throw 'FAIL: legacy audit must run before the restore point and all installation mutations'
 }
-$workflow = Get-Content -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '.github/workflows/build.yml') -Raw
+$repoRoot = Split-Path -Parent $root
+$workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -Raw
 Assert-Contains $workflow 'MicBridge.LegacyInstallAudit.psm1' 'Build package stages the legacy audit module beside the installer'
