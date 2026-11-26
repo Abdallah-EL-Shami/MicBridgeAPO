@@ -8,6 +8,7 @@ $data = Join-Path $root 'data'
 $files = Join-Path $tx 'install-files'
 $dlls = Join-Path $data 'dll-backups'
 $registryProviderPath = $null
+$restoreProviderPath = $null
 New-Item -ItemType Directory -Force -Path $files,$dlls | Out-Null
 try {
     $device = [guid]::NewGuid()
@@ -139,5 +140,6 @@ try {
     Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU reg.exe export verification'
 } finally {
     if ($registryProviderPath -and (Test-Path -LiteralPath $registryProviderPath)) { Remove-Item -LiteralPath $registryProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($restoreProviderPath -and (Test-Path -LiteralPath $restoreProviderPath)) { Remove-Item -LiteralPath $restoreProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
