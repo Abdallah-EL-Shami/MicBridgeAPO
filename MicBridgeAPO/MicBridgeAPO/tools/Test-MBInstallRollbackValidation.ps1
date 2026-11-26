@@ -113,6 +113,29 @@ try {
     $realRegistryTampered = Test-MBRegistryExportSnapshot -RegistryPath $registryPath -ExpectedSha256 $realExportHash -TemporaryDirectory $tx
     if ($realRegistryTampered) { throw 'FAIL: real reg.exe export accepted modified registry contents' }
 
+
+    # Exercise the production restore primitive against an isolated HKCU key.
+    $restoreLeaf = 'MicBridgeRollbackRestore-' + [guid]::NewGuid().ToString('N')
+    $restoreProviderPath = "Registry::HKEY_CURRENT_USER\\Software\\$restoreLeaf"
+    $restoreRegistryPath = "HKCU\\Software\\$restoreLeaf"
+    $restoreSnapshot = Join-Path $tx 'restore-fixture.reg'
+    New-Item -Path $restoreProviderPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $restoreProviderPath -Name 'OriginalValue' -Value 'before' -Type String
+    & reg.exe export $restoreRegistryPath $restoreSnapshot /y | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'FAIL: could not export isolated HKCU restore fixture' }
+    $restoreHash = (Get-FileHash -LiteralPath $restoreSnapshot -Algorithm SHA256).Hash
+    Set-ItemProperty -LiteralPath $restoreProviderPath -Name 'OriginalValue' -Value 'after' -Type String
+    Restore-MBRegistryExportSnapshot -RegistryPath $restoreRegistryPath -SnapshotPath $restoreSnapshot -ExpectedSha256 $restoreHash -TemporaryDirectory $tx | Out-Null
+    $restoredValue = (Get-ItemProperty -LiteralPath $restoreProviderPath -Name 'OriginalValue').OriginalValue
+    if ($restoredValue -ne 'before') { throw 'FAIL: registry restore primitive did not restore the original HKCU value' }
+    try {
+        Restore-MBRegistryExportSnapshot -RegistryPath 'HKLM\\SOFTWARE\\Classes\\CLSID\\MustNotTouch' -SnapshotPath $restoreSnapshot -ExpectedSha256 ('0' * 64) -TemporaryDirectory $tx
+        throw 'FAIL: registry restore primitive accepted a mismatched snapshot hash'
+    } catch {
+        if ($_.Exception.Message -eq 'FAIL: registry restore primitive accepted a mismatched snapshot hash') { throw }
+    }
+    Remove-Item -LiteralPath $restoreProviderPath -Recurse -Force -ErrorAction SilentlyContinue
+
     Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU reg.exe export verification'
 } finally {
     if ($registryProviderPath -and (Test-Path -LiteralPath $registryProviderPath)) { Remove-Item -LiteralPath $registryProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
