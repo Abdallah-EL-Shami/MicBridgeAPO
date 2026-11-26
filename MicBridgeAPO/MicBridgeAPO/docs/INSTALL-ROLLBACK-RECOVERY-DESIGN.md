@@ -91,13 +91,11 @@ Status: design only; not an implementation or release-readiness claim.
   and checks DLL restoration, journal identity, idempotent re-entry, and that
   the original grouped `RestorePreviousInstallState` step remains pending.
 - Windows CI runs this test.
-- This is deliberately a **DLL-only component executor**, not full transaction
-  recovery. It does not restore endpoint values/ACL, COM, support files,
-  configuration, shortcut, or directory ACLs; it does not mark the main
-  transaction complete; it is not called automatically at installer startup;
-  and it is not included in the install package. The fail-closed startup guard
-  remains mandatory. Do not use this component as a reason to install or
-  manually alter a live transaction until its Windows CI test is green.
+- ThThis was the initial **DLL-only component executor**. It remains independently
+  testable, but the packaged `MicBridge.FullInstallRollbackExecutor.psm1` now
+  coordinates it with endpoint values/ACLs, COM, support files, configuration,
+  shortcut, and ProgramData ACL recovery. Startup and installer-failure paths
+  call the full coordinator, not this DLL-only component directly.
 
 ## Test requirements
 
@@ -212,7 +210,7 @@ release did not already leave incorrect changes behind.
   valid permanent backup remains evidence, not cryptographic proof of the
   original Windows state. Do not delete or rewrite it automatically.
 
-## COM recovery prototype (isolated, not yet wired into installer)
+## COM recovery component (coordinated by the full executor)
 
 - Added `MicBridge.ComRegistrationRollback.psm1`. It has only two fixed targets:
   the product CLSID and its AudioEngine APO key. It checks the exact transaction
@@ -283,8 +281,7 @@ release did not already leave incorrect changes behind.
   component tests, full-coordinator crash/re-entry test, endpoint Registry/ACL
   recovery tests, and installer package staging. These Registry mutation tests
   use HKCU only; no production HKLM restoration was executed.
-- The COM executor is still not called by `install.ps1` or startup recovery and
-  is not staged into the installer package. The main grouped
-  `RestorePreviousInstallState` step is therefore not yet fully replayable
-  after process death. Production defaults remain HKLM; all Registry mutation
-  tests use HKCU. Do not install this branch yet.
+- COM, DLL, support-file, and metadata actions are orchestrated by the full
+  executor and are wired into installer startup/failure recovery. Production
+  defaults remain HKLM, but all Registry mutation tests use HKCU; no production
+  HKLM restore has been exercised. Do not install this branch yet.
