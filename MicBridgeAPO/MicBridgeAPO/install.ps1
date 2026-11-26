@@ -154,6 +154,27 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
     Write-RecoveryLog 'ERROR' "Pre-install recovery/rollback preflight failed; new installation did not start. $($_.Exception.ToString())"
     throw
 }
+# Read-only legacy audit gate: never install over unidentified or legacy MicBridge state.
+$legacyAuditModule = Join-Path $PSScriptRoot 'tools\MicBridge.LegacyInstallAudit.psm1'
+if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
+    throw "Legacy installation audit module is missing; refusing to start a new install transaction: $legacyAuditModule"
+}
+try {
+    Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
+    $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\'
+    Write-InstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
+    if (-not $legacyAudit.IsReadOnly -or $legacyAudit.CleanupAllowed -ne $false -or
+        $legacyAudit.OriginalWindowsBaselineProven -ne $false -or
+        $legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
+        $details = @($legacyAudit.Findings | Where-Object { $_.Classification -notin @('Absent') } |
+            ForEach-Object { "$($_.Name): $($_.Classification) [$($_.Path)]" }) -join '; '
+        throw "Legacy MicBridge state was detected or could not be ruled out. No cleanup or installation was attempted. Review findings: $details"
+    }
+} catch {
+    Write-InstallLog 'ERROR' "Read-only legacy audit gate blocked installation. $($_.Exception.ToString())"
+    throw
+}
+
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $backupFile = Join-Path $dataDir 'backup.json'
 $dllBackupPath = $null
