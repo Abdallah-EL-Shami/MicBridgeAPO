@@ -102,6 +102,7 @@ try {
 
     $comResult=Invoke-MBInstallComRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
     if(-not $comResult.Success -or -not $comResult.MainTransactionStillPending) { throw 'FAIL: COM executor returned an invalid result' }
+    Import-Module $journalModule -Force -Global
     $comJournal=Read-MBRecoveryJournal -Path $comResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreComCLSID','RestoreComAudioEngineAPO')
     if(@($comJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: COM executor did not complete both registration restores' }
     $mainAfterCom=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
