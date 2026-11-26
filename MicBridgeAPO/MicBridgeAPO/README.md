@@ -7,7 +7,7 @@
 هذه النسخة على فرع الاستعادة مخصصة لاختبارات CI ومراجعة التراجع فقط، وليست إصدارًا معتمدًا للتثبيت. لا تثبّت حزمة Actions الناتجة من هذا الفرع حتى صدور موافقة صريحة على الإصدار.
 
 ## التثبيت (بعد اعتماد إصدار رسمي فقط)
-1. نزّل ملف MicBridgeAPO-Install-Package وفك ضغطه كاملًا في مجلد واحد. لا تنقل الملفات منفردة ولا تحذف مجلد tools؛ يجب أن تبقى وحدات tools\\MicBridge.RecoveryJournal.psm1 وtools\\MicBridge.InstallRollbackValidation.psm1 وtools\\MicBridge.EndpointRegistryRollback.psm1 وtools\\MicBridge.InstallRollbackActions.psm1 بجانب ملفات التثبيت.
+1. نزّل ملف MicBridgeAPO-Install-Package وفك ضغطه كاملًا في مجلد واحد. لا تنقل الملفات منفردة ولا تحذف مجلد tools؛ يجب أن تبقى وحدات tools\\MicBridge.RecoveryJournal.psm1 وtools\\MicBridge.InstallRollbackValidation.psm1 وtools\\MicBridge.EndpointRegistryRollback.psm1 وtools\\MicBridge.InstallRollbackActions.psm1 وtools\\MicBridge.RegistryAclRollback.psm1 بجانب ملفات التثبيت.
 2. انقر مرتين على install.bat (يطلب صلاحيات المسؤول تلقائيًا).
    لتثبيت مايك آخر: powershell -ExecutionPolicy Bypass -File install.ps1 -DeviceName "الاسم"
 

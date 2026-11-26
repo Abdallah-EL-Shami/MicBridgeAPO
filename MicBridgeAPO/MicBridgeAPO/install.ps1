@@ -119,20 +119,15 @@ public class TokenPriv {
 $secAll = [System.Security.AccessControl.AccessControlSections]'Owner,Group,Access'
 $hklm   = [Microsoft.Win32.Registry]::LocalMachine
 
-function Get-Sddl([string]$sub) {      # يقرأ المالك والصلاحيات بصيغة SDDL
-    $k = $hklm.OpenSubKey($sub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [System.Security.AccessControl.RegistryRights]::ReadPermissions)
-    if (-not $k) { return $null }
-    $sd = $k.GetAccessControl($secAll); $k.Close()
-    return $sd.GetSecurityDescriptorSddlForm($secAll)
+$registryAclModule = Join-Path $PSScriptRoot 'tools\MicBridge.RegistryAclRollback.psm1'
+Import-Module -Name $registryAclModule -Force -ErrorAction Stop
+function Get-Sddl([string]$sub) {
+    Get-MBRegistryAclSddl -Hive HKLM -SubKeyPath $sub
 }
-function Restore-Sddl([string]$sub, [string]$sddl) {   # يعيد المالك والصلاحيات الأصلية
+function Restore-Sddl([string]$sub, [string]$sddl) {
     [TokenPriv]::Enable('SeTakeOwnershipPrivilege') | Out-Null
     [TokenPriv]::Enable('SeRestorePrivilege') | Out-Null
-    $k = $hklm.OpenSubKey($sub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]'TakeOwnership,ChangePermissions')
-    if (-not $k) { throw "تعذر فتح المفتاح $sub" }
-    $sec = New-Object System.Security.AccessControl.RegistrySecurity
-    $sec.SetSecurityDescriptorSddlForm($sddl)
-    $k.SetAccessControl($sec); $k.Close()
+    Restore-MBRegistryAclSddl -Hive HKLM -SubKeyPath $sub -Sddl $sddl
 }
 
 function Get-RegistryValueSnapshot([string]$sub, [string]$name) {

@@ -68,6 +68,7 @@ Assert-Contains $installer "StepId 'RestoreEndpointFxValues'" 'Rollback journals
 Assert-Contains $installer 'Test-MBEndpointRegistrySnapshot -Snapshot \(Get-MBTransactionFxRegistrySnapshot \$tx\)' 'Rollback verifies endpoint Fx values and key existence through the isolated registry module'
 Assert-Contains $installer "\$rollbackStepIds = @\('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState'\)" 'Rollback orders endpoint values, endpoint ACL, then remaining install-state restoration'
 Assert-Contains $installer "StepId 'RestoreEndpointAcl'" 'Rollback journals endpoint ACL restoration as an independent recovery step'
+Assert-Contains $installer 'MicBridge.RegistryAclRollback.psm1' 'Installer loads the tested endpoint ACL rollback module'
 Assert-Contains $installer 'Restore-Sddl "\$capSub\\\$\(\$tx\.DeviceId\)\\FxProperties"' 'Endpoint ACL step restores the original FxProperties security descriptor'
 Assert-Contains $installer 'Restore-Sddl "\$capSub\\\$\(\$tx\.DeviceId\)"' 'Endpoint ACL step restores the original capture endpoint security descriptor'
 Assert-Contains $installer 'Restore-MBEndpointRegistrySnapshot -Snapshot' 'Rollback uses the tested endpoint Fx restoration module'
@@ -232,7 +233,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
