@@ -21,13 +21,16 @@ function Write-MBLegacyJournalAtomic {
         if (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Journal cannot be a reparse point.' }
         if ($existing.PSIsContainer) { throw 'Journal path is a directory.' }
     }
-    $temp = Join-Path $parent ('.' + [IO.Path]::GetFileName($full) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $token = [guid]::NewGuid().ToString('N')
+    $temp = Join-Path $parent ('.' + [IO.Path]::GetFileName($full) + '.' + $token + '.tmp')
+    $backup = Join-Path $parent ('.' + [IO.Path]::GetFileName($full) + '.' + $token + '.bak')
     try {
         [IO.File]::WriteAllText($temp, $Content, [Text.UTF8Encoding]::new($false))
-        if (Test-Path -LiteralPath $full) { [IO.File]::Replace($temp, $full, $null) }
+        if (Test-Path -LiteralPath $full) { [IO.File]::Replace($temp, $full, $backup) }
         else { [IO.File]::Move($temp, $full) }
     } finally {
         if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
     }
 }
 
