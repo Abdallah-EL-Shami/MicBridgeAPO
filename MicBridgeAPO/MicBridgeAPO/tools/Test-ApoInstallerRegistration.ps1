@@ -49,6 +49,7 @@ Assert-Contains $installer 'Get-FileHash\s+-LiteralPath\s+\$target\s+-Algorithm 
 Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$dataDir' 'Rollback verifies restored ProgramData directory ACL'
 Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$controlPath' 'Rollback verifies restored control file ACL'
 Assert-Contains $installer 'ShortcutBackupSha256' 'Rollback verifies restored desktop shortcut contents'
+Assert-Contains $installer 'DllOriginalSha256\s*=\s*if \(Test-Path' 'Installer snapshots the original installed DLL hash before any replacement'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
