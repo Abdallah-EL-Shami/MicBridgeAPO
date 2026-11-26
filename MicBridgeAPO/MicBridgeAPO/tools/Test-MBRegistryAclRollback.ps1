@@ -63,13 +63,17 @@ $verify = { Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $SubKey -ExpectedSddl 
 Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointAcl' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreEndpointAcl') -Action $action -Verify $verify
 '@
     [IO.File]::WriteAllText($child,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $childStdout = Join-Path $root 'acl-child.stdout.txt'
+    $childStderr = Join-Path $root 'acl-child.stderr.txt'
     $process = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
         '-NoProfile','-ExecutionPolicy','Bypass','-File',$child,$module,$journal,$subKey,$originalSddl,$device.ToString('D')
-    ) -Wait -PassThru
+    ) -Wait -PassThru -RedirectStandardOutput $childStdout -RedirectStandardError $childStderr
     if ($process.ExitCode -eq 0) { throw 'Crash-injection child exited successfully.' }
     $interrupted = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointAcl')
     if ($interrupted.Steps[0].State -ne 'Running') {
-        throw ("Journal state after child exit was [{0}], expected [Running]." -f $interrupted.Steps[0].State)
+        $stdoutText = if (Test-Path $childStdout) { Get-Content -Raw $childStdout } else { '' }
+        $stderrText = if (Test-Path $childStderr) { Get-Content -Raw $childStderr } else { '' }
+        throw ("Journal state after child exit was [{0}], expected [Running]. Child exit={1}; stdout=[{2}]; stderr=[{3}]" -f $interrupted.Steps[0].State,$process.ExitCode,$stdoutText,$stderrText)
     }
     $postCrashSddl = Get-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey
     if (-not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -ExpectedSddl $originalSddl)) {
