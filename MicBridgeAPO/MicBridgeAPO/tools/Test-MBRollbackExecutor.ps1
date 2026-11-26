@@ -134,17 +134,6 @@ try {
     $mainAfterFiles=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
     if($mainAfterFiles.Steps[2].State -ne 'Pending') { throw 'FAIL: support-file executor incorrectly marked grouped main step complete' }
 
-    # Run the complete main transaction journal after the isolated components
-    # have proven idempotent re-entry. Restore endpoint FX values and ACLs too.
-    $fullResult=Invoke-MBInstallFullRollback -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -ExpectedDeviceId $device -RegistryHive HKCU
-    if(-not $fullResult.Success -or @($fullResult.CompletedSteps).Count -ne 3) { throw 'FAIL: full install rollback executor did not complete all three main steps' }
-    Import-Module $journalModule -Force -Global
-    $fullJournal=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
-    if(@($fullJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: full install rollback journal retained a pending step' }
-    $fxCheck=Get-MBEndpointRegistrySnapshot -RegistryPath "HKCU\$fxSub" -ValueNames @('{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15')
-    if(-not (Test-MBEndpointRegistrySnapshot -Snapshot $fxCheck)) { throw 'FAIL: full executor endpoint FX postcondition failed' }
-    if(-not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $captureSub -ExpectedSddl $devSddl) -or -not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $fxSub -ExpectedSddl $fxSddl)) { throw 'FAIL: full executor endpoint ACL postcondition failed' }
-
     # Restore transaction-created ProgramData files, desktop shortcut, and ACL.
     [IO.File]::Copy($iniPackageFixture,(Join-Path $data 'MicBridge.ini'))
     [IO.File]::Copy($controlPackageFixture,(Join-Path $data 'control.ini'))
@@ -191,6 +180,17 @@ try {
     if ($mainJournal.Steps[2].State -ne 'Pending') {
         throw 'FAIL: isolated DLL executor incorrectly marked the grouped main rollback step complete'
     }
+
+    # Run the complete main transaction journal after the isolated components
+    # have proven idempotent re-entry. Restore endpoint FX values and ACLs too.
+    $fullResult=Invoke-MBInstallFullRollback -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -ExpectedDeviceId $device -RegistryHive HKCU
+    if(-not $fullResult.Success -or @($fullResult.CompletedSteps).Count -ne 3) { throw 'FAIL: full install rollback executor did not complete all three main steps' }
+    Import-Module $journalModule -Force -Global
+    $fullJournal=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    if(@($fullJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: full install rollback journal retained a pending step' }
+    $fxCheck=Get-MBEndpointRegistrySnapshot -RegistryPath "HKCU\$fxSub" -ValueNames @('{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0','{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15')
+    if(-not (Test-MBEndpointRegistrySnapshot -Snapshot $fxCheck)) { throw 'FAIL: full executor endpoint FX postcondition failed' }
+    if(-not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $captureSub -ExpectedSddl $devSddl) -or -not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $fxSub -ExpectedSddl $fxSddl)) { throw 'FAIL: full executor endpoint ACL postcondition failed' }
 
     # Re-enter from a distinct PowerShell process. This proves the executor
     # reconstructs its action from the durable transaction files, not closures
