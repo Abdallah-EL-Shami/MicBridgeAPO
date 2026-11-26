@@ -239,6 +239,23 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreCom' -ExpectedOperation Ins
     }
     Remove-Item -LiteralPath $crashProviderPath -Recurse -Force -ErrorAction SilentlyContinue
 
+    # Validate the durable journal and state as one transaction before any replay.
+    $preflightJournalPath = Join-Path $tx 'rollback-recovery.json'
+    $preflightSteps = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    $preflightJournal = New-MBRecoveryJournal -Path $preflightJournalPath -Operation InstallRollback -DeviceId $device -StepIds $preflightSteps
+    $state.TransactionId = $preflightJournal.TransactionId
+    [IO.File]::WriteAllText((Join-Path $tx 'state.json'),(ConvertTo-Json -InputObject $state -Depth 20),(New-Object Text.UTF8Encoding($false)))
+    $preflight = Test-MBInstallRollbackTransaction -JournalPath $preflightJournalPath -StatePath (Join-Path $tx 'state.json') -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device -ExpectedStepIds $preflightSteps
+    if (-not $preflight.IsValid -or -not $preflight.ReplaySafe) {
+        throw "FAIL: valid durable transaction preflight rejected: $($preflight.Errors -join '; ')"
+    }
+    $state.TransactionId = [guid]::NewGuid().ToString('D')
+    [IO.File]::WriteAllText((Join-Path $tx 'state.json'),(ConvertTo-Json -InputObject $state -Depth 20),(New-Object Text.UTF8Encoding($false)))
+    $mismatchedPreflight = Test-MBInstallRollbackTransaction -JournalPath $preflightJournalPath -StatePath (Join-Path $tx 'state.json') -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device -ExpectedStepIds $preflightSteps
+    if ($mismatchedPreflight.IsValid -or -not ($mismatchedPreflight.Errors -match 'transaction identities do not match')) {
+        throw 'FAIL: preflight accepted a state snapshot from a different transaction'
+    }
+
     Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU export verification and fresh-process COM crash recovery'
 } finally {
     if ($registryProviderPath -and (Test-Path -LiteralPath $registryProviderPath)) { Remove-Item -LiteralPath $registryProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
