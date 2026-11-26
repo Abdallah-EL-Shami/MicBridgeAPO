@@ -65,6 +65,28 @@ function Restore-Sddl([string]$sub, [string]$sddl) {   # يعيد المالك �
 }
 
 
+function Test-MBRegistrySnapshot([string]$RegistrySubKey, [string]$SnapshotPath, [bool]$ExpectedExists) {
+    $registryPath = "HKLM:\\$RegistrySubKey"
+    if (-not $ExpectedExists) {
+        return (-not (Test-Path -LiteralPath $registryPath))
+    }
+    if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath $registryPath)) { return $false }
+    $currentExport = Join-Path $dataDir ("verify-" + [guid]::NewGuid().ToString('N') + ".reg")
+    try {
+        & reg.exe export "HKLM\\$RegistrySubKey" $currentExport /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $currentExport -PathType Leaf)) { return $false }
+        $expectedLines = @(Get-Content -LiteralPath $SnapshotPath -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+        $actualLines = @(Get-Content -LiteralPath $currentExport -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+        if ($expectedLines.Count -ne $actualLines.Count) { return $false }
+        for ($i=0; $i -lt $expectedLines.Count; $i++) {
+            if (-not [string]::Equals([string]$expectedLines[$i],[string]$actualLines[$i],[StringComparison]::OrdinalIgnoreCase)) { return $false }
+        }
+        return $true
+    } catch { return $false }
+    finally { Remove-Item -LiteralPath $currentExport -Force -ErrorAction SilentlyContinue }
+}
+
 # Fail closed before any mutation if the original recovery snapshot is unavailable.
 if (-not (Test-Path -LiteralPath $backupFile)) {
     throw 'backup.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
@@ -375,16 +397,35 @@ if ($remainingReferences.Count -gt 0 -and -not ($b.PrevClsidRegistrationExists -
 # registration; remove only MicBridge's registration when no prior registration existed.
 $apoRegistrationPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
 $comRegistrationPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
-if ($b.PrevApoRegistrationExists) {
+# Persist the COM restoration plan before changing either registration.
+# Re-running uninstall resumes this exact endpoint-bound plan; completed steps are verified.
+$uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
+$uninstallStepIds = @('RestoreAudioEngineApo','RestoreComClsid')
+if (-not (Test-Path -LiteralPath $uninstallJournal -PathType Leaf)) {
+    New-MBRecoveryJournal -Path $uninstallJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $uninstallStepIds | Out-Null
+} else {
+    Read-MBRecoveryJournal -Path $uninstallJournal -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds | Out-Null
+}
+
+Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreAudioEngineApo' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
     if (Test-Path -LiteralPath $apoRegistrationPath) { Remove-Item -LiteralPath $apoRegistrationPath -Recurse -Force -ErrorAction Stop }
-    & reg.exe import ([string]$b.PrevApoRegistrationFile) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the original AudioEngine APO registration; keeping MicBridge files for recovery.' }
-} elseif (Test-Path -LiteralPath $apoRegistrationPath) { Remove-Item -LiteralPath $apoRegistrationPath -Recurse -Force -ErrorAction Stop }
-if ($b.PrevClsidRegistrationExists) {
+    if ($b.PrevApoRegistrationExists) {
+        & reg.exe import ([string]$b.PrevApoRegistrationFile) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the original AudioEngine APO registration.' }
+    }
+} -Verify {
+    Test-MBRegistrySnapshot -RegistrySubKey "SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid" -SnapshotPath ([string]$b.PrevApoRegistrationFile) -ExpectedExists ([bool]$b.PrevApoRegistrationExists)
+}
+
+Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreComClsid' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
     if (Test-Path -LiteralPath $comRegistrationPath) { Remove-Item -LiteralPath $comRegistrationPath -Recurse -Force -ErrorAction Stop }
-    & reg.exe import ([string]$b.PrevClsidRegistrationFile) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the original COM CLSID registration; keeping MicBridge files for recovery.' }
-} elseif (Test-Path -LiteralPath $comRegistrationPath) { Remove-Item -LiteralPath $comRegistrationPath -Recurse -Force -ErrorAction Stop }
+    if ($b.PrevClsidRegistrationExists) {
+        & reg.exe import ([string]$b.PrevClsidRegistrationFile) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the original COM CLSID registration.' }
+    }
+} -Verify {
+    Test-MBRegistrySnapshot -RegistrySubKey "SOFTWARE\\Classes\\CLSID\\$clsid" -SnapshotPath ([string]$b.PrevClsidRegistrationFile) -ExpectedExists ([bool]$b.PrevClsidRegistrationExists)
+}
 Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk') -Force -ErrorAction SilentlyContinue
 
 Restart-Service -Name Audiosrv -Force
