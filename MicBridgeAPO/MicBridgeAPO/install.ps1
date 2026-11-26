@@ -62,9 +62,36 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
             $pendingRollbackJournals += $candidateJournal
         }
     }
-    if ($pendingRollbackJournals.Count -gt 0) {
+    if ($pendingRollbackJournals.Count -gt 1) {
         $paths = $pendingRollbackJournals -join '; '
-        throw "An interrupted MicBridge installation rollback was detected. A new installation is blocked to protect the previous device state. Recovery replay is not yet automated; preserve these transaction folders and use the recovery procedure: $paths"
+        if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
+        throw "Multiple interrupted MicBridge rollback transactions were found. Their order is ambiguous; no automatic replay was attempted. Preserve: $paths"
+    }
+    if ($pendingRollbackJournals.Count -eq 1) {
+        $pendingJournalPath = [string]$pendingRollbackJournals[0]
+        $pendingTransactionDirectory = Split-Path -Parent $pendingJournalPath
+        $pendingJournal = Read-MBRecoveryJournal -Path $pendingJournalPath -ExpectedOperation InstallRollback -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+        $pendingDeviceId = [guid]::Parse([string]$pendingJournal.DeviceId)
+        $fullRollbackModule = Join-Path $PSScriptRoot 'tools\\MicBridge.FullInstallRollbackExecutor.psm1'
+        if (-not (Test-Path -LiteralPath $fullRollbackModule -PathType Leaf)) {
+            if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
+            throw "Full rollback executor is missing; preserve the pending transaction: $fullRollbackModule"
+        }
+        Import-Module -Name $fullRollbackModule -Force -ErrorAction Stop
+        # Release the installer's outer lock; the full executor acquires the
+        # same lock while replaying and verifying the entire durable transaction.
+        if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
+        $recoveryResult = Invoke-MBInstallFullRollback -TransactionDirectory $pendingTransactionDirectory -DataDirectory $dataDir -InstallDirectory $installDir -ExpectedDeviceId $pendingDeviceId
+        if (-not $recoveryResult.Success) {
+            throw "Interrupted MicBridge rollback did not complete. Preserve the transaction directory: $pendingTransactionDirectory"
+        }
+        $verifiedJournal = Read-MBRecoveryJournal -Path $pendingJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $pendingDeviceId -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+        if (@($verifiedJournal.Steps | Where-Object { $_.State -ne 'Completed' }).Count -gt 0) {
+            throw "Full rollback executor returned without completing every main step. Preserve: $pendingTransactionDirectory"
+        }
+        # Re-acquire the installer lock before starting a new transaction.
+        $operationLock = Enter-MBRecoveryOperationLock -Path $operationLockPath -TimeoutSeconds 0
+        Write-Host "Recovered the interrupted MicBridge installation transaction before starting a new installation."
     }
 }
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
