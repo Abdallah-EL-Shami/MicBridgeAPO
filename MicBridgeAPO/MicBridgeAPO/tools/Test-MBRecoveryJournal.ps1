@@ -107,6 +107,23 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     $stillValid = Read-MBRecoveryJournal -Path $blockedWritePath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('RestoreBeforeMutation')
     if ($stillValid.Steps[0].State -ne 'Pending') { throw 'FAIL: failed journal update damaged the last durable state' }
 
+    # The dedicated writer lock must also fail closed independently of the
+    # per-step lock, leaving the durable journal state unchanged.
+    $writerLockPath = Join-Path $tempRoot 'writer-lock.json'
+    New-MBRecoveryJournal -Path $writerLockPath -Operation Uninstall -DeviceId $device -StepIds @('WriterLockStep') | Out-Null
+    $writerLockHandle = New-Object IO.FileStream("$writerLockPath.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    $writerActionRan = $false
+    try {
+        $writerBlocked = $false
+        try {
+            Invoke-MBRecoveryStep -Path $writerLockPath -StepId 'WriterLockStep' -Action { $script:writerActionRan=$true } -Verify { $false }
+        } catch { $writerBlocked = $true }
+        if (-not $writerBlocked) { throw 'FAIL: journal writer lock did not block a competing writer' }
+        if ($writerActionRan) { throw 'FAIL: action ran without a durable Running journal update' }
+    } finally { $writerLockHandle.Dispose() }
+    $writerLockState = Read-MBRecoveryJournal -Path $writerLockPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('WriterLockStep')
+    if ($writerLockState.Steps[0].State -ne 'Pending') { throw 'FAIL: writer-lock contention changed the durable step state' }
+
     # Persistent recovery artifacts are bound to their SHA-256 content.
     $manifestFile = Join-Path $tempRoot 'com-snapshot.reg'
     [IO.File]::WriteAllText($manifestFile,"Windows Registry Editor Version 5.00`r`n")
