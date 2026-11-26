@@ -58,6 +58,13 @@ Assert-Contains $uninstaller '\$expectedAssociation' 'Uninstaller restores assoc
 Assert-Contains $uninstaller 'RegistryValueKind]::MultiString' 'Uninstaller restores the composite property with REG_MULTI_SZ type'
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$apoRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if AudioEngine registration removal fails'
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if COM registration removal fails'
+Assert-Contains $uninstaller "uninstall-cleanup-recovery.json" 'Uninstaller persists a separate cleanup journal without changing the legacy registry journal schema'
+Assert-Contains $uninstaller "@\('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory'\)" 'Uninstaller journals shortcut, audio-service, and install-directory cleanup independently'
+Assert-Contains $uninstaller "StepId 'RemoveDesktopShortcut'" 'Uninstaller can resume desktop shortcut removal'
+Assert-Contains $uninstaller "StepId 'RestartAudioService'" 'Uninstaller can resume and verify the Audio service restart'
+Assert-Contains $uninstaller "StepId 'RemoveInstallDirectory'" 'Uninstaller can resume installation-directory cleanup'
+Assert-Contains $uninstaller 'Get-Service -Name Audiosrv' 'Uninstaller verifies Audio service is running after restart'
+Assert-Contains $uninstaller 'preserveInstallDirectory' 'Uninstaller retains files when restored original COM registration may reference the DLL'
 
 $uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
 $uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
