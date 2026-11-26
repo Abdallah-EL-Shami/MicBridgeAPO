@@ -149,7 +149,8 @@ function Test-MBInstallRollbackSnapshot {
         [Parameter(Mandatory)][object]$State,
         [Parameter(Mandatory)][string]$TransactionDirectory,
         [Parameter(Mandatory)][string]$DataDirectory,
-        [Parameter(Mandatory)][guid]$ExpectedDeviceId
+        [Parameter(Mandatory)][guid]$ExpectedDeviceId,
+        [ValidateSet('HKLM','HKCU')][string]$RegistryHive = 'HKLM'
     )
     $errors = New-Object 'System.Collections.Generic.List[string]'
     # Validate the transaction/data roots themselves even when this snapshot
@@ -283,10 +284,11 @@ function Test-MBInstallRollbackSnapshot {
                 continue
             }
             Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+            $registryHiveName = if ($RegistryHive -eq 'HKLM') { 'HKEY_LOCAL_MACHINE' } else { 'HKEY_CURRENT_USER' }
             $expectedRegistryRoot = if ($com.Name -eq 'CLSID') {
-                'HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+                "$registryHiveName\SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}"
             } else {
-                'HKEY_LOCAL_MACHINE\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+                "$registryHiveName\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}"
             }
             if (-not (Test-MBRegistryExportBounds -SnapshotPath $com.Path -ExpectedRegistryRoot $expectedRegistryRoot)) {
                 [void]$errors.Add("$($com.Name) COM export has an invalid header, missing fixed root, or keys outside the MicBridge registration.")
@@ -368,7 +370,8 @@ function Test-MBInstallRollbackTransaction {
         [Parameter(Mandatory)][string]$TransactionDirectory,
         [Parameter(Mandatory)][string]$DataDirectory,
         [Parameter(Mandatory)][guid]$ExpectedDeviceId,
-        [Parameter(Mandatory)][string[]]$ExpectedStepIds
+        [Parameter(Mandatory)][string[]]$ExpectedStepIds,
+        [ValidateSet('HKLM','HKCU')][string]$RegistryHive = 'HKLM'
     )
     $errors = New-Object 'System.Collections.Generic.List[string]'
     $journalModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
@@ -395,7 +398,7 @@ function Test-MBInstallRollbackTransaction {
 
         $journal = Read-MBRecoveryJournal -Path $JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds -ErrorAction Stop
         $state = Get-Content -LiteralPath $StatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $snapshot = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -ExpectedDeviceId $ExpectedDeviceId
+        $snapshot = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -ExpectedDeviceId $ExpectedDeviceId -RegistryHive $RegistryHive
         if (-not $snapshot.IsValid -or -not $snapshot.ReplaySafe) {
             foreach ($errorText in @($snapshot.Errors)) { [void]$errors.Add([string]$errorText) }
         }
