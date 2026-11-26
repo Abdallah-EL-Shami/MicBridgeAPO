@@ -10,9 +10,9 @@ function Invoke-MBInstallDllRecovery {
     )
 
     $ErrorActionPreference = 'Stop'
-    $transactionRoot = [IO.Path]::GetFullPath($TransactionDirectory).TrimEnd('\')
-    $dataRoot = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
-    $installRoot = [IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')
+    $transactionRoot = [IO.Path]::GetFullPath($TransactionDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $dataRoot = [IO.Path]::GetFullPath($DataDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $installRoot = [IO.Path]::GetFullPath($InstallDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
     $expectedTransactionName = [IO.Path]::GetFileName($transactionRoot)
     if ($expectedTransactionName -notmatch '^transactions-[A-Za-z0-9-]+$') {
         throw 'DLL recovery requires a transaction-owned transactions-* directory.'
