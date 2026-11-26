@@ -124,6 +124,39 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     $writerLockState = Read-MBRecoveryJournal -Path $writerLockPath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('WriterLockStep')
     if ($writerLockState.Steps[0].State -ne 'Pending') { throw 'FAIL: writer-lock contention changed the durable step state' }
 
+    # Fallback restoration must honor the same writer lock as normal journal writes.
+    $lockedFallbackPath = Join-Path $tempRoot 'locked-fallback.json'
+    New-MBRecoveryJournal -Path $lockedFallbackPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreLocked') | Out-Null
+    [IO.File]::WriteAllText($lockedFallbackPath,'{corrupted')
+    $corruptBytesBefore = [IO.File]::ReadAllBytes($lockedFallbackPath)
+    $fallbackWriteLock = New-Object IO.FileStream("$lockedFallbackPath.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        $restoreBlocked = $false
+        try { Read-MBRecoveryJournal -Path $lockedFallbackPath | Out-Null }
+        catch { $restoreBlocked = $true }
+        if (-not $restoreBlocked) { throw 'FAIL: corrupt-primary fallback restoration ignored the writer lock' }
+        $corruptBytesAfter = [IO.File]::ReadAllBytes($lockedFallbackPath)
+        if ([Convert]::ToBase64String($corruptBytesBefore) -ne [Convert]::ToBase64String($corruptBytesAfter)) {
+            throw 'FAIL: blocked fallback restoration changed the corrupt primary'
+        }
+    } finally { $fallbackWriteLock.Dispose() }
+    $lockedRecovered = Read-MBRecoveryJournal -Path $lockedFallbackPath
+    if ($lockedRecovered.Steps.Count -ne 1) { throw 'FAIL: corrupt-primary fallback did not recover after lock release' }
+
+    $lockedMissingPath = Join-Path $tempRoot 'locked-missing.json'
+    New-MBRecoveryJournal -Path $lockedMissingPath -Operation Uninstall -DeviceId $device -StepIds @('RestoreMissingLocked') | Out-Null
+    Remove-Item -LiteralPath $lockedMissingPath -Force
+    $missingWriteLock = New-Object IO.FileStream("$lockedMissingPath.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        $missingRestoreBlocked = $false
+        try { Read-MBRecoveryJournal -Path $lockedMissingPath | Out-Null }
+        catch { $missingRestoreBlocked = $true }
+        if (-not $missingRestoreBlocked) { throw 'FAIL: missing-primary fallback restoration ignored the writer lock' }
+        if (Test-Path -LiteralPath $lockedMissingPath) { throw 'FAIL: blocked missing-primary restoration created a primary file' }
+    } finally { $missingWriteLock.Dispose() }
+    $missingLockedRecovered = Read-MBRecoveryJournal -Path $lockedMissingPath
+    if ($missingLockedRecovered.Steps.Count -ne 1) { throw 'FAIL: missing-primary fallback did not recover after lock release' }
+
     # Persistent recovery artifacts are bound to their SHA-256 content.
     $manifestFile = Join-Path $tempRoot 'com-snapshot.reg'
     [IO.File]::WriteAllText($manifestFile,"Windows Registry Editor Version 5.00`r`n")
