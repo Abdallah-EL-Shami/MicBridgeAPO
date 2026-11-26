@@ -202,7 +202,8 @@ release did not already leave incorrect changes behind.
   is staged in the install package. No cleanup or automatic repair is performed.
 - HKCU/temp-only tests cover missing backup, valid candidate backup, endpoint
   mismatch, tampered COM export, unknown install files, and no mutation of
-  Registry/file state.
+  Registry/file state. These tests and the installer/uninstaller static checks
+  passed in Windows CI run 924.
 - Hardened transaction preflight so a hash-valid COM export must also have the
   Windows Registry Editor header, contain the exact fixed MicBridge CLSID or
   AudioEngine APO root, and contain no key outside that root or its children.
@@ -228,8 +229,14 @@ release did not already leave incorrect changes behind.
   removal of keys absent from the snapshot, idempotence, tampered snapshot
   rejection, foreign CLSID preservation, and child-process termination after
   the Registry side effect followed by fresh-process journal resume.
-- The executor is still not called by `install.ps1` or startup recovery and is
-  not staged into the installer package. A full-transaction HKCU fixture has
-  now been added to the durable executor test, including fresh-process re-entry;
-  CI is the remaining verification gate. Production defaults remain HKLM and
-  have not been exercised by tests. Do not install this branch yet.
+- A full-transaction HKCU fixture now exercises the COM executor alongside the
+  DLL executor, including transaction preflight, component journal completion,
+  and fresh-process re-entry. The separate COM action test also kills a child
+  PowerShell process after the Registry side effect and proves a new process
+  completes the Running journal without repeating the import. These tests passed
+  in Windows CI run 924.
+- The COM executor is still not called by `install.ps1` or startup recovery and
+  is not staged into the installer package. The main grouped
+  `RestorePreviousInstallState` step is therefore not yet fully replayable
+  after process death. Production defaults remain HKLM; all Registry mutation
+  tests use HKCU. Do not install this branch yet.
