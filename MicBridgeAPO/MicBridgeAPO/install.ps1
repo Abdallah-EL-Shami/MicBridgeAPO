@@ -37,6 +37,16 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         $candidateJournal = Join-Path $transactionFolder.FullName 'rollback-recovery.json'
         if (-not (Test-Path -LiteralPath $candidateJournal -PathType Leaf)) { continue }
         $candidateState = Read-MBRecoveryJournal -Path $candidateJournal -ExpectedOperation InstallRollback
+        $candidateSnapshotPath = Join-Path $transactionFolder.FullName 'state.json'
+        if (-not (Test-Path -LiteralPath $candidateSnapshotPath -PathType Leaf)) {
+            throw "Interrupted install rollback has no transaction snapshot: $candidateSnapshotPath"
+        }
+        $candidateSnapshot = Get-Content -LiteralPath $candidateSnapshotPath -Raw | ConvertFrom-Json
+        $snapshotTransactionId = [guid]::Empty
+        if (-not [guid]::TryParse([string]$candidateSnapshot.TransactionId,[ref]$snapshotTransactionId) -or
+            $snapshotTransactionId.ToString('D') -ne [string]$candidateState.TransactionId) {
+            throw "Interrupted install rollback journal/snapshot transaction identity mismatch: $candidateJournal"
+        }
         $unfinished = @($candidateState.Steps | Where-Object { $_.State -ne 'Completed' })
         if ($unfinished.Count -gt 0) {
             $pendingRollbackJournals += $candidateJournal
@@ -334,7 +344,9 @@ Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 $rollbackJournalPath = Join-Path $transactionDir 'rollback-recovery.json'
 $rollbackDeviceId = [guid]$dev.Id
 $rollbackStepIds = @('RestorePreviousInstallState')
-New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds | Out-Null
+$rollbackJournal = New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds
+$transactionState.TransactionId = [string]$rollbackJournal.TransactionId
+Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 
 
 # ---- 4) الملفات
@@ -451,9 +463,14 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             # Validate every durable rollback input before touching Registry, ACLs, COM, or files.
             $rollbackValidationModule = Join-Path $PSScriptRoot 'tools\MicBridge.InstallRollbackValidation.psm1'
             Import-Module -Name $rollbackValidationModule -Force -ErrorAction Stop
-            $rollbackValidation = Test-MBInstallRollbackSnapshot -State (Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json) -TransactionDirectory $transactionDir -DataDirectory $dataDir -ExpectedDeviceId $rollbackDeviceId
+            $rollbackSnapshot = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+            $rollbackValidation = Test-MBInstallRollbackSnapshot -State $rollbackSnapshot -TransactionDirectory $transactionDir -DataDirectory $dataDir -ExpectedDeviceId $rollbackDeviceId
             if (-not $rollbackValidation.IsValid -or -not $rollbackValidation.ReplaySafe) {
                 throw "Rollback snapshot validation failed; no rollback mutations were attempted. $($rollbackValidation.Errors -join '; ')"
+            }
+            $rollbackJournal = Read-MBRecoveryJournal -Path $rollbackJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds
+            if ([string]$rollbackSnapshot.TransactionId -ne [string]$rollbackJournal.TransactionId) {
+                throw 'Rollback journal and snapshot belong to different transactions; no rollback mutations were attempted.'
             }
             Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
                         # Reload the durable snapshot: process-local variables are not recovery evidence.
