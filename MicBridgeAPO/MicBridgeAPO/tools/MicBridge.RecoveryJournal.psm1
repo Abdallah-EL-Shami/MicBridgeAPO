@@ -13,7 +13,11 @@ function Write-MBRecoveryJsonAtomic {
     $json = ConvertTo-Json -InputObject $Value -Depth 20
     $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json)
     $stream = $null
+    $writeLock = $null
     try {
+        # Serialize every journal replacement, including initial creation and fallback repair.
+        # The OS releases this handle automatically if the process terminates.
+        $writeLock = New-Object IO.FileStream("$Path.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         # WriteThrough reduces exposure to OS cache loss; Flush(true) requests a durable file flush.
         $stream = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
         $stream.Write($bytes,0,$bytes.Length)
@@ -27,6 +31,7 @@ function Write-MBRecoveryJsonAtomic {
         }
     } finally {
         if ($stream) { $stream.Dispose() }
+        if ($writeLock) { $writeLock.Dispose() }
         if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
         # A backup left by a crash is intentionally retained for forensic/manual recovery.
     }
