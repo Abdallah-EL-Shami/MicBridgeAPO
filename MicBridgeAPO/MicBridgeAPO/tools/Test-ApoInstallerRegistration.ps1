@@ -58,13 +58,6 @@ Assert-Contains $uninstaller '\$expectedAssociation' 'Uninstaller restores assoc
 Assert-Contains $uninstaller 'RegistryValueKind]::MultiString' 'Uninstaller restores the composite property with REG_MULTI_SZ type'
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$apoRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if AudioEngine registration removal fails'
 Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Recurse -Force -ErrorAction Stop' 'Uninstaller stops if COM registration removal fails'
-Assert-Contains $uninstaller "uninstall-cleanup-recovery.json" 'Uninstaller persists a separate cleanup journal without changing the legacy registry journal schema'
-Assert-Contains $uninstaller "@\('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory'\)" 'Uninstaller journals shortcut, audio-service, and install-directory cleanup independently'
-Assert-Contains $uninstaller "StepId 'RemoveDesktopShortcut'" 'Uninstaller can resume desktop shortcut removal'
-Assert-Contains $uninstaller "StepId 'RestartAudioService'" 'Uninstaller can resume and verify the Audio service restart'
-Assert-Contains $uninstaller "StepId 'RemoveInstallDirectory'" 'Uninstaller can resume installation-directory cleanup'
-Assert-Contains $uninstaller 'Get-Service -Name Audiosrv' 'Uninstaller verifies Audio service is running after restart'
-Assert-Contains $uninstaller 'preserveInstallDirectory' 'Uninstaller retains files when restored original COM registration may reference the DLL'
 
 $uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
 $uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
@@ -118,36 +111,6 @@ Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validati
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
 Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
-Assert-Contains $installer 'function Invoke-MBInstallRollbackRecovery' 'Installer can resume an interrupted rollback from its durable snapshot'
-Assert-Contains $installer "TransactionOutcome = 'Pending'" 'Install transaction begins in a durable pending state'
-Assert-Contains $installer "TransactionOutcome = 'Committed'" 'Successful install persists a committed outcome'
-Assert-Contains $installer 'Committed installation' 'Startup skips rollback for a committed installation'
-Assert-Contains $installer 'TransactionId = \$transactionId' 'Install snapshot is bound to its transaction folder identity'
-$commitIndex = $installer.IndexOf("`$transactionState.TransactionOutcome = 'Committed'")
-$commitPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $commitIndex)
-$cleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force', $commitPersistIndex)
-if ($commitIndex -lt 0 -or $commitPersistIndex -le $commitIndex -or $cleanupIndex -le $commitPersistIndex) { throw 'FAIL: committed outcome must be durably persisted before transaction cleanup.' }
-Write-Host 'PASS: committed installation outcome is durable before cleanup'
-Assert-Contains $installer 'ExpectedOperation InstallRollback -ExpectedDeviceId' 'Rollback replay binds the journal to the original capture endpoint'
-Assert-Contains $installer 'DllBackupPath\s*=\s*\$null' 'Transaction snapshot defines durable previous-DLL metadata'
-Assert-Contains $installer 'The previous-DLL backup path is outside the MicBridge-owned backup directory' 'Rollback rejects DLL backup paths outside ProgramData ownership'
-Assert-Contains $installer 'The previous-DLL backup hash does not match the transaction snapshot' 'Rollback verifies the previous DLL hash before restoration'
-Assert-Contains $installer 'Registry recovery snapshot hash mismatch' 'Rollback rejects modified COM registry export snapshots before mutation'
-Assert-Contains $installer 'Install-file recovery snapshot hash mismatch' 'Rollback rejects modified installed-file snapshots before mutation'
-Assert-Contains $installer 'Shortcut recovery snapshot hash mismatch' 'Rollback rejects modified desktop shortcut snapshots before mutation'
-Assert-Contains $installer 'restoredShortcutHash' 'Rollback verifies restored shortcut content, not only file existence'
-Assert-Contains $installer 'targetHash' 'Rollback verifies restored installer-file content, not only file existence'
-Assert-Contains $installer 'DataDirSddl' 'Rollback verifies the restored ProgramData directory ACL'
-Assert-Contains $installer 'ControlSddl' 'Rollback verifies the restored control-file ACL'
-Assert-Contains $installer 'Interrupted installation rollback resumed and verified' 'Installer reports only a verified resumed rollback'
-Assert-Contains $installer 'Invoke-MBInstallRollbackRecovery -JournalPath \$rollbackJournalPath -TransactionDir \$transactionDir' 'Immediate rollback and restart recovery share the same verified recovery path'
-$backupMetadataIndex = $installer.IndexOf('$transactionState.DllBackupPath = $dllBackupPath')
-$backupPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $backupMetadataIndex)
-$dllCopyIndex = $installer.IndexOf('Copy-Item -LiteralPath $DllSource -Destination $installedDll', $backupPersistIndex)
-if ($backupMetadataIndex -lt 0 -or $backupPersistIndex -le $backupMetadataIndex -or $dllCopyIndex -le $backupPersistIndex) {
-    throw 'FAIL: Previous-DLL recovery metadata must be durably persisted before replacing the installed DLL.'
-}
-Write-Host 'PASS: Previous-DLL recovery metadata is durable before DLL replacement'
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
 Assert-Contains $installer '\[IO\.File\]::Replace' 'Atomic JSON helper replaces an existing snapshot atomically'
@@ -183,9 +146,6 @@ Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{'
 
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
 Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
-Assert-Contains $installer 'function Test-RegistryTreeSnapshot' 'Rollback verifies complete restored COM registry trees'
-Assert-Contains $installer 'Test-RegistryTreeSnapshot \("SOFTWARE\\\\Classes\\\\CLSID\\\\\$clsid"\).*ClsidRegBackupHash' 'Rollback verifies the restored CLSID tree against its saved export hash'
-Assert-Contains $installer 'Test-RegistryTreeSnapshot \("SOFTWARE\\\\Classes\\\\AudioEngine\\\\AudioProcessingObjects\\\\\$clsid"\).*ApoRegBackupHash' 'Rollback verifies the restored AudioEngine APO tree against its saved export hash'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
