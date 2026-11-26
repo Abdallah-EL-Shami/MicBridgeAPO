@@ -46,7 +46,7 @@ function Get-MBComSnapshotServerPath {
             $inside=$v.Substring(1,$v.Length-2).Equals($ExpectedRegistryKey+'\InprocServer32',[StringComparison]::OrdinalIgnoreCase)
             continue
         }
-        if($inside -and $v -match '^@="((?:[^"\\]|\\.)*)"$') { return $Matches[1].Replace('\\\\','\').Replace('\\"','"') }
+        if($inside -and $v -match '^@="((?:[^"\\]|\\.)*)"$') { return $Matches[1].Replace('\\','\').Replace('\\"','"') }
     }
     return $null
 }
@@ -57,6 +57,28 @@ function Test-MBComProductServerPath {
         $server=[IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($ServerPath.Trim('"')))
         $root=[IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')+'\'
         return $server.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($server) -ieq 'MicBridgeAPO.dll'
+    } catch { return $false }
+}
+function Test-MBComNoReparsePath {
+    param([string]$Path,[string]$Root)
+    try {
+        $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd('\')
+        $pathFull=[IO.Path]::GetFullPath($Path)
+        if(-not $pathFull.Equals($rootFull,[StringComparison]::OrdinalIgnoreCase) -and
+            -not $pathFull.StartsWith($rootFull+'\',[StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $current=$pathFull
+        $volume=[IO.Path]::GetPathRoot($pathFull)
+        while($true) {
+            if(Test-Path -LiteralPath $current) {
+                $item=Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            }
+            if($current.TrimEnd('\').Equals($volume.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)) { break }
+            $parent=[IO.Directory]::GetParent($current)
+            if(-not $parent) { return $false }
+            $current=$parent.FullName
+        }
+        return $true
     } catch { return $false }
 }
 function Get-MBComRegistryExportHash {
@@ -99,9 +121,11 @@ function Restore-MBComRegistrySnapshot {
     $expectedRoot="$hiveName\$($spec.RelativeKey)"
     $backupFull=$null
     if($existed) {
-        $transactionRoot=[IO.Path]::GetFullPath($TransactionDirectory).TrimEnd('\')+'\'
+        $transactionRoot=[IO.Path]::GetFullPath($TransactionDirectory).TrimEnd('\')
         $backupFull=[IO.Path]::GetFullPath($backup)
-        if(-not $backupFull.StartsWith($transactionRoot,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($backupFull) -cne $spec.SnapshotName) { throw "$Target snapshot is not the fixed transaction-owned file." }
+        if(-not (Test-MBComNoReparsePath -Path $backupFull -Root $transactionRoot) -or
+            -not [IO.Path]::GetDirectoryName($backupFull).Equals($transactionRoot,[StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFileName($backupFull) -cne $spec.SnapshotName) { throw "$Target snapshot is not the fixed transaction-owned file or traverses a reparse point." }
         if($hash -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $backupFull -PathType Leaf)) { throw "$Target snapshot is missing or has invalid hash." }
         $item=Get-Item -LiteralPath $backupFull -Force -ErrorAction Stop
         if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "$Target snapshot is a reparse point." }
