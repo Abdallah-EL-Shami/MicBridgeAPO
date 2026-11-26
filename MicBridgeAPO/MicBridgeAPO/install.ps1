@@ -389,6 +389,7 @@ if (Test-Path -LiteralPath $installedDll) {
 # Stage on the same volume, verify bytes, then atomically publish the new DLL.
 # File.Replace fails closed if Windows has the current image mapped/locked.
 $stagedDll = Join-Path $installDir ('.MicBridgeAPO.install.' + [guid]::NewGuid().ToString('N') + '.tmp')
+$publishBackup = $null
 try {
     Copy-Item -LiteralPath $DllSource -Destination $stagedDll -ErrorAction Stop
     $stageStream = [IO.File]::Open($stagedDll,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
@@ -412,7 +413,9 @@ try {
         throw 'A DLL appeared at the installation destination after transaction snapshot; refusing to overwrite it.'
     }
     if (Test-Path -LiteralPath $installedDll -PathType Leaf) {
-        [IO.File]::Replace($stagedDll,$installedDll,$null,$false)
+        # Preserve the replaced image until the published DLL hash is verified.
+        $publishBackup = Join-Path $installDir ('.MicBridgeAPO.publish.' + [guid]::NewGuid().ToString('N') + '.bak')
+        [IO.File]::Replace($stagedDll,$installedDll,$publishBackup,$false)
     } elseif (Test-Path -LiteralPath $installedDll) {
         throw 'Installed DLL destination changed to a non-file before publish.'
     } else {
@@ -424,6 +427,9 @@ try {
 $publishedDllHash = (Get-FileHash -LiteralPath $installedDll -Algorithm SHA256 -ErrorAction Stop).Hash
 if (-not [string]::Equals($publishedDllHash,$dllSourceHash,[StringComparison]::OrdinalIgnoreCase)) {
     throw 'Published DLL hash differs from the verified package source.'
+}
+if ($publishBackup -and (Test-Path -LiteralPath $publishBackup -PathType Leaf)) {
+    Remove-Item -LiteralPath $publishBackup -Force -ErrorAction Stop
 }
 Write-InstallLog 'INFO' "New DLL atomically published. SHA256=$publishedDllHash"
 foreach ($f in 'MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
