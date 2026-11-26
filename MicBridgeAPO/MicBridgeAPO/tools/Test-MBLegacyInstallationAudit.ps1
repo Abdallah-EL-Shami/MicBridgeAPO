@@ -73,10 +73,11 @@ try {
     if ($result.Outcome -eq 'NoLegacyResidueDetected') { throw 'FAIL: product-owned test candidates were not inventoried' }
 
     # Tampering or endpoint mismatch invalidates the baseline candidate without changing the live state.
+    $clsidExportBytes=[IO.File]::ReadAllBytes($clsidExport)
     [IO.File]::AppendAllText($clsidExport,'tampered')
     $tampered=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
     if($tampered.Outcome -ne 'ReviewRequired' -or $tampered.BaselineAssessment -ne 'InvalidOrInsufficient') { throw 'FAIL: tampered permanent COM backup was accepted' }
-    [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject ($permanentBackup | Select-Object * ) -Depth 8),(New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllBytes($clsidExport,$clsidExportBytes)
     $permanentBackup.DeviceId=[guid]::NewGuid().ToString('D')
     [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
     $mismatch=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
