@@ -127,8 +127,13 @@ function Refresh-Ui {
     $lblIo.Text = "الإرسال: $sendText    |    الاستقبال: $receiveText"
 
     $underruns = [long](Num $h 'underruns')
-    if ($null -ne $script:lastUnderruns -and $underruns -gt $script:lastUnderruns) { $script:lastUnderrunAt = $now }
-    $script:lastUnderruns = $underruns
+    if ($null -eq $script:lastUnderruns -or $underruns -lt $script:lastUnderruns) {
+        # APO restart resets its counters; establish a new baseline without a false warning.
+        $script:lastUnderruns = $underruns
+    } else {
+        if ($underruns -gt $script:lastUnderruns) { $script:lastUnderrunAt = $now }
+        $script:lastUnderruns = $underruns
+    }
     $recentUnderrun = ($null -ne $script:lastUnderrunAt) -and (($now - $script:lastUnderrunAt).TotalSeconds -lt 5.0)
     if ($h['state'] -eq 'PROCESSING' -and -not $recentUnderrun) {
         $lblQuality.Text = 'جودة الاتصال: جيدة'
