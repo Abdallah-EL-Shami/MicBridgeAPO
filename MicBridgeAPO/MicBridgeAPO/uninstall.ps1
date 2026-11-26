@@ -21,6 +21,18 @@ $fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
 $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
+$uninstallLog = Join-Path $dataDir 'Uninstall.log'
+function Write-UninstallLog([string]$Level,[string]$Message) {
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+        Add-Content -LiteralPath $uninstallLog -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $env:TEMP 'MicBridgeAPO-Uninstall.log') -Value $line -Encoding UTF8 -ErrorAction Stop } catch {}
+    }
+}
+Write-Host "سجل الإزالة: $uninstallLog"
+Write-UninstallLog 'INFO' 'Uninstaller started with administrative privileges.'
 $backupFile = Join-Path $dataDir 'backup.json'
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
@@ -318,6 +330,7 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 }
 Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId $parsedDeviceId
+Write-UninstallLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
 if ($legacyAudit.Outcome -eq 'ReviewRequired') {
     $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
     $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
@@ -429,18 +442,21 @@ if (Test-Path $backupFile) {
 
     # Older releases saved this value from the wrong registry path. It is not a
     # trustworthy snapshot of the real Windows setting, so never restore/delete it.
+    Write-UninstallLog 'INFO' 'Endpoint FX values cleanup/restoration step completed and verified.'
     Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreWindowsAudioSetting' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
         Write-Warning 'Leaving DisableProtectedAudioDG unchanged: legacy backup data is not a trustworthy snapshot.'
     } -Verify {
         return $true
     }
 
+    Write-UninstallLog 'INFO' 'Windows AudioDG setting deliberately left unchanged; legacy value was not trusted.'
     Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreEndpointAcl' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
         if ($b.FxKeySddl -and (Test-Path $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
         Restore-Sddl $devSub $b.DevKeySddl
     } -Verify {
         Test-MBEndpointAclSnapshot -DeviceSubKey $devSub -FxSubKey $fxSub -ExpectedDeviceSddl ([string]$b.DevKeySddl) -ExpectedFxSddl ([string]$b.FxKeySddl)
     }
+    Write-UninstallLog 'INFO' 'Endpoint ACL restoration completed and verified.'
     Write-Host 'أُعيد مالك المفتاح وصلاحياته كما كانت.'
 } else { Write-Warning 'لم أجد backup.json، سأزيل التسجيل فقط.' }
 
@@ -489,6 +505,7 @@ Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreAudioEngineApo' -E
     Test-MBRegistrySnapshot -RegistrySubKey "SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\$clsid" -SnapshotPath ([string]$b.PrevApoRegistrationFile) -ExpectedExists ([bool]$b.PrevApoRegistrationExists)
 }
 
+Write-UninstallLog 'INFO' 'AudioEngine APO registration restoration completed and verified.'
 Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreComClsid' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
     if (Test-Path -LiteralPath $comRegistrationPath) { Remove-Item -LiteralPath $comRegistrationPath -Recurse -Force -ErrorAction Stop }
     if ($b.PrevClsidRegistrationExists) {
@@ -498,6 +515,7 @@ Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreComClsid' -Expecte
 } -Verify {
     Test-MBRegistrySnapshot -RegistrySubKey "SOFTWARE\\Classes\\CLSID\\$clsid" -SnapshotPath ([string]$b.PrevClsidRegistrationFile) -ExpectedExists ([bool]$b.PrevClsidRegistrationExists)
 }
+Write-UninstallLog 'INFO' 'COM CLSID restoration completed and verified.'
 # File/shortcut/service cleanup is a separate durable phase. Keep the existing
 # registry/COM/ACL journal unchanged so older in-progress uninstall journals remain resumable.
 $cleanupJournal = Join-Path $dataDir 'uninstall-cleanup-recovery.json'
@@ -522,14 +540,17 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -Exp
             $shortcutItem = Get-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
             if ($shortcutItem.PSIsContainer -or (($shortcutItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
                 Write-Warning 'Desktop shortcut is not a regular file; preserving it.'
+                Write-UninstallLog 'WARN' "Preserved non-regular desktop shortcut: '$shortcutPath'."
             } else {
                 $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
                 if ($ownedHash.Length -eq 64 -and $ownedHash -match '^[0-9A-Fa-f]+$') {
                     $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
                     if ([string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)) {
                         Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+                        Write-UninstallLog 'INFO' "Removed verified MicBridge-owned desktop shortcut: '$shortcutPath'."
                     } else {
                         Write-Warning 'Desktop shortcut changed after MicBridge created it; preserving the user-modified shortcut.'
+                        Write-UninstallLog 'WARN' "Preserved modified desktop shortcut: '$shortcutPath'."
                     }
                 } else {
                     Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
@@ -558,8 +579,10 @@ $preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApo
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
     if ($preserveInstallDirectory) {
         Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
+        Write-UninstallLog 'WARN' "Preserved install directory '$installDir' because a pre-existing COM registration may reference its DLL."
     } elseif (Test-Path -LiteralPath $installDir) {
         Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction Stop
+        Write-UninstallLog 'INFO' "Removed install directory after ownership/preflight checks: '$installDir'."
     }
 } -Verify {
     if ($preserveInstallDirectory) {
@@ -568,7 +591,12 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -Ex
         -not (Test-Path -LiteralPath $installDir)
     }
 }
+} catch {
+    try { Write-UninstallLog 'ERROR' "Uninstall failed or stopped. Error='$($_.Exception.ToString())'; Position='$($_.InvocationInfo.PositionMessage)'" } catch {}
+    Write-Host "فشلت الإزالة أو توقفت للحماية. سجل الإزالة: $uninstallLog" -ForegroundColor Red
+    throw
 } finally {
     if ($operationLock) { $operationLock.Dispose() }
 }
+Write-UninstallLog 'INFO' 'Uninstall completed. ProgramData settings and diagnostic logs were retained.'
 Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
