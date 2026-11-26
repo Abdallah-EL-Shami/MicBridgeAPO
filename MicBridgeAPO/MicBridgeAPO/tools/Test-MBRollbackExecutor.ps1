@@ -14,6 +14,7 @@ foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModul
 # Import the journal explicitly afterward for the test's direct journal assertions.
 Import-Module $executorModule -Force
 Import-Module $comExecutorModule -Force
+Import-Module $fileExecutorModule -Force
 Import-Module $journalModule -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeRollbackExecutor-' + [guid]::NewGuid().ToString('N'))
