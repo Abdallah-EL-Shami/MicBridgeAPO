@@ -318,9 +318,6 @@ function Restore-MBRegistryExportSnapshot {
     return $true
 }
 
-Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot, Test-MBInstallRollbackTransaction
-
-
 function Test-MBInstallRollbackTransaction {
     [CmdletBinding()]
     param(
