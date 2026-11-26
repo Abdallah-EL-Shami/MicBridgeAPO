@@ -122,6 +122,47 @@ function Restore-MBDllSnapshot {
         throw 'DLL rollback backup hash mismatch; refusing to restore an unverified binary.'
     }
     if (-not (Test-MBNoReparsePath -Path $BackupRoot -StopAt $BackupRoot)) { throw 'DLL backup root must not be a reparse point.' }
+    if (Test-Path -LiteralPath $InstalledDllPath) {
+        if ($NewDllSha256 -notmatch '^[A-Fa-f0-9]{64}
+    # replacement. A mapped/locked destination must fail closed.
+    $stagedPath = Join-Path (Split-Path -Parent $InstalledDllPath) ('.MicBridgeAPO.rollback.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        Copy-Item -LiteralPath $BackupPath -Destination $stagedPath -ErrorAction Stop
+        $stageStream = [IO.File]::Open($stagedPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
+        try { $stageStream.Flush($true) } finally { $stageStream.Dispose() }
+        $stagedHash = (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($stagedHash,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Staged rollback DLL hash does not match the durable original snapshot.'
+        }
+        if (Test-Path -LiteralPath $InstalledDllPath -PathType Leaf) {
+            [IO.File]::Replace($stagedPath,$InstalledDllPath,$null,$false)
+        } elseif (Test-Path -LiteralPath $InstalledDllPath) {
+            throw 'Installed DLL destination exists but is not a regular file; refusing replacement.'
+        } else {
+            [IO.File]::Move($stagedPath,$InstalledDllPath)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $stagedPath) { Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue }
+    }
+    if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) {
+        throw 'Restored DLL hash does not match the durable pre-transaction snapshot.'
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBDllSnapshotRestored,Restore-MBDllSnapshot
+) {
+            throw 'New DLL SHA-256 is missing or malformed; refusing to overwrite a destination not proven to belong to this transaction.'
+        }
+        $currentItem = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
+        if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $currentItem.PSIsContainer) {
+            throw 'Installed DLL destination is not a regular owned file; refusing rollback replacement.'
+        }
+        $currentHash = (Get-FileHash -LiteralPath $InstalledDllPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($currentHash,$NewDllSha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Installed DLL no longer matches this transaction new-file hash; refusing to overwrite an unowned file.'
+        }
+    }
     # Copy and verify beside the destination; commit with a same-volume atomic
     # replacement. A mapped/locked destination must fail closed.
     $stagedPath = Join-Path (Split-Path -Parent $InstalledDllPath) ('.MicBridgeAPO.rollback.' + [guid]::NewGuid().ToString('N') + '.tmp')
