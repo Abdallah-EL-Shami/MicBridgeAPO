@@ -12,6 +12,7 @@ $registryPath = "HKCU\$leaf"
 $providerPath = "Registry::HKEY_CURRENT_USER\$leaf"
 $names = @('FxEffect','FxAssociation','FxComposite')
 $journal = Join-Path $root 'endpoint-recovery.json'
+$crashLeaf = $null
 try {
     New-Item -Path $providerPath -Force | Out-Null
     Set-ItemProperty -LiteralPath $providerPath -Name $names[0] -Value '{00000000-0000-0000-0000-000000000001}' -Type String
@@ -34,7 +35,7 @@ try {
     $missingSnapshot = Get-MBEndpointRegistrySnapshot -RegistryPath $registryPath -ValueNames @($missingName)
     Set-ItemProperty -LiteralPath $providerPath -Name $missingName -Value 'temporary' -Type String
     Restore-MBEndpointRegistrySnapshot -Snapshot $missingSnapshot | Out-Null
-    if (Get-MBEndpointRegistrySnapshot -RegistryPath $registryPath -ValueNames @($missingName) | Where-Object { $_.Values[0].Exists }) { throw 'FAIL: newly-added value was not removed' }
+    if ((Get-MBEndpointRegistrySnapshot -RegistryPath $registryPath -ValueNames @($missingName)).Values[0].Exists) { throw 'FAIL: newly-added value was not removed' }
 
     # When the endpoint key did not exist, rollback removes only an empty transaction-created key.
     $absentLeaf = 'Software\MicBridgeEndpointAbsent-' + [guid]::NewGuid().ToString('N')
