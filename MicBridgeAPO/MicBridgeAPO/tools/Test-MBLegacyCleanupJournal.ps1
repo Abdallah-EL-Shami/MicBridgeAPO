@@ -9,7 +9,7 @@ try {
     [IO.File]::WriteAllBytes($dll, [byte[]](9,8,7,6))
     $hash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
     $plan = [pscustomobject]@{
-        IsReadOnly=$true; CleanupExecutionAllowed=$false; InstallAllowed=$false
+        IsReadOnly=$true; InstallDirectory=$root; CanProceedToCleanupReview=$true; CleanupExecutionAllowed=$false; InstallAllowed=$false
         Items=@(
             [pscustomobject]@{Kind='File';Name='MicBridgeAPO.dll';Path=$dll;Classification='MicBridgeBinaryCandidate';ProposedAction='CandidateForReviewedRemoval';Sha256=$hash},
             [pscustomobject]@{Kind='Registration';Name='COM CLSID';Path='HKCU:\Software\Test';Classification='MicBridgeCandidate';ProposedAction='CandidateForReviewedRemoval';Sha256=$hash},
