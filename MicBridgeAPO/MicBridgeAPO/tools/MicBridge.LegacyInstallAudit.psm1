@@ -58,13 +58,17 @@ function Test-MBLegacyInstallationState {
             $backupItem=Get-Item -LiteralPath $backupJson -Force -ErrorAction Stop
             if(($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'backup.json is a reparse point.' }
             $backup=Get-Content -LiteralPath $backupJson -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            $required=@('DeviceId','ComRegistrationSnapshotVersion','PrevClsidRegistrationExists','PrevApoRegistrationExists','PrevClsidRegistrationFile','PrevApoRegistrationFile','PrevClsidRegistrationSha256','PrevApoRegistrationSha256')
+            $required=@('DeviceId','ComRegistrationSnapshotVersion','PrevClsidRegistrationExists','PrevApoRegistrationExists','PrevClsidRegistrationFile','PrevApoRegistrationFile','PrevClsidRegistrationSha256','PrevApoRegistrationSha256','DevKeySddl','FxKeySddl','CreatedFx','PrevEndpointEffect')
             $missing=@($required | Where-Object { $backup.PSObject.Properties.Name -notcontains $_ })
             if($missing.Count -gt 0) { throw ('Permanent backup is missing fields: '+($missing -join ', ')) }
             if([int]$backup.ComRegistrationSnapshotVersion -ne 1) { throw 'Permanent backup COM snapshot schema is not version 1.' }
             $backupDevice=[guid]::Empty
             if(-not [guid]::TryParse([string]$backup.DeviceId,[ref]$backupDevice)) { throw 'Permanent backup endpoint identity is invalid.' }
             if($ExpectedDeviceId -ne [guid]::Empty -and $backupDevice -ne $ExpectedDeviceId) { throw 'Permanent backup belongs to a different capture endpoint.' }
+            if($backup.CreatedFx -isnot [bool]) { throw 'Permanent backup CreatedFx flag is not Boolean.' }
+            if([string]::IsNullOrWhiteSpace([string]$backup.DevKeySddl)) { throw 'Permanent backup device security descriptor is missing.' }
+            if(-not $backup.CreatedFx -and [string]::IsNullOrWhiteSpace([string]$backup.FxKeySddl)) { throw 'Permanent backup FxProperties security descriptor is missing.' }
+            if($backup.CreatedFx -and -not [string]::IsNullOrWhiteSpace([string]$backup.FxKeySddl)) { throw 'Permanent backup marks FxProperties as newly created but also records a prior security descriptor.' }
 
             $comBackupRoot=Join-Path $dataFull 'com-registration-backup'
             $comEntries=@(
