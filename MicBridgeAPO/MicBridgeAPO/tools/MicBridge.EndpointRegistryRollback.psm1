@@ -95,10 +95,9 @@ function Restore-MBEndpointRegistrySnapshot {
             throw 'Endpoint registry snapshot contains an invalid value entry.'
         }
         if ($entry.Exists) {
-            $parsedKind = [Microsoft.Win32.RegistryValueKind]::String
-            if (-not [Enum]::TryParse([string]$entry.Kind,$true,[ref]$parsedKind) -or $parsedKind -eq [Microsoft.Win32.RegistryValueKind]::Unknown) {
-                throw "Unsupported registry value kind in snapshot: $($entry.Kind)"
-            }
+            try { $parsedKind = [Microsoft.Win32.RegistryValueKind]([Enum]::Parse([Microsoft.Win32.RegistryValueKind],[string]$entry.Kind,$true)) }
+            catch { throw "Unsupported registry value kind in snapshot: $($entry.Kind)" }
+            if ($parsedKind -eq [Microsoft.Win32.RegistryValueKind]::Unknown) { throw "Unsupported registry value kind in snapshot: $($entry.Kind)" }
         }
     }
 
