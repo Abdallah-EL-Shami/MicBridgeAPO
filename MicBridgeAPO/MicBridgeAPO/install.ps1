@@ -390,7 +390,9 @@ $apoRegBackup = Join-Path $transactionDir 'audioengine-apo.reg'
 $clsidRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
 $apoRegExisted = Test-Path -LiteralPath "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
 if ($clsidRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\CLSID\$clsid" $clsidRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing COM CLSID registration.' } }
+$clsidRegBackupHash = if ($clsidRegExisted) { (Get-FileHash -LiteralPath $clsidRegBackup -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
 if ($apoRegExisted) { & reg.exe export "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" $apoRegBackup /y | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the existing AudioEngine APO registration.' } }
+$apoRegBackupHash = if ($apoRegExisted) { (Get-FileHash -LiteralPath $apoRegBackup -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
 $fxNowSub = "$capSub\$($dev.Id)\FxProperties"
 $installFilesBackup = @()
 $installFilesDir = Join-Path $transactionDir 'install-files'
@@ -400,12 +402,14 @@ foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninsta
     $backupPath = Join-Path $installFilesDir $name
     $existed = Test-Path -LiteralPath $target
     if ($existed) { Copy-Item -LiteralPath $target -Destination $backupPath -Force }
-    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath }
+    $installFileHash = if ($existed) { (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
+    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath; Sha256=$installFileHash }
 }
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
 $shortcutBackup = Join-Path $transactionDir 'MicBridge.lnk'
 $shortcutExisted = Test-Path -LiteralPath $shortcutPath
 if ($shortcutExisted) { Copy-Item -LiteralPath $shortcutPath -Destination $shortcutBackup -Force }
+$shortcutBackupHash = if ($shortcutExisted) { (Get-FileHash -LiteralPath $shortcutBackup -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
 $controlPath = Join-Path $dataDir 'control.ini'
 $controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath $controlPath).Sddl } else { $null }
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
@@ -418,7 +422,9 @@ $transactionState = [pscustomobject]@{
     FxSddl = (Get-Sddl $fxSub)
     FxKeyExisted = (Test-Path -LiteralPath "$capRoot\$($dev.Id)\FxProperties")
     ClsidRegExisted = $clsidRegExisted
+    ClsidRegBackupHash = $clsidRegBackupHash
     ApoRegExisted = $apoRegExisted
+    ApoRegBackupHash = $apoRegBackupHash
     DllExisted = (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))
     DllBackupPath = $null
     DllBackupHash = $null
@@ -430,6 +436,7 @@ $transactionState = [pscustomobject]@{
     InstallFiles = $installFilesBackup
     ShortcutExisted = $shortcutExisted
     ShortcutBackup = $shortcutBackup
+    ShortcutBackupHash = $shortcutBackupHash
     InstallDirExisted = (Test-Path -LiteralPath $installDir)
 }
 if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxComposite.Kind -ne 'MultiString') {
