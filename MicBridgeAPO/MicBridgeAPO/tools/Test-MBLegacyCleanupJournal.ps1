@@ -35,6 +35,35 @@ try {
     try { Set-MBLegacyCleanupReviewDecision -Path $staleJournalPath -ItemId $staleEntry.Id -Reviewer 'test-reviewer' -Approve $true | Out-Null } catch { $staleBlocked = $true }
     if (-not $staleBlocked) { throw 'FAIL: changed candidate content was approved.' }
     [IO.File]::WriteAllBytes($dll, [byte[]](9,8,7,6))
+    $blockedPlan = [pscustomobject]@{
+        IsReadOnly=$true; InstallDirectory=$root; CanProceedToCleanupReview=$false
+        CleanupExecutionAllowed=$false; InstallAllowed=$false; Items=@($plan.Items[0])
+    }
+    $blockedJournalPath = Join-Path $root 'blocked-review.json'
+    $blockedJournal = New-MBLegacyCleanupJournal -Plan $blockedPlan -Path $blockedJournalPath
+    $blockedEntry = @($blockedJournal.Entries | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' })[0]
+    $planGateBlocked = $false
+    try { Set-MBLegacyCleanupReviewDecision -Path $blockedJournalPath -ItemId $blockedEntry.Id -Reviewer 'test-reviewer' -Approve $true | Out-Null } catch { $planGateBlocked = $true }
+    if (-not $planGateBlocked) { throw 'FAIL: plan with unresolved blockers allowed approval.' }
+
+    $outsidePath = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeOutside-' + [guid]::NewGuid().ToString('N') + '.dll')
+    try {
+        [IO.File]::WriteAllBytes($outsidePath, [byte[]](4,3,2,1))
+        $outsideHash = (Get-FileHash -LiteralPath $outsidePath -Algorithm SHA256).Hash
+        $outsidePlan = [pscustomobject]@{
+            IsReadOnly=$true; InstallDirectory=$root; CanProceedToCleanupReview=$true
+            CleanupExecutionAllowed=$false; InstallAllowed=$false
+            Items=@([pscustomobject]@{Kind='File';Name='MicBridgeAPO.dll';Path=$outsidePath;Classification='MicBridgeBinaryCandidate';ProposedAction='CandidateForReviewedRemoval';Sha256=$outsideHash})
+        }
+        $outsideJournalPath = Join-Path $root 'outside-review.json'
+        $outsideJournal = New-MBLegacyCleanupJournal -Plan $outsidePlan -Path $outsideJournalPath
+        $outsideEntry = $outsideJournal.Entries[0]
+        $outsideBlocked = $false
+        try { Set-MBLegacyCleanupReviewDecision -Path $outsideJournalPath -ItemId $outsideEntry.Id -Reviewer 'test-reviewer' -Approve $true | Out-Null } catch { $outsideBlocked = $true }
+        if (-not $outsideBlocked) { throw 'FAIL: candidate outside install root was approved.' }
+    } finally {
+        if (Test-Path -LiteralPath $outsidePath) { Remove-Item -LiteralPath $outsidePath -Force }
+    }
     $originalHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
     if ($originalHash -ne $hash) { throw 'FAIL: journal changed product file.' }
     $raw = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
