@@ -27,7 +27,7 @@ function Invoke-MBInstallComRecovery {
         $primaryJournal=Join-Path $txRoot 'rollback-recovery.json'
         $statePath=Join-Path $txRoot 'state.json'
         $mainSteps=@('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
-        $preflight=Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $txRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $mainSteps
+        $preflight=Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $txRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $mainSteps -RegistryHive $RegistryHive
         if(-not $preflight.IsValid -or -not $preflight.ReplaySafe) { throw "COM recovery preflight failed; no COM changes attempted. $($preflight.Errors -join '; ')" }
         $state=$preflight.State
         $componentJournal=Join-Path $txRoot 'com-recovery.json'
