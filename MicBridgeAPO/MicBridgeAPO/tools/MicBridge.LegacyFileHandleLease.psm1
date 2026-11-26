@@ -128,23 +128,6 @@ namespace MicBridge.LegacyFileHandleLease {
             string volumeRoot = Path.GetPathRoot(full);
             if (String.IsNullOrEmpty(volumeRoot))
                 throw new InvalidOperationException("Directory path has no supported volume root.");
-            string current = volumeRoot;
-            DirectoryPinSet pins = new DirectoryPinSet();
-            try {
-                PinDirectoryComponent(current, pins);
-            string remainder = full.Substring(volumeRoot.Length);
-            string[] parts = remainder.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (string part in parts) {
-                current = Path.Combine(current, part);
-                ValidateDirectoryComponent(current);
-            }
-        }
-
-        private static DirectoryPinSet PinDirectoryChain(string directoryPath) {
-            string full = Path.GetFullPath(directoryPath);
-            string volumeRoot = Path.GetPathRoot(full);
-            if (String.IsNullOrEmpty(volumeRoot))
-                throw new InvalidOperationException("Directory path has no supported volume root.");
             DirectoryPinSet pins = new DirectoryPinSet();
             try {
                 string current = volumeRoot;
