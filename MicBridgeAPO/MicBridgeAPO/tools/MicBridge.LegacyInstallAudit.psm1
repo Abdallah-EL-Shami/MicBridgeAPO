@@ -52,6 +52,7 @@ function Test-MBLegacyInstallationState {
     $baselineAssessment = 'NotPresent'
     $backupJson = Join-Path $dataFull 'backup.json'
     $registryHiveName = Get-MBLegacyExpectedRegistryHiveName -RegistryRoot $RegistryRoot
+    $registrySubRoot = $RegistryRoot.Substring(5).Trim('\')
     if(Test-Path -LiteralPath $backupJson) {
         try {
             $backupItem=Get-Item -LiteralPath $backupJson -Force -ErrorAction Stop
@@ -163,7 +164,11 @@ function Test-MBLegacyInstallationState {
         }
     }
 
-    $ambiguous = @($findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient') })
+    if($baselineAssessment -eq 'NotPresent' -and @($findings | Where-Object { $_.Classification -in @('MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate') }).Count -gt 0) {
+        $baselineAssessment='Missing'
+        $findings.Add([pscustomobject]@{Kind='PermanentBackup';Name='backup.json';Classification='MissingPermanentBackup';Path=$backupJson;ServerPath=$null;Sha256=$null})
+    }
+    $ambiguous = @($findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
     $candidate = @($findings | Where-Object { $_.Classification -in @('MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate','MicBridgeRecoveryEvidence','StructurallyValidCandidate') })
     $outcome = if ($ambiguous.Count -gt 0) { 'ReviewRequired' } elseif ($candidate.Count -gt 0) { 'InventoryOnly' } else { 'NoLegacyResidueDetected' }
 
@@ -184,7 +189,7 @@ Export-ModuleMember -Function Test-MBLegacyInstallationState
                 if(($fileItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "$($entry.Name) backup is a reparse point." }
                 $actual=(Get-FileHash -LiteralPath $expectedPath -Algorithm SHA256 -ErrorAction Stop).Hash
                 if(-not $actual.Equals($entry.Hash,[StringComparison]::OrdinalIgnoreCase)) { throw "$($entry.Name) backup hash mismatch." }
-                $expectedRoot="$registryHiveName\$($entry.Key)"
+                $expectedRoot=if([string]::IsNullOrWhiteSpace($registrySubRoot)) { "$registryHiveName\$($entry.Key)" } else { "$registryHiveName\$registrySubRoot\$($entry.Key)" }
                 if(-not (Test-MBLegacyRegExport -Path $expectedPath -ExpectedRoot $expectedRoot)) { throw "$($entry.Name) backup contains an invalid or foreign registry root." }
             }
             $baselineAssessment='StructurallyValidCandidate'
