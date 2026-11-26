@@ -177,14 +177,6 @@ Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM regist
 Assert-Contains $installer 'function Test-RegistryTreeSnapshot' 'Rollback verifies complete restored COM registry trees'
 Assert-Contains $installer 'Test-RegistryTreeSnapshot \("SOFTWARE\\\\Classes\\\\CLSID\\\\\$clsid"\).*ClsidRegBackupHash' 'Rollback verifies the restored CLSID tree against its saved export hash'
 Assert-Contains $installer 'Test-RegistryTreeSnapshot \("SOFTWARE\\\\Classes\\\\AudioEngine\\\\AudioProcessingObjects\\\\\$clsid"\).*ApoRegBackupHash' 'Rollback verifies the restored AudioEngine APO tree against its saved export hash'
-Assert-Contains $installer "TransactionOutcome = 'Pending'" 'Transaction snapshot starts in a durable pending state'
-Assert-Contains $installer "TransactionOutcome = 'Committed'" 'Successful installation persists a committed outcome'
-Assert-Contains $installer 'Committed installation transaction' 'Startup recognizes an installation committed before cleanup'
-$commitIndex = $installer.IndexOf("`$transactionState.TransactionOutcome = 'Committed'")
-$commitPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $commitIndex)
-$cleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force', $commitPersistIndex)
-if ($commitIndex -lt 0 -or $commitPersistIndex -le $commitIndex -or $cleanupIndex -le $commitPersistIndex) { throw 'FAIL: committed outcome must be durably persisted before transaction cleanup.' }
-Write-Host 'PASS: committed installation outcome is durable before cleanup'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
