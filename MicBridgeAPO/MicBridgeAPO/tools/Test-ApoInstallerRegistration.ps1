@@ -304,3 +304,4 @@ Assert-Contains $workflow 'MicBridge.FullInstallRollbackExecutor.psm1' 'Build pa
 Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor preserves the fixed main transaction step order'
 Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
 Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
+Assert-Contains $fullExecutor 'Test-MBInstallRollbackTransaction' 'Full executor binds its snapshot to the durable main journal'
