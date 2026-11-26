@@ -111,6 +111,19 @@ Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validati
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
 Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
+Assert-Contains $installer 'function Invoke-MBInstallRollbackRecovery' 'Installer can resume an interrupted rollback from its durable snapshot'
+Assert-Contains $installer 'ExpectedOperation InstallRollback -ExpectedDeviceId' 'Rollback replay binds the journal to the original capture endpoint'
+Assert-Contains $installer 'DllBackupPath = $null' 'Transaction snapshot defines durable previous-DLL metadata'
+Assert-Contains $installer 'The previous-DLL backup path is outside the MicBridge-owned backup directory' 'Rollback rejects DLL backup paths outside ProgramData ownership'
+Assert-Contains $installer 'The previous-DLL backup hash does not match the transaction snapshot' 'Rollback verifies the previous DLL hash before restoration'
+Assert-Contains $installer 'Interrupted installation rollback resumed and verified' 'Installer reports only a verified resumed rollback'
+$backupMetadataIndex = $installer.IndexOf('$transactionState.DllBackupPath = $dllBackupPath')
+$backupPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $backupMetadataIndex)
+$dllCopyIndex = $installer.IndexOf('Copy-Item -LiteralPath $DllSource -Destination $installedDll', $backupPersistIndex)
+if ($backupMetadataIndex -lt 0 -or $backupPersistIndex -le $backupMetadataIndex -or $dllCopyIndex -le $backupPersistIndex) {
+    throw 'FAIL: Previous-DLL recovery metadata must be durably persisted before replacing the installed DLL.'
+}
+Write-Host 'PASS: Previous-DLL recovery metadata is durable before DLL replacement'
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
 Assert-Contains $installer '\[IO\.File\]::Replace' 'Atomic JSON helper replaces an existing snapshot atomically'
