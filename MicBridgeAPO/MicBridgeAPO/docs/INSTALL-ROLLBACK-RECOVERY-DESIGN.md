@@ -203,3 +203,26 @@ release did not already leave incorrect changes behind.
 - These changes do not yet constitute a legacy cleanup routine or a durable
   COM replay executor. Do not infer that COM rollback is complete from export
   validation or the isolated registry import primitive.
+
+## COM recovery prototype (isolated, not yet wired into installer)
+
+- Added `MicBridge.ComRegistrationRollback.psm1`. It has only two fixed targets:
+  the product CLSID and its AudioEngine APO key. It checks the exact transaction
+  filename, snapshot SHA-256, Registry export header/root/child-key bounds, and
+  reparse-point-free transaction path before import.
+- A saved CLSID snapshot is considered restorable only when its
+  `InprocServer32` path resolves to `MicBridgeAPO.dll` inside the fixed install
+  directory. If the current CLSID points elsewhere, the action refuses to
+  overwrite or delete it. An APO key without a product-owned CLSID is preserved.
+- Added `MicBridge.ComRegistrationExecutor.psm1` with a separate durable
+  component journal. It deliberately leaves the existing three-step main
+  transaction journal pending; it does not claim the entire rollback is done.
+- Added HKCU-only tests for restoration of pre-existing CLSID/APO keys, removal
+  of keys absent from the snapshot, idempotence, tampered snapshot rejection,
+  foreign CLSID preservation, and child-process termination after the Registry
+  side effect followed by fresh-process journal resume.
+- The COM executor is not yet called by `install.ps1` or startup recovery, and
+  is not yet staged into the installer package. Its HKCU action tests do not
+  constitute permission to run production writes against HKLM. The executor's
+  complete transaction preflight still needs an isolated test strategy before
+  integration. Do not install this branch yet.
