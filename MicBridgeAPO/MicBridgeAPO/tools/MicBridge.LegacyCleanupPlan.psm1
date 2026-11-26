@@ -66,44 +66,7 @@ function New-MBLegacyCleanupPlan {
             if ($binaryFull -and
                 $binaryFull.StartsWith($installFull + '\', [StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($binaryFull) -ieq 'MicBridgeAPO.dll' -and
-                $finding.Sha256 -match '^[A-Fa-f0-9]{64}
-        elseif ($classification -in @('MicBridgeRecoveryEvidence','PreserveDataFile','ReparsePointPreserved')) {
-            $reason = 'Recovery evidence, user data, or reparse point is preserved by policy.'
-        }
-        elseif ($classification -notin @('Absent')) {
-            $blockers.Add("Unresolved or foreign item requires preservation: $path [$classification]")
-        }
-
-        $items.Add([pscustomobject]@{
-            Kind = [string]$finding.Kind
-            Name = [string]$finding.Name
-            Path = $path
-            Classification = $classification
-            ProposedAction = $action
-            Reason = $reason
-            Sha256 = [string]$finding.Sha256
-        })
-    }
-
-    $canProceed = ($blockers.Count -eq 0)
-    [pscustomobject]@{
-        SchemaVersion = 1
-        IsReadOnly = $true
-        CanProceedToCleanupReview = $canProceed
-        CleanupExecutionAllowed = $false
-        InstallAllowed = $false
-        Items = @($items)
-        Blockers = @($blockers)
-        Warnings = @(
-            'This is a review plan, not an executable cleanup authorization.',
-            'No registry or file mutation is performed.',
-            'Do not restore old backups as a Windows baseline.'
-        )
-    }
-}
-
-Export-ModuleMember -Function New-MBLegacyCleanupPlan
-) {
+                $finding.Sha256 -match '^[A-Fa-f0-9]{64}$') {
                 $action = 'CandidateForReviewedRemoval'
                 $reason = 'Canonical product DLL path and recorded SHA-256 format qualify for human review only; this does not prove ownership or authorize removal.'
             } else {
