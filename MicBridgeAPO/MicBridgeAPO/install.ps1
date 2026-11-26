@@ -231,6 +231,22 @@ Write-Host "تم العثور على: $($dev.Names)  ($($dev.Id))"
 $devSub = "$capSub\$($dev.Id)"
 $fxSub  = "$devSub\FxProperties"
 
+# Read-only legacy-install audit before restore points, snapshots, COM changes,
+# DLL replacement, ACL changes, or endpoint Registry writes.
+$legacyAuditModule = Join-Path $PSScriptRoot 'tools\MicBridge.LegacyInstallAudit.psm1'
+if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
+    throw "Legacy installation audit module is missing; refusing to upgrade an existing installation: $legacyAuditModule"
+}
+Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
+$legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
+if ($legacyAudit.Outcome -eq 'ReviewRequired') {
+    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
+    $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
+    Write-InstallLog 'CRITICAL' "Read-only legacy installation audit requires manual review. BaselineAssessment=$($legacyAudit.BaselineAssessment). $reviewSummary"
+    throw "Legacy installation state is ambiguous or its permanent pre-install backup is insufficient. No upgrade changes were made. Preserve ProgramData and install folders for review. $reviewSummary"
+}
+Write-InstallLog 'INFO' "Read-only legacy audit passed with Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment). Original Windows baseline is not claimed as proven."
+
 # ---- 2) نقطة استعادة (قد تفشل، لا بأس)
 try { Checkpoint-Computer -Description 'قبل MicBridge APO' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host 'تم إنشاء نقطة استعادة' }
 catch { Write-Warning "لم تُنشأ نقطة استعادة: $($_.Exception.Message)" }
