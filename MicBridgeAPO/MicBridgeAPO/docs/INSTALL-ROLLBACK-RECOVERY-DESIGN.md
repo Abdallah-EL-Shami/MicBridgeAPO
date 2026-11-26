@@ -270,8 +270,19 @@ release did not already leave incorrect changes behind.
   the completed transaction. All Windows CI checks, including package staging,
   passed in run 1001.
 
-- The support-file executor is not yet called by startup recovery or the
-  installer failure handler.
+- `install.ps1` now calls the full executor from both the installer failure
+  handler and startup recovery. Startup automatically replays exactly one
+  validated pending transaction before beginning a new install; multiple
+  pending transactions are treated as ambiguous and fail closed. The installer
+  releases its operation lock before calling the executor, then reacquires it
+  before continuing a new installation.
+- The full executor preflights the main journal plus all support-file and
+  metadata snapshots before its first endpoint Registry/ACL mutation. The build
+  package stages the full executor and all of its runtime dependencies.
+- Windows CI run 1040 passed the complete build, static installer checks,
+  component tests, full-coordinator crash/re-entry test, endpoint Registry/ACL
+  recovery tests, and installer package staging. These Registry mutation tests
+  use HKCU only; no production HKLM restoration was executed.
 - The COM executor is still not called by `install.ps1` or startup recovery and
   is not staged into the installer package. The main grouped
   `RestorePreviousInstallState` step is therefore not yet fully replayable
