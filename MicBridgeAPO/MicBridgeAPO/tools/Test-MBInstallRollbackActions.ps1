@@ -26,6 +26,19 @@ try {
         BackupRoot=$backupRoot
         InstallRoot=$installRoot
     }
+    # Hold the destination without delete sharing: atomic rollback must fail closed
+    # and leave the currently installed bytes intact while Windows denies replacement.
+    $lockedHash = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+    $lockedStream = [IO.File]::Open($installed,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {
+        $lockedRejected = $false
+        try { Restore-MBDllSnapshot @restoreArgs | Out-Null } catch { $lockedRejected = $true }
+        if (-not $lockedRejected) { throw 'FAIL: rollback replaced a DLL whose destination denied delete sharing' }
+    } finally { $lockedStream.Dispose() }
+    if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $lockedHash) {
+        throw 'FAIL: failed locked-file rollback changed the installed DLL'
+    }
+
     Restore-MBDllSnapshot @restoreArgs | Out-Null
     if (-not (Test-MBDllSnapshotRestored @restoreArgs)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
     Restore-MBDllSnapshot @restoreArgs | Out-Null
