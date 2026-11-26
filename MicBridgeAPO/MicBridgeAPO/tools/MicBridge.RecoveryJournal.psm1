@@ -322,6 +322,7 @@ function Invoke-MBRecoveryPlan {
         [Parameter(Mandatory)][hashtable]$Verifiers,
         [hashtable]$Dependencies = @{},
         [IO.FileStream]$OperationLock,
+        [string]$OperationLockPath,
         [int]$LockTimeoutSeconds = 0
     )
     if (-not $ExpectedStepIds -or @($ExpectedStepIds | Select-Object -Unique).Count -ne $ExpectedStepIds.Count) {
@@ -342,7 +343,8 @@ function Invoke-MBRecoveryPlan {
     }
     $ownsOperationLock = $false
     if ($OperationLock) {
-        $expectedLockPath = [IO.Path]::GetFullPath("$Path.operation.lock")
+        $lockBasePath = if ([string]::IsNullOrWhiteSpace($OperationLockPath)) { $Path } else { $OperationLockPath }
+        $expectedLockPath = [IO.Path]::GetFullPath("$lockBasePath.operation.lock")
         $actualLockPath = [IO.Path]::GetFullPath($OperationLock.Name)
         if (-not $OperationLock.CanRead -or -not $OperationLock.CanWrite -or
             -not [string]::Equals($expectedLockPath,$actualLockPath,[StringComparison]::OrdinalIgnoreCase)) {
