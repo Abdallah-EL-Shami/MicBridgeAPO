@@ -55,24 +55,7 @@ function Test-MBDllSnapshotRestored {
     )
     if (-not (Test-MBPathWithinDirectory -Candidate $InstalledDllPath -Root $InstallRoot) -or
         -not (Test-MBNoReparsePath -Path (Split-Path -Parent $InstalledDllPath) -StopAt $InstallRoot)) { return $false }
-    if (-not $DllExisted) {
-        if (Test-Path -LiteralPath $InstalledDllPath) {
-            if ($NewDllSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
-                throw 'New DLL SHA-256 is missing or malformed; refusing to remove an unowned destination.'
-            }
-            $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.PSIsContainer) {
-                throw 'Refusing to remove a reparse point or non-file at the installed DLL destination.'
-            }
-            $destinationHash = (Get-FileHash -LiteralPath $InstalledDllPath -Algorithm SHA256 -ErrorAction Stop).Hash
-            if (-not [string]::Equals($destinationHash,$NewDllSha256,[StringComparison]::OrdinalIgnoreCase)) {
-                throw 'Installed DLL does not match this transaction new-file hash; refusing to delete an unowned file.'
-            }
-            Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
-        }
-        if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) { throw 'New DLL removal could not be verified.' }
-        return $true
-    }
+    if (-not $DllExisted) { return -not (Test-Path -LiteralPath $InstalledDllPath) }
     if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $InstalledDllPath -PathType Leaf)) { return $false }
     try {
         $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
@@ -103,9 +86,16 @@ function Restore-MBDllSnapshot {
     }
     if (-not $DllExisted) {
         if (Test-Path -LiteralPath $InstalledDllPath) {
+            if ($NewDllSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+                throw 'New DLL SHA-256 is missing or malformed; refusing to remove an unowned destination.'
+            }
             $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.PSIsContainer) {
                 throw 'Refusing to remove a reparse point or non-file at the installed DLL destination.'
+            }
+            $destinationHash = (Get-FileHash -LiteralPath $InstalledDllPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if (-not [string]::Equals($destinationHash,$NewDllSha256,[StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Installed DLL does not match this transaction new-file hash; refusing to delete an unowned file.'
             }
             Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
         }
