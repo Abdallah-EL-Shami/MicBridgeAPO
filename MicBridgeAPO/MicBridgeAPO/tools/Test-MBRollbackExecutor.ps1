@@ -12,8 +12,8 @@ foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModul
 # Import the executor first: it loads its dependencies into its own module scope.
 # Import the journal explicitly afterward for the test's direct journal assertions.
 Import-Module $executorModule -Force
-Import-Module $journalModule -Force
 Import-Module $comExecutorModule -Force
+Import-Module $journalModule -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeRollbackExecutor-' + [guid]::NewGuid().ToString('N'))
 $tx = Join-Path $root ('transactions-' + [guid]::NewGuid().ToString('N'))
