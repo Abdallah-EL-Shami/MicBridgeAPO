@@ -86,15 +86,30 @@ try {
         throw 'FAIL: isolated DLL executor incorrectly marked the grouped main rollback step complete'
     }
 
-    # Re-entry in a fresh invocation must be idempotent and must not overwrite
-    # the restored file or increment the action attempt count.
-    $again = Invoke-MBInstallDllRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device
-    $after = Read-MBRecoveryJournal -Path $again.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreDll')
+    # Re-enter from a distinct PowerShell process. This proves the executor
+    # reconstructs its action from the durable transaction files, not closures
+    # left behind in the process that performed the first restore.
+    $childScript = Join-Path $tx 'dll-executor-reentry-child.ps1'
+    $childSource = @'
+param([string]$ExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
+$ErrorActionPreference = 'Stop'
+Import-Module $ExecutorModule -Force
+$result = Invoke-MBInstallDllRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId)
+if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw 'Fresh-process executor returned an invalid result.' }
+'@
+    [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
+        $executorModule,$tx,$data,$install,$device.ToString('D')
+    ) -Wait -PassThru
+    if ($childProcess.ExitCode -ne 0) { throw "FAIL: fresh-process executor re-entry failed with exit code $($childProcess.ExitCode)" }
+
+    $after = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreDll')
     if ($after.Steps[0].State -ne 'Completed' -or $after.Steps[0].Attempts -ne 1) {
-        throw 'FAIL: idempotent re-entry repeated the DLL restore side effect'
+        throw 'FAIL: fresh-process idempotent re-entry repeated the DLL restore side effect'
     }
 
-    Write-Host 'PASS: isolated DLL executor preflight, durable component journal, verified restore, transaction identity binding, idempotent re-entry, and preservation of main fail-closed journal'
+    Write-Host 'PASS: isolated DLL executor preflight, durable component journal, verified restore, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
