@@ -52,11 +52,25 @@ namespace MicBridge.LegacyFileHandleLease {
             FileIdentity = info.VolumeSerialNumber.ToString("X8") + ":" +
                 info.FileIndexHigh.ToString("X8") + info.FileIndexLow.ToString("X8");
             Length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
+            if (info.NumberOfLinks != 1)
+                throw new InvalidOperationException("Candidate has multiple hard links; exclusive path validation is insufficient.");
             stream = new FileStream(handle, FileAccess.Read, 4096, false);
             using (SHA256 sha = SHA256.Create()) {
                 byte[] digest = sha.ComputeHash(stream);
                 Sha256 = BitConverter.ToString(digest).Replace("-", "");
             }
+            BY_HANDLE_FILE_INFORMATION after;
+            if (!Native.GetFileInformationByHandle(handle, out after))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            long afterLength = ((long)after.FileSizeHigh << 32) | after.FileSizeLow;
+            bool stable = after.VolumeSerialNumber == info.VolumeSerialNumber &&
+                after.FileIndexHigh == info.FileIndexHigh && after.FileIndexLow == info.FileIndexLow &&
+                after.NumberOfLinks == info.NumberOfLinks && afterLength == Length &&
+                after.LastWriteTime.dwHighDateTime == info.LastWriteTime.dwHighDateTime &&
+                after.LastWriteTime.dwLowDateTime == info.LastWriteTime.dwLowDateTime &&
+                stream.Length == Length;
+            if (!stable)
+                throw new InvalidOperationException("File identity or metadata changed while hashing the opened handle.");
             stream.Position = 0;
         }
 
