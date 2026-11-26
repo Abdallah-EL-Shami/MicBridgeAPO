@@ -167,9 +167,17 @@ namespace MicBridge.LegacyFileHandleLease {
                     (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
                     throw new InvalidOperationException("A directory component is not a regular directory or is a reparse point: " + path);
                 string actualPath = NormalizeFinalPath(FinalPath(h));
-                string expectedPath = Path.GetFullPath(path).TrimEnd('\\');
-                if (!String.Equals(actualPath.TrimEnd('\\'), expectedPath, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Directory component resolved to a different path during pinning: " + path);
+                string fullExpectedPath = Path.GetFullPath(path);
+                string volumeRoot = Path.GetPathRoot(fullExpectedPath);
+                bool isVolumeRoot = String.Equals(fullExpectedPath.TrimEnd('\\'),
+                    volumeRoot.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+                string expectedPath = fullExpectedPath.TrimEnd('\\');
+                // Windows may return a volume-GUID name for a drive root; validate the
+                // root's directory/reparse attributes but compare exact paths below it.
+                if (!isVolumeRoot &&
+                    !String.Equals(actualPath.TrimEnd('\\'), expectedPath, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Directory component resolved to a different path during pinning: " +
+                        path + " (actual: " + actualPath + ", expected: " + expectedPath + ")");
                 pins.Add(h);
                 h = null;
             } finally { if (h != null) h.Dispose(); }
