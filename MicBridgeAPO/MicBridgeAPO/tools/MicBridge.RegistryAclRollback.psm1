@@ -64,7 +64,7 @@ function Test-MBRegistryAclSddl {
     # alone as an ACL change.
     $normalize = {
         param([string]$value)
-        return [regex]::Replace($value, 'D:AI(?=\\()', 'D:')
+        return $value.Replace('D:AI(', 'D:(')
     }
     $expectedCanonical = & $normalize ([string]$ExpectedSddl)
     $actualCanonical = & $normalize ([string]$actual)
