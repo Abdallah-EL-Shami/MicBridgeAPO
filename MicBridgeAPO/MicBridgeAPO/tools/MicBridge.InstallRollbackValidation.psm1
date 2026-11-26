@@ -83,7 +83,7 @@ function Test-MBInstallRollbackSnapshot {
     $required = @(
         'DeviceId','TransactionId','FxEffect','FxAssociation','FxComposite','DevSddl','FxSddl',
         'FxKeyExisted','ClsidRegExisted','ApoRegExisted','DllExisted',
-        'DllOriginalSha256','ClsidRegExisted','ClsidRegBackup','ClsidRegSha256','ApoRegExisted','ApoRegBackup','ApoRegSha256','IniExisted','ControlExisted','DataDirSddl',
+        'DllOriginalSha256','DllNewSha256','DllReplacementStarted','ClsidRegExisted','ClsidRegBackup','ClsidRegSha256','ApoRegExisted','ApoRegBackup','ApoRegSha256','IniExisted','ControlExisted','DataDirSddl',
         'ControlSddl','InstallFiles','ShortcutExisted','ShortcutBackup',
         'ShortcutBackupSha256','InstallDirExisted'
     )
@@ -160,12 +160,196 @@ function Test-MBInstallRollbackSnapshot {
         Test-MBFileSnapshot -Path ([string]$State.ShortcutBackup) -Sha256 ([string]$State.ShortcutBackupSha256) -Root $TransactionDirectory -Label 'Desktop shortcut' -Errors $errors
     }
 
-    if ($State.PSObject.Properties.Name -contains 'DllReplacementStarted' -and $State.DllReplacementStarted) {
-        if ($State.DllExisted) {
-            if ($State.PSObject.Properties.Name -notcontains 'DllBackupPath' -or $State.PSObject.Properties.Name -notcontains 'DllBackupSha256') {
-                [void]$errors.Add('DLL replacement started but durable backup provenance is incomplete.')
-            } else {
-                Test-MBFileSnapshot -Path ([string]$State.DllBackupPath) -Sha256 ([string]$State.DllBackupSha256) -Root (Join-Path $DataDirectory 'dll-backups') -Label 'Previous DLL' -Errors $errors
+    if ($State.DllReplacementStarted -isnot [bool]) {
+        [void]$errors.Add('DLL replacement state must be Boolean.')
+    }
+    if ([string]$State.DllNewSha256 -notmatch '^[A-Fa-f0-9]{64}
+
+    foreach ($com in @(
+        [pscustomobject]@{ Name='CLSID'; Existed=[bool]$State.ClsidRegExisted; Path=[string]$State.ClsidRegBackup; Hash=[string]$State.ClsidRegSha256; ExpectedName='clsid.reg' },
+        [pscustomobject]@{ Name='AudioEngine APO'; Existed=[bool]$State.ApoRegExisted; Path=[string]$State.ApoRegBackup; Hash=[string]$State.ApoRegSha256; ExpectedName='audioengine-apo.reg' }
+    )) {
+        if ($com.Existed) {
+            $expectedPath = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory $com.ExpectedName))
+            $recordedPath = ''
+            try { $recordedPath = [IO.Path]::GetFullPath($com.Path) } catch {}
+            if (-not [string]::Equals($recordedPath,$expectedPath,[StringComparison]::OrdinalIgnoreCase)) {
+                [void]$errors.Add("$($com.Name) COM export path does not match its fixed transaction-owned filename.")
+                continue
+            }
+            Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+            if (Test-Path -LiteralPath $com.Path -PathType Leaf) {
+                $item = Get-Item -LiteralPath $com.Path -Force
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    [void]$errors.Add("$($com.Name) COM export must not be a reparse point.")
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        IsValid = ($errors.Count -eq 0)
+        Errors = @($errors)
+        ReplaySafe = ($errors.Count -eq 0)
+    }
+}
+
+function Restore-MBRegistryExportSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][string]$SnapshotPath,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$TemporaryDirectory
+    )
+    if ($RegistryPath -notmatch '^(HKLM|HKCU)\\') {
+        throw 'Registry restore path must be an explicit HKLM or HKCU key.'
+    }
+    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'Registry snapshot SHA-256 is missing or malformed.'
+    }
+    if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) {
+        throw 'Registry snapshot file is missing.'
+    }
+    if (-not (Test-Path -LiteralPath $TemporaryDirectory -PathType Container)) {
+        throw 'Registry verification directory is missing.'
+    }
+    $snapshotItem = Get-Item -LiteralPath $SnapshotPath -Force -ErrorAction Stop
+    if (($snapshotItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Registry snapshot must not be a reparse point.'
+    }
+    $actualSnapshotHash = (Get-FileHash -LiteralPath $SnapshotPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($actualSnapshotHash,$ExpectedSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Registry snapshot hash mismatch; refusing to import untrusted recovery data.'
+    }
+
+    $registryHive = if ($RegistryPath.StartsWith('HKLM\',[StringComparison]::OrdinalIgnoreCase)) { 'HKEY_LOCAL_MACHINE' } else { 'HKEY_CURRENT_USER' }
+    $registrySubKey = $RegistryPath.Substring(5)
+    $expectedRoot = "$registryHive\$registrySubKey"
+    $snapshotText = [IO.File]::ReadAllText($SnapshotPath)
+    $snapshotKeys = @($snapshotText -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -match "^\[HKEY_.+\]$" } | ForEach-Object { $_.Substring(1, $_.Length - 2) })
+    if ($snapshotKeys.Count -eq 0 -or -not ($snapshotKeys -contains $expectedRoot)) {
+        throw 'Registry snapshot does not contain the exact requested root key.'
+    }
+    foreach ($snapshotKey in $snapshotKeys) {
+        if (-not ($snapshotKey.Equals($expectedRoot,[StringComparison]::OrdinalIgnoreCase) -or $snapshotKey.StartsWith($expectedRoot + '\',[StringComparison]::OrdinalIgnoreCase))) {
+            throw 'Registry snapshot contains a key outside the requested recovery root.'
+        }
+    }
+
+    & reg.exe import $SnapshotPath | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "reg.exe import failed for the fixed recovery target '$RegistryPath' (exit $LASTEXITCODE)."
+    }
+    if (-not (Test-MBRegistryExportSnapshot -RegistryPath $RegistryPath -ExpectedSha256 $ExpectedSha256 -TemporaryDirectory $TemporaryDirectory)) {
+        throw "Registry restore verification failed for '$RegistryPath'."
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot
+) {
+        [void]$errors.Add('Verified package DLL SHA-256 is missing or malformed.')
+    }
+    if ($State.DllExisted) {
+        if ([string]$State.DllOriginalSha256 -notmatch '^[A-Fa-f0-9]{64}
+
+    foreach ($com in @(
+        [pscustomobject]@{ Name='CLSID'; Existed=[bool]$State.ClsidRegExisted; Path=[string]$State.ClsidRegBackup; Hash=[string]$State.ClsidRegSha256; ExpectedName='clsid.reg' },
+        [pscustomobject]@{ Name='AudioEngine APO'; Existed=[bool]$State.ApoRegExisted; Path=[string]$State.ApoRegBackup; Hash=[string]$State.ApoRegSha256; ExpectedName='audioengine-apo.reg' }
+    )) {
+        if ($com.Existed) {
+            $expectedPath = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory $com.ExpectedName))
+            $recordedPath = ''
+            try { $recordedPath = [IO.Path]::GetFullPath($com.Path) } catch {}
+            if (-not [string]::Equals($recordedPath,$expectedPath,[StringComparison]::OrdinalIgnoreCase)) {
+                [void]$errors.Add("$($com.Name) COM export path does not match its fixed transaction-owned filename.")
+                continue
+            }
+            Test-MBFileSnapshot -Path $com.Path -Sha256 $com.Hash -Root $TransactionDirectory -Label "$($com.Name) COM export" -Errors $errors
+            if (Test-Path -LiteralPath $com.Path -PathType Leaf) {
+                $item = Get-Item -LiteralPath $com.Path -Force
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    [void]$errors.Add("$($com.Name) COM export must not be a reparse point.")
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        IsValid = ($errors.Count -eq 0)
+        Errors = @($errors)
+        ReplaySafe = ($errors.Count -eq 0)
+    }
+}
+
+function Restore-MBRegistryExportSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][string]$SnapshotPath,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$TemporaryDirectory
+    )
+    if ($RegistryPath -notmatch '^(HKLM|HKCU)\\') {
+        throw 'Registry restore path must be an explicit HKLM or HKCU key.'
+    }
+    if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'Registry snapshot SHA-256 is missing or malformed.'
+    }
+    if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) {
+        throw 'Registry snapshot file is missing.'
+    }
+    if (-not (Test-Path -LiteralPath $TemporaryDirectory -PathType Container)) {
+        throw 'Registry verification directory is missing.'
+    }
+    $snapshotItem = Get-Item -LiteralPath $SnapshotPath -Force -ErrorAction Stop
+    if (($snapshotItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Registry snapshot must not be a reparse point.'
+    }
+    $actualSnapshotHash = (Get-FileHash -LiteralPath $SnapshotPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not [string]::Equals($actualSnapshotHash,$ExpectedSha256,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Registry snapshot hash mismatch; refusing to import untrusted recovery data.'
+    }
+
+    $registryHive = if ($RegistryPath.StartsWith('HKLM\',[StringComparison]::OrdinalIgnoreCase)) { 'HKEY_LOCAL_MACHINE' } else { 'HKEY_CURRENT_USER' }
+    $registrySubKey = $RegistryPath.Substring(5)
+    $expectedRoot = "$registryHive\$registrySubKey"
+    $snapshotText = [IO.File]::ReadAllText($SnapshotPath)
+    $snapshotKeys = @($snapshotText -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -match "^\[HKEY_.+\]$" } | ForEach-Object { $_.Substring(1, $_.Length - 2) })
+    if ($snapshotKeys.Count -eq 0 -or -not ($snapshotKeys -contains $expectedRoot)) {
+        throw 'Registry snapshot does not contain the exact requested root key.'
+    }
+    foreach ($snapshotKey in $snapshotKeys) {
+        if (-not ($snapshotKey.Equals($expectedRoot,[StringComparison]::OrdinalIgnoreCase) -or $snapshotKey.StartsWith($expectedRoot + '\',[StringComparison]::OrdinalIgnoreCase))) {
+            throw 'Registry snapshot contains a key outside the requested recovery root.'
+        }
+    }
+
+    & reg.exe import $SnapshotPath | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "reg.exe import failed for the fixed recovery target '$RegistryPath' (exit $LASTEXITCODE)."
+    }
+    if (-not (Test-MBRegistryExportSnapshot -RegistryPath $RegistryPath -ExpectedSha256 $ExpectedSha256 -TemporaryDirectory $TemporaryDirectory)) {
+        throw "Registry restore verification failed for '$RegistryPath'."
+    }
+    return $true
+}
+
+Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot
+) {
+            [void]$errors.Add('Original installed DLL SHA-256 is missing or malformed.')
+        }
+    } elseif ($null -ne $State.DllOriginalSha256 -and -not [string]::IsNullOrWhiteSpace([string]$State.DllOriginalSha256)) {
+        [void]$errors.Add('Original DLL SHA-256 must be empty when no installed DLL existed.')
+    }
+    if ($State.DllReplacementStarted -and $State.DllExisted) {
+        if ($State.PSObject.Properties.Name -notcontains 'DllBackupPath' -or $State.PSObject.Properties.Name -notcontains 'DllBackupSha256') {
+            [void]$errors.Add('DLL replacement started but durable backup provenance is incomplete.')
+        } else {
+            Test-MBFileSnapshot -Path ([string]$State.DllBackupPath) -Sha256 ([string]$State.DllBackupSha256) -Root (Join-Path $DataDirectory 'dll-backups') -Label 'Previous DLL' -Errors $errors
+            if (-not [string]::Equals([string]$State.DllBackupSha256,[string]$State.DllOriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
+                [void]$errors.Add('DLL backup hash differs from the original installed DLL snapshot.')
             }
         }
     }
