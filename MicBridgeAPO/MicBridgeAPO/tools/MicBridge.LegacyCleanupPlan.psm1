@@ -103,6 +103,7 @@ function New-MBLegacyCleanupPlan {
     [pscustomobject]@{
         SchemaVersion = 1
         IsReadOnly = $true
+        InstallDirectory = $installFull
         CanProceedToCleanupReview = ($blockers.Count -eq 0)
         CleanupExecutionAllowed = $false
         InstallAllowed = $false
