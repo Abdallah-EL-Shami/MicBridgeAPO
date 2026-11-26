@@ -22,9 +22,9 @@ $gateEnd = $source.IndexOf('$compositeBackupFile = Join-Path $dataDir', $gateSta
 if ($gateStart -lt 0 -or $gateEnd -le $gateStart) { throw 'FAIL: first-install legacy audit gate is missing or misplaced.' }
 $gate = $source.Substring($gateStart,$gateEnd-$gateStart)
 
-if (-not $gate.Contains("Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop")) { throw 'FAIL: installer does not import the read-only legacy audit module.' }
-if (-not $gate.Contains("Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\'")) { throw 'FAIL: installer does not audit the intended HKLM root.' }
-if (-not $gate.Contains("$legacyAudit.Outcome -ne 'NoLegacyResidueDetected'")) { throw 'FAIL: installer does not fail closed on legacy or ambiguous state.' }
+if (-not $gate.Contains("Import-Module -Name `$legacyAuditModule -Force -ErrorAction Stop")) { throw 'FAIL: installer does not import the read-only legacy audit module.' }
+if (-not $gate.Contains("Test-MBLegacyInstallationState -InstallDirectory `$installDir -DataDirectory `$dataDir -RegistryRoot 'HKLM:\'")) { throw 'FAIL: installer does not audit the intended HKLM root.' }
+if (-not $gate.Contains("`$legacyAudit.Outcome -ne 'NoLegacyResidueDetected'")) { throw 'FAIL: installer does not fail closed on legacy or ambiguous state.' }
 if (-not $gate.Contains('No cleanup or installation was attempted.')) { throw 'FAIL: blocked install does not explain that no cleanup/install was attempted.' }
 if ($gate -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-ItemProperty|reg\.exe\s+(delete|add))\b') {
     throw 'FAIL: first-install audit gate contains a Registry or file mutation command.'
@@ -36,7 +36,7 @@ $upgradeCheckpoint = $source.IndexOf("Checkpoint-Computer -Description 'قبل M
 if ($auditCall1 -lt 0 -or $auditCall2 -le $auditCall1 -or $upgradeCheckpoint -le $auditCall2) {
     throw 'FAIL: both first-install and upgrade paths must audit before the first restore-point/snapshot mutation.'
 }
-if (-not $workflowSource.Contains("Copy-Item -LiteralPath $legacyAuditModule -Destination $toolsPackage")) {
+if (-not $workflowSource.Contains("Copy-Item -LiteralPath `$legacyAuditModule -Destination `$toolsPackage")) {
     throw 'FAIL: package staging does not include the required legacy audit module.'
 }
 if (-not $workflowSource.Contains('Test-MBInstallerLegacyGate.ps1')) {
