@@ -28,9 +28,20 @@ function Test-MBLegacyCleanupPreflight {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
         $blockers += 'Audited installation directory no longer exists.'
     } else {
-        $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
-        if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            $blockers += 'Audited installation directory is a reparse point.'
+        # Check the complete directory ancestry, not only the final directory.
+        # A junction/symlink in a parent can redirect an apparently in-root path.
+        $walkRoot = $root
+        while ($walkRoot) {
+            if (Test-Path -LiteralPath $walkRoot -PathType Container) {
+                $rootItem = Get-Item -LiteralPath $walkRoot -Force -ErrorAction Stop
+                if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $blockers += "Audited installation path contains a reparse-point directory: $walkRoot"
+                    break
+                }
+            }
+            $parentRoot = Split-Path -Parent $walkRoot
+            if ([string]::IsNullOrWhiteSpace($parentRoot) -or $parentRoot -eq $walkRoot) { break }
+            $walkRoot = $parentRoot
         }
     }
 
