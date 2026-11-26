@@ -66,7 +66,7 @@ function Restore-Sddl([string]$sub, [string]$sddl) {   # يعيد المالك �
 
 
 function Test-MBRegistrySnapshot([string]$RegistrySubKey, [string]$SnapshotPath, [bool]$ExpectedExists) {
-    $registryPath = "HKLM:\\$RegistrySubKey"
+    $registryPath = "HKLM:\$RegistrySubKey"
     if (-not $ExpectedExists) {
         return (-not (Test-Path -LiteralPath $registryPath))
     }
@@ -74,7 +74,7 @@ function Test-MBRegistrySnapshot([string]$RegistrySubKey, [string]$SnapshotPath,
     if (-not (Test-Path -LiteralPath $registryPath)) { return $false }
     $currentExport = Join-Path $dataDir ("verify-" + [guid]::NewGuid().ToString('N') + ".reg")
     try {
-        & reg.exe export "HKLM\\$RegistrySubKey" $currentExport /y | Out-Null
+        & reg.exe export "HKLM\$RegistrySubKey" $currentExport /y | Out-Null
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $currentExport -PathType Leaf)) { return $false }
         $expectedLines = @(Get-Content -LiteralPath $SnapshotPath -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
         $actualLines = @(Get-Content -LiteralPath $currentExport -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
