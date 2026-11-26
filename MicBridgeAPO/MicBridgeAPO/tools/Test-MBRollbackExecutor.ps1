@@ -100,7 +100,7 @@ try {
     $comApoKey.SetValue('FriendlyName','MicBridge failed update',[Microsoft.Win32.RegistryValueKind]::String)
     $comApoKey.Dispose()
 
-    $comResult=Invoke-MBInstallComRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU -RegistryHive HKCU
+    $comResult=Invoke-MBInstallComRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
     if(-not $comResult.Success -or -not $comResult.MainTransactionStillPending) { throw 'FAIL: COM executor returned an invalid result' }
     $comJournal=Read-MBRecoveryJournal -Path $comResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreComCLSID','RestoreComAudioEngineAPO')
     if(@($comJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: COM executor did not complete both registration restores' }
@@ -134,10 +134,10 @@ try {
 param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
 $ErrorActionPreference = 'Stop'
 Import-Module $ComExecutorModule -Force
-$com = Invoke-MBInstallComRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU -RegistryHive HKCU
+$com = Invoke-MBInstallComRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
 if (-not $com.Success -or -not $com.MainTransactionStillPending) { throw 'Fresh-process COM executor returned an invalid result.' }
 Import-Module $ExecutorModule -Force
-$result = Invoke-MBInstallDllRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId)
+$result = Invoke-MBInstallDllRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
 if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw 'Fresh-process DLL executor returned an invalid result.' }
 '@
     [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
