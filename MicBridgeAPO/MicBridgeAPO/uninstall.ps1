@@ -480,14 +480,46 @@ Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreComClsid' -Expecte
 } -Verify {
     Test-MBRegistrySnapshot -RegistrySubKey "SOFTWARE\\Classes\\CLSID\\$clsid" -SnapshotPath ([string]$b.PrevClsidRegistrationFile) -ExpectedExists ([bool]$b.PrevClsidRegistrationExists)
 }
-Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk') -Force -ErrorAction SilentlyContinue
+# File/shortcut/service cleanup is a separate durable phase. Keep the existing
+# registry/COM/ACL journal unchanged so older in-progress uninstall journals remain resumable.
+$cleanupJournal = Join-Path $dataDir 'uninstall-cleanup-recovery.json'
+$cleanupStepIds = @('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory')
+if (-not (Test-Path -LiteralPath $cleanupJournal -PathType Leaf)) {
+    New-MBRecoveryJournal -Path $cleanupJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $cleanupStepIds | Out-Null
+} else {
+    Read-MBRecoveryJournal -Path $cleanupJournal -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds | Out-Null
+}
 
-Restart-Service -Name Audiosrv -Force
-Start-Sleep -Seconds 2
-if ($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists) {
-    Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
-} elseif (Test-Path -LiteralPath $installDir) {
-    Remove-Item -Recurse -Force $installDir -ErrorAction Stop
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+        Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+    }
+} -Verify {
+    -not (Test-Path -LiteralPath $shortcutPath)
+}
+
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    Restart-Service -Name Audiosrv -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+} -Verify {
+    $audioService = Get-Service -Name Audiosrv -ErrorAction Stop
+    $audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running
+}
+
+$preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists)
+Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
+    if ($preserveInstallDirectory) {
+        Write-Warning 'Original COM registration existed before MicBridge. The installation directory is retained to avoid deleting a DLL that the restored registration may reference.'
+    } elseif (Test-Path -LiteralPath $installDir) {
+        Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction Stop
+    }
+} -Verify {
+    if ($preserveInstallDirectory) {
+        Test-Path -LiteralPath $installDir -PathType Container
+    } else {
+        -not (Test-Path -LiteralPath $installDir)
+    }
 }
 } finally {
     if ($operationLock) { $operationLock.Dispose() }
