@@ -544,6 +544,7 @@ Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت
             Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
         }
     }
+    }
 } -Verify {
     if (-not (Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -or
         -not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $true }
