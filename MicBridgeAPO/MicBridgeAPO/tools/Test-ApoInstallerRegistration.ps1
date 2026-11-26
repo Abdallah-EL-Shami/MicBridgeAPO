@@ -50,6 +50,10 @@ Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$dataDir' 'Rollback verifi
 Assert-Contains $installer 'Get-Acl\s+-LiteralPath\s+\$controlPath' 'Rollback verifies restored control file ACL'
 Assert-Contains $installer 'ShortcutBackupSha256' 'Rollback verifies restored desktop shortcut contents'
 Assert-Contains $installer 'DllOriginalSha256\s*=\s*if \(Test-Path' 'Installer snapshots the original installed DLL hash before any replacement'
+Assert-Contains $installer 'if \(-not \[bool\]\$tx\.FxKeyExisted -and \(Test-Path' 'Rollback verifies that a newly-created endpoint FxProperties key was removed'
+Assert-Contains $installer '\$tx\.IniExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original INI file existence'
+Assert-Contains $installer '\$tx\.ControlExisted\s+-ne\s+\[bool\]\(Test-Path' 'Rollback verifies the original control file existence'
+Assert-Contains $installer '\$tx\.InstallDirExisted -and \(Test-Path' 'Rollback verifies cleanup of an install directory created by the failed attempt'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
