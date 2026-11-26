@@ -31,7 +31,9 @@ function Invoke-MBInstallDllRecovery {
             throw "Required rollback module is missing: $modulePath"
         }
     }
-    # Keep journal commands visible to the caller after this executor returns.
+    # Import into this module's function scope for internal calls, and into
+    # the caller's global scope for post-return journal inspection.
+    Import-Module $journalModule -Force -ErrorAction Stop
     Import-Module $journalModule -Force -Global -ErrorAction Stop
 
     # Use the same exclusive operation lock as install.ps1 across the full
@@ -83,7 +85,9 @@ function Invoke-MBInstallDllRecovery {
             New-MBRecoveryJournal -Path $dllJournalPath -Operation InstallRollback -DeviceId $ExpectedDeviceId -StepIds $dllStepIds -TransactionId ([guid]$preflight.Journal.TransactionId) | Out-Null
         }
 
-        # Import into the global session so the journal's deferred ScriptBlocks can resolve the exported commands after this function returns.
+        # Load action commands locally for this executor's deferred ScriptBlocks,
+        # and globally so a caller can inspect/reuse the exported commands.
+        Import-Module $dllModule -Force -ErrorAction Stop
         Import-Module $dllModule -Force -Global -ErrorAction Stop
         $action = { Restore-MBDllSnapshot @dllArgs | Out-Null }.GetNewClosure()
         $verify = { Test-MBDllSnapshotRestored @dllArgs }.GetNewClosure()
