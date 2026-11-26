@@ -258,6 +258,18 @@ release did not already leave incorrect changes behind.
   The durable transaction fixture also re-enters metadata recovery from a new
   PowerShell process. Windows CI run 978 passed the complete suite and staged
   the updated installer package.
+- Added `MicBridge.FullInstallRollbackExecutor.psm1`. It reconstructs the
+  three fixed main rollback steps from the durable transaction snapshot and
+  coordinates endpoint FX values, endpoint ACLs, COM, DLL, support files,
+  configuration files, shortcut, and ProgramData ACL restoration. The grouped
+  `RestorePreviousInstallState` action is now replayable from a fresh process;
+  if a pre-existing install directory has disappeared, it fails closed rather
+  than recreating it without a captured ACL baseline.
+- The full coordinator is exercised in the HKCU/temp transaction fixture after
+  the isolated component executors, and a separate PowerShell process re-enters
+  the completed transaction. All Windows CI checks, including package staging,
+  passed in run 1001.
+
 - The support-file executor is not yet called by startup recovery or the
   installer failure handler.
 - The COM executor is still not called by `install.ps1` or startup recovery and
