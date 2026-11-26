@@ -1,6 +1,12 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+trap {
+    Write-Host ("RECOVERY TEST ERROR: " + $_.Exception.Message)
+    Write-Host ("RECOVERY TEST STACK: " + $_.ScriptStackTrace)
+    throw
+}
+
 $modulePath = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
 Import-Module $modulePath -Force
 
