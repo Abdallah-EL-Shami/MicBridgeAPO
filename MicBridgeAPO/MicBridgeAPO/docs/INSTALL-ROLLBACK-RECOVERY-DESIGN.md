@@ -116,3 +116,71 @@ Do not enable automatic replay, remove the startup fail-closed guard, publish
 an install artifact as release-ready, or ask the user to install until the
 preflight, executor, crash-injection, verification, and artifact checks above
 are implemented and green.
+
+## Legacy installation audit before upgrading an existing installation
+
+This is a separate prerequisite from transaction rollback. A transaction snapshot
+records the machine as it exists immediately before the new attempt; it does not
+prove that this state is the original Windows state or that an older MicBridge
+release did not already leave incorrect changes behind.
+
+### Safety contract
+
+- Run a read-only inventory before creating a new install transaction or changing
+  any machine state.
+- Treat existing `backup.json`, `composite-efx-backup.json`, COM exports,
+  transaction snapshots, journals, install logs, and ownership markers as
+  evidence with provenance, not as unquestionable truth.
+- A saved snapshot is eligible as a baseline only when its schema, endpoint
+  identity, transaction identity where applicable, expected fixed registry root,
+  file hash, and creation provenance all validate. A hash proves byte integrity,
+  not that the captured values were correct or genuinely pre-install.
+- Classify files and registrations as MicBridge-owned only when fixed product
+  identity and ownership evidence agree. A matching filename or CLSID alone is
+  insufficient; inspect the CLSID's server path and ensure it resolves inside
+  the product install directory before considering a registration removable.
+- Never infer the original Windows state from the current live state after a
+  legacy install has already modified it. If no trustworthy pre-install record
+  exists, report the state as unknown and require an explicit recovery decision.
+- Never automatically import an old COM export merely because it exists.
+  Validate its exact root key, server path, product ownership, schema and hash;
+  if it contains a foreign server or unexpected subkeys, preserve it and stop.
+- Do not recursively delete a legacy install directory. Remove only individually
+  verified MicBridge-owned files; preserve unknown files and any DLL referenced
+  by a registration that is being retained.
+- Do not change Realtek/vendor APO registrations, unrelated endpoint effects,
+  AudioDG security settings, or Windows audio services.
+- The audit itself must not write Registry, alter ACLs, stop/restart services,
+  delete files, or create a "baseline" by copying the already-modified live state.
+
+### Audit outcomes
+
+1. **Clean / proven compatible:** ownership and required snapshots validate;
+   proceed to the normal transaction snapshot and installer preflight.
+2. **MicBridge residue proven, original baseline proven:** offer a separately
+   journaled cleanup plan limited to those proven product-owned artifacts, then
+   re-audit before installation.
+3. **Residue proven but original baseline unknown:** do not claim restoration
+   to Windows defaults. Preserve evidence and block automatic cleanup; require
+   a reviewed recovery plan.
+4. **Foreign or ambiguous registration/file:** preserve it and fail closed.
+
+### Required implementation and tests
+
+- Add a read-only `Test-MBLegacyInstallationState` preflight module and invoke it
+  before any install mutation or transaction snapshot is created.
+- Inventory the fixed product CLSID and AudioEngine APO registration, their
+  `InprocServer32` values, referenced DLL paths and hashes, known install/data
+  directories, backup metadata, old transaction directories, and ownership
+  markers. Report findings without changing them.
+- Include fixtures for: a clean machine; a previous MicBridge DLL with a valid
+  product registration; a stale MicBridge registration pointing outside the
+  install directory; a foreign CLSID tree; missing/old backup schema; mismatched
+  endpoint identity; corrupt/tampered COM export; and unknown files in the
+  install directory.
+- Assert that every audit outcome is read-only by comparing registry exports,
+  file hashes, ACLs, and service state before and after the audit.
+- Only after this audit is implemented and its Windows CI tests pass may a
+  separate, explicit cleanup executor be designed. Cleanup must not be folded
+  into ordinary install or rollback actions.
+
