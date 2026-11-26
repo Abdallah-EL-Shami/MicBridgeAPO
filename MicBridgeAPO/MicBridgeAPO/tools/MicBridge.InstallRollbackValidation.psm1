@@ -318,4 +318,70 @@ function Restore-MBRegistryExportSnapshot {
     return $true
 }
 
-Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot
+Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot, Test-MBInstallRollbackTransaction
+
+
+function Test-MBInstallRollbackTransaction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$JournalPath,
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][string]$TransactionDirectory,
+        [Parameter(Mandatory)][string]$DataDirectory,
+        [Parameter(Mandatory)][guid]$ExpectedDeviceId,
+        [Parameter(Mandatory)][string[]]$ExpectedStepIds
+    )
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+    $journalModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
+    try {
+        if (-not (Test-Path -LiteralPath $journalModule -PathType Leaf)) {
+            throw 'Recovery journal module is missing.'
+        }
+        Import-Module -Name $journalModule -Force -ErrorAction Stop
+
+        $expectedJournal = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory 'rollback-recovery.json'))
+        $expectedState = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory 'state.json'))
+        if (-not [string]::Equals([IO.Path]::GetFullPath($JournalPath),$expectedJournal,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Journal path does not match the fixed transaction-owned filename.'
+        }
+        if (-not [string]::Equals([IO.Path]::GetFullPath($StatePath),$expectedState,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Snapshot path does not match the fixed transaction-owned filename.'
+        }
+        foreach ($file in @($JournalPath,$StatePath)) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or
+                -not (Test-MBNoReparsePath -Path $file -StopAt $TransactionDirectory)) {
+                throw "Transaction metadata is missing or traverses a reparse point: $file"
+            }
+        }
+
+        $journal = Read-MBRecoveryJournal -Path $JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds -ErrorAction Stop
+        $state = Get-Content -LiteralPath $StatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $snapshot = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -ExpectedDeviceId $ExpectedDeviceId
+        if (-not $snapshot.IsValid -or -not $snapshot.ReplaySafe) {
+            foreach ($errorText in @($snapshot.Errors)) { [void]$errors.Add([string]$errorText) }
+        }
+        $stateTransactionId = [guid]::Empty
+        $journalTransactionId = [guid]::Empty
+        if (-not [guid]::TryParse([string]$state.TransactionId,[ref]$stateTransactionId) -or
+            -not [guid]::TryParse([string]$journal.TransactionId,[ref]$journalTransactionId) -or
+            $stateTransactionId -ne $journalTransactionId) {
+            [void]$errors.Add('Journal and snapshot transaction identities do not match.')
+        }
+        return [pscustomobject]@{
+            IsValid = ($errors.Count -eq 0)
+            ReplaySafe = ($errors.Count -eq 0)
+            Errors = @($errors)
+            Journal = $journal
+            State = $state
+        }
+    } catch {
+        [void]$errors.Add($_.Exception.Message)
+        return [pscustomobject]@{
+            IsValid = $false
+            ReplaySafe = $false
+            Errors = @($errors)
+            Journal = $null
+            State = $null
+        }
+    }
+}
