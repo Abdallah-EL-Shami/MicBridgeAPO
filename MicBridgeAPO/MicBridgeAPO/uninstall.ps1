@@ -100,14 +100,28 @@ $expectedComFiles = @(
 # Verify immutable COM export bytes before any endpoint, ACL, COM, or file mutation.
 # Legacy snapshots without hashes remain readable; newly-created snapshots are hash-bound.
 $hashFields = @(
-    [pscustomobject]@{ Exists=[bool]$preflightBackup.PrevClsidRegistrationExists; File=$preflightBackup.PrevClsidRegistrationFile; HashField='PrevClsidRegistrationSha256' },
-    [pscustomobject]@{ Exists=[bool]$preflightBackup.PrevApoRegistrationExists; File=$preflightBackup.PrevApoRegistrationFile; HashField='PrevApoRegistrationSha256' }
+    [pscustomobject]@{ Exists=[bool]$preflightBackup.PrevClsidRegistrationExists; HashField='PrevClsidRegistrationSha256'; Name='previous-clsid.reg' },
+    [pscustomobject]@{ Exists=[bool]$preflightBackup.PrevApoRegistrationExists; HashField='PrevApoRegistrationSha256'; Name='previous-audioengine-apo.reg' }
 )
 foreach ($entry in $hashFields) {
     if (-not $entry.Exists) { continue }
     if ($preflightBackup.PSObject.Properties.Name -contains $entry.HashField) {
         $expectedHash = [string]$preflightBackup.($entry.HashField)
-        if ($expectedHash -notmatch '^[A-Fa-f0-9]{64}    if ($preflightBackup.PSObject.Properties.Name -notcontains $item.Field) {
+        if ($expectedHash -notmatch '^[A-Fa-f0-9]{64}$') {
+            throw "backup.json has an invalid $($entry.HashField); uninstall stopped before changes."
+        }
+        $backupPath = Join-Path (Join-Path $dataDir 'com-registration-backup') $entry.Name
+        if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+            throw "Required COM recovery file '$($entry.Name)' is missing; uninstall stopped before changes."
+        }
+        $actualHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not [string]::Equals($expectedHash, $actualHash, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "COM recovery file '$($entry.Name)' failed SHA-256 integrity validation; uninstall stopped before changes."
+        }
+    }
+}
+foreach ($item in $expectedComFiles) {
+    if ($preflightBackup.PSObject.Properties.Name -notcontains $item.Field) {
         throw "backup.json is missing $($item.Field); uninstall stopped before changes."
     }
     $expectedPath = [IO.Path]::GetFullPath((Join-Path $comBackupDir $item.Name))
