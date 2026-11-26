@@ -24,6 +24,7 @@ try {
         BackupPath=$backup
         BackupSha256=$backupHash
         BackupRoot=$backupRoot
+        NewDllSha256=(Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
         InstallRoot=$installRoot
     }
     # Hold the destination without delete sharing: atomic rollback must fail closed
@@ -50,6 +51,13 @@ try {
     Remove-Item -LiteralPath $backup -Force
     Restore-MBDllSnapshot @restoreArgs | Out-Null
     [IO.File]::WriteAllBytes($backup,$originalBytes)
+    [IO.File]::WriteAllBytes($installed,[byte[]](31,32,33))
+    $foreignInstalledHash = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+    $foreignInstallRejected = $false
+    try { Restore-MBDllSnapshot @restoreArgs | Out-Null } catch { $foreignInstallRejected = $_.Exception.Message -match 'unowned file' }
+    if (-not $foreignInstallRejected -or (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $foreignInstalledHash) {
+        throw 'FAIL: rollback overwrote a DLL changed outside this transaction'
+    }
     [IO.File]::WriteAllBytes($installed,$newBytes)
     # Rejected tampered backup must leave these exact destination bytes unchanged.
     $beforeTamperReject = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
