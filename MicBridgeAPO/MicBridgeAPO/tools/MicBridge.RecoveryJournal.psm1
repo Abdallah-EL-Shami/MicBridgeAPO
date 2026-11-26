@@ -360,7 +360,9 @@ function Invoke-MBRecoveryPlan {
         foreach ($id in $ExpectedStepIds) {
             $current = Read-MBRecoveryJournal -Path $Path -ExpectedOperation $ExpectedOperation -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $ExpectedStepIds
             $blockedBy = @()
-            foreach ($dependency in @($Dependencies[$id])) {
+            $stepDependencies = @()
+            if ($Dependencies.ContainsKey($id)) { $stepDependencies = @($Dependencies[$id]) }
+            foreach ($dependency in $stepDependencies) {
                 $dependencyStep = $current.Steps | Where-Object { $_.Id -eq $dependency } | Select-Object -First 1
                 if (-not $dependencyStep -or $dependencyStep.State -ne 'Completed') { $blockedBy += $dependency }
             }
