@@ -58,6 +58,7 @@ try {
 param([string]$Module,[string]$Journal,[string]$SubKey,[string]$Sddl,[string]$Device)
 $ErrorActionPreference = 'Stop'
 Import-Module $Module -Force
+Import-Module (Join-Path (Split-Path -Parent $Module) 'MicBridge.RecoveryJournal.psm1') -Force
 $action = { Restore-MBRegistryAclSddl -Hive HKCU -SubKeyPath $SubKey -Sddl $Sddl; [Environment]::FailFast('Injected crash after ACL restore') }.GetNewClosure()
 $verify = { Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $SubKey -ExpectedSddl $Sddl }.GetNewClosure()
 Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointAcl' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreEndpointAcl') -Action $action -Verify $verify
