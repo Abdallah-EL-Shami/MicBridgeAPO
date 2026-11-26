@@ -85,7 +85,7 @@ function Restore-MBRecoveryPreviousJournal {
         $primaryArgs = @{ Path=$Path; NoPreviousFallback=$true }
         if ($ExpectedOperation) { $primaryArgs.ExpectedOperation=$ExpectedOperation }
         if ($null -ne $ExpectedDeviceId -and $ExpectedDeviceId -ne [guid]::Empty) { $primaryArgs.ExpectedDeviceId=$ExpectedDeviceId }
-        if (@($ExpectedStepIds).Count -gt 0) { $primaryArgs.ExpectedStepIds=$ExpectedStepIds }
+        if ($null -ne $ExpectedStepIds -and $ExpectedStepIds.Count -gt 0) { $primaryArgs.ExpectedStepIds=$ExpectedStepIds }
         try {
             # A writer may have repaired/replaced the primary while we waited.
             # Prefer that newer valid primary over an older .previous snapshot.
@@ -100,7 +100,7 @@ function Restore-MBRecoveryPreviousJournal {
         $fallbackArgs = @{ Path=$previousPath; NoPreviousFallback=$true }
         if ($ExpectedOperation) { $fallbackArgs.ExpectedOperation=$ExpectedOperation }
         if ($null -ne $ExpectedDeviceId -and $ExpectedDeviceId -ne [guid]::Empty) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
-        if (@($ExpectedStepIds).Count -gt 0) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
+        if ($null -ne $ExpectedStepIds -and $ExpectedStepIds.Count -gt 0) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
         $fallback = Read-MBRecoveryJournal @fallbackArgs
         $directory = Split-Path -Parent $Path
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
@@ -190,8 +190,8 @@ function Read-MBRecoveryJournal {
     if ($PSBoundParameters.ContainsKey('ExpectedDeviceId') -and $parsedDeviceId -ne $ExpectedDeviceId) {
         throw 'Recovery journal endpoint identity does not match the requested device; refusing recovery.'
     }
-    if ($PSBoundParameters.ContainsKey('ExpectedStepIds')) {
-        if (@($ExpectedStepIds).Count -ne $ids.Count) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
+    if ($PSBoundParameters.ContainsKey('ExpectedStepIds') -and $null -ne $ExpectedStepIds) {
+        if ($ExpectedStepIds.Count -ne $ids.Count) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
         for ($i=0; $i -lt $ids.Count; $i++) {
             if ([string]$ExpectedStepIds[$i] -ne $ids[$i]) { throw 'Recovery journal step plan does not match the caller; refusing recovery.' }
         }
