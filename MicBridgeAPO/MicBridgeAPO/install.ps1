@@ -448,6 +448,13 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     Write-InstallLog 'ERROR' "Error position: $($failure.InvocationInfo.PositionMessage)"
     if ($transactionStateFile -and (Test-Path -LiteralPath $transactionStateFile)) {
         try {
+            # Validate every durable rollback input before touching Registry, ACLs, COM, or files.
+            $rollbackValidationModule = Join-Path $PSScriptRoot 'tools\MicBridge.InstallRollbackValidation.psm1'
+            Import-Module -Name $rollbackValidationModule -Force -ErrorAction Stop
+            $rollbackValidation = Test-MBInstallRollbackSnapshot -State (Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json) -TransactionDirectory $transactionDir -DataDirectory $dataDir -ExpectedDeviceId $rollbackDeviceId
+            if (-not $rollbackValidation.IsValid -or -not $rollbackValidation.ReplaySafe) {
+                throw "Rollback snapshot validation failed; no rollback mutations were attempted. $($rollbackValidation.Errors -join '; ')"
+            }
             Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
                         # Reload the durable snapshot: process-local variables are not recovery evidence.
                         $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
