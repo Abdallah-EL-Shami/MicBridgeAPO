@@ -497,26 +497,36 @@ if (-not (Test-Path -LiteralPath $cleanupJournal -PathType Leaf)) {
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
 $shortcutOwnershipFile = Join-Path $dataDir 'desktop-shortcut.sha256'
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
-    # Only delete the exact file whose SHA-256 was recorded by the installer.
-    if ((Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -and (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
-        $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
-        if ($ownedHash.Length -eq 64 -and $ownedHash -match '^[0-9A-Fa-f]+$') {
-            $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ([string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)) {
-                Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
-            } else {
-                Write-Warning 'Desktop shortcut changed after MicBridge created it; preserving the user-modified shortcut.'
-            }
-        } else {
-            Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
+    # The ownership marker is MicBridge data: reject directories/reparse points before reading or deleting it.
+    if (Test-Path -LiteralPath $shortcutOwnershipFile) {
+        $markerItem = Get-Item -LiteralPath $shortcutOwnershipFile -Force -ErrorAction Stop
+        if ($markerItem.PSIsContainer -or (($markerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'Desktop shortcut ownership marker is not a regular file; refusing to follow or remove it.'
         }
+        # Only delete a regular shortcut whose bytes still match the install-time ownership hash.
+        if (Test-Path -LiteralPath $shortcutPath) {
+            $shortcutItem = Get-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+            if ($shortcutItem.PSIsContainer -or (($shortcutItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                Write-Warning 'Desktop shortcut is not a regular file; preserving it.'
+            } else {
+                $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
+                if ($ownedHash.Length -eq 64 -and $ownedHash -match '^[0-9A-Fa-f]+$') {
+                    $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                    if ([string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)) {
+                        Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+                    } else {
+                        Write-Warning 'Desktop shortcut changed after MicBridge created it; preserving the user-modified shortcut.'
+                    }
+                } else {
+                    Write-Warning 'Desktop shortcut ownership record is invalid; preserving the shortcut.'
+                }
+            }
+        }
+        # The decision is complete; remove only the verified regular ownership marker.
+        Remove-Item -LiteralPath $shortcutOwnershipFile -Force -ErrorAction Stop
     }
 } -Verify {
-    if (-not (Test-Path -LiteralPath $shortcutOwnershipFile -PathType Leaf) -or -not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $true }
-    $ownedHash = (Get-Content -LiteralPath $shortcutOwnershipFile -Raw -ErrorAction Stop).Trim()
-    if ($ownedHash.Length -ne 64 -or $ownedHash -notmatch '^[0-9A-Fa-f]+$') { return $true }
-    $currentHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
-    -not [string]::Equals($currentHash,$ownedHash,[StringComparison]::OrdinalIgnoreCase)
+    -not (Test-Path -LiteralPath $shortcutOwnershipFile)
 }
 
 $serviceRestartMarker = "$cleanupJournal.service-restarted"
