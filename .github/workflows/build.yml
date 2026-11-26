@@ -26,6 +26,9 @@ jobs:
       - name: Test isolated DLL rollback action
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackActions.ps1
+      - name: Test isolated endpoint registry rollback and crash recovery
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBEndpointRegistryRollback.ps1
       - name: Stage complete install package
         shell: pwsh
         run: |
@@ -51,6 +54,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $rollbackValidator -PathType Leaf)) { throw "Required rollback validator missing: $rollbackValidator" }
           Copy-Item -LiteralPath $rollbackValidator -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallRollbackValidation.psm1') -PathType Leaf)) { throw 'Rollback validator was not staged in the required tools directory.' }
+          $endpointRollbackModule = Join-Path $source 'tools/MicBridge.EndpointRegistryRollback.psm1'
+          if (-not (Test-Path -LiteralPath $endpointRollbackModule -PathType Leaf)) { throw "Required endpoint rollback module missing: $endpointRollbackModule" }
+          Copy-Item -LiteralPath $endpointRollbackModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.EndpointRegistryRollback.psm1') -PathType Leaf)) { throw 'Endpoint rollback module was not staged in the required tools directory.' }
           $dllRollbackModule = Join-Path $source 'tools/MicBridge.InstallRollbackActions.psm1'
           if (-not (Test-Path -LiteralPath $dllRollbackModule -PathType Leaf)) { throw "Required DLL rollback module missing: $dllRollbackModule" }
           Copy-Item -LiteralPath $dllRollbackModule -Destination $toolsPackage
