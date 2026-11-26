@@ -142,7 +142,14 @@ function Restore-MBInstallMetadataSnapshot {
         $controlAcl.SetSecurityDescriptorSddlForm([string]$State.ControlSddl)
         Set-Acl -LiteralPath $control -AclObject $controlAcl -ErrorAction Stop
     }
-    if(-not (Test-MBInstallMetadataRestored -State $State -DataDirectory $data -DesktopDirectory $desktop)) { throw 'Metadata rollback verification failed.' }
+    if(-not (Test-MBInstallMetadataRestored -State $State -DataDirectory $data -DesktopDirectory $desktop)) {
+        $iniExists=Test-Path -LiteralPath $ini
+        $controlExists=Test-Path -LiteralPath $control
+        $shortcutExists=Test-Path -LiteralPath (Join-Path $desktop 'MicBridge.lnk')
+        $actualDataSddl=(Get-Acl -LiteralPath $data -ErrorAction Stop).Sddl
+        $dataAclMatch=($actualDataSddl -eq [string]$State.DataDirSddl)
+        throw "Metadata rollback verification failed. IniExists=$iniExists; ControlExists=$controlExists; ShortcutExists=$shortcutExists; DataDirAclMatch=$dataAclMatch."
+    }
     return $true
 }
 
