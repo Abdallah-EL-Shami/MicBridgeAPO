@@ -103,9 +103,9 @@ try {
     $comResult=Invoke-MBInstallComRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
     if(-not $comResult.Success -or -not $comResult.MainTransactionStillPending) { throw 'FAIL: COM executor returned an invalid result' }
     Import-Module $journalModule -Force -Global
-    $comJournal=Read-MBRecoveryJournal -Path $comResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreComCLSID','RestoreComAudioEngineAPO')
+    $comJournal=Read-MBRecoveryJournal -Path $comResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreComCLSID','RestoreComAudioEngineAPO')
     if(@($comJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: COM executor did not complete both registration restores' }
-    $mainAfterCom=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    $mainAfterCom=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
     if($mainAfterCom.Steps[2].State -ne 'Pending') { throw 'FAIL: COM executor incorrectly marked the grouped main rollback step complete' }
 
     $result = Invoke-MBInstallDllRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
@@ -118,11 +118,11 @@ try {
     # The executor's module-scoped dependency imports can shadow the test's
     # imported command binding; re-import in the test scope before assertions.
     Import-Module $journalModule -Force -Global
-    $dllJournal = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreDll')
+    $dllJournal = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreDll')
     if ($dllJournal.Steps[0].State -ne 'Completed' -or $dllJournal.Steps[0].Attempts -ne 1) {
         throw 'FAIL: component journal did not record verified completion'
     }
-    $mainJournal = Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    $mainJournal = Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
     if ($mainJournal.Steps[2].State -ne 'Pending') {
         throw 'FAIL: isolated DLL executor incorrectly marked the grouped main rollback step complete'
     }
@@ -148,7 +148,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
     ) -Wait -PassThru
     if ($childProcess.ExitCode -ne 0) { throw "FAIL: fresh-process executor re-entry failed with exit code $($childProcess.ExitCode)" }
 
-    $after = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -RegistryHive HKCU -ExpectedStepIds @('RestoreDll')
+    $after = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreDll')
     if ($after.Steps[0].State -ne 'Completed' -or $after.Steps[0].Attempts -ne 1) {
         throw 'FAIL: fresh-process idempotent re-entry repeated the DLL restore side effect'
     }
