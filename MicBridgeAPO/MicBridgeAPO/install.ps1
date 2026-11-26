@@ -363,6 +363,15 @@ if ($shortcutExisted) {
 }
 $controlPath = Join-Path $dataDir 'control.ini'
 $controlSddl = if (Test-Path -LiteralPath $controlPath) { (Get-Acl -LiteralPath $controlPath).Sddl } else { $null }
+$iniPackageSource = Join-Path $PSScriptRoot 'MicBridge.ini'
+if (-not (Test-Path -LiteralPath $iniPackageSource -PathType Leaf)) { throw "Required MicBridge.ini package file is missing: $iniPackageSource" }
+$iniNewSha256 = (Get-FileHash -LiteralPath $iniPackageSource -Algorithm SHA256 -ErrorAction Stop).Hash
+$controlTemplate = "[Control]`r`nEnabled=1`r`n"
+$controlTemplateBytes = [Text.Encoding]::ASCII.GetBytes($controlTemplate)
+$sha256Provider = [Security.Cryptography.SHA256]::Create()
+try { $controlNewSha256 = [BitConverter]::ToString($sha256Provider.ComputeHash($controlTemplateBytes)).Replace('-','') } finally { $sha256Provider.Dispose() }
+$iniOriginalSha256 = if (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -PathType Leaf) { (Get-FileHash -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -Algorithm SHA256).Hash } else { $null }
+$controlOriginalSha256 = if (Test-Path -LiteralPath $controlPath -PathType Leaf) { (Get-FileHash -LiteralPath $controlPath -Algorithm SHA256).Hash } else { $null }
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
 $transactionState = [pscustomobject]@{
     DeviceId = $dev.Id
@@ -383,13 +392,18 @@ $transactionState = [pscustomobject]@{
     DllNewSha256 = $dllSourceHash
     DllReplacementStarted = $false
     IniExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))
+    IniOriginalSha256 = $iniOriginalSha256
+    IniNewSha256 = $iniNewSha256
     ControlExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'control.ini'))
+    ControlOriginalSha256 = $controlOriginalSha256
+    ControlNewSha256 = $controlNewSha256
     DataDirSddl = $dataDirSddl
     ControlSddl = $controlSddl
     InstallFiles = $installFilesBackup
     ShortcutExisted = $shortcutExisted
     ShortcutBackup = $shortcutBackup
     ShortcutBackupSha256 = $shortcutBackupSha256
+    ShortcutNewSha256 = $null
     InstallDirExisted = (Test-Path -LiteralPath $installDir)
 }
 if ($transactionState.FxComposite.Exists -and [string]$transactionState.FxComposite.Kind -ne 'MultiString') {
@@ -470,9 +484,15 @@ if ($publishBackup -and (Test-Path -LiteralPath $publishBackup -PathType Leaf)) 
 Write-InstallLog 'INFO' "New DLL atomically published. SHA256=$publishedDllHash"
 foreach ($f in 'MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
 $ini = Join-Path $dataDir 'MicBridge.ini'
-if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot 'MicBridge.ini') $ini }
+if (-not (Test-Path -LiteralPath $ini)) {
+    Copy-Item -LiteralPath $iniPackageSource -Destination $ini -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash -ne [string]$transactionState.IniNewSha256) { throw 'Installed MicBridge.ini does not match the transaction package hash.' }
+}
 $ctrl = Join-Path $dataDir 'control.ini'
-if (-not (Test-Path $ctrl)) { Set-Content $ctrl "[Control]`r`nEnabled=1`r`n" -Encoding ASCII }
+if (-not (Test-Path -LiteralPath $ctrl)) {
+    [IO.File]::WriteAllBytes($ctrl,$controlTemplateBytes)
+    if ((Get-FileHash -LiteralPath $ctrl -Algorithm SHA256).Hash -ne [string]$transactionState.ControlNewSha256) { throw 'Created control.ini does not match the transaction template hash.' }
+}
 & icacls.exe $dataDir /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed for $dataDir with exit code $LASTEXITCODE" }
 & icacls.exe $ctrl /grant '*S-1-5-32-545:M' | Out-Null
@@ -543,7 +563,10 @@ try {
         $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
         $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
         $lnk.Save()
-        # File.Move without overwrite closes the race with another creator.
+        $transactionState.ShortcutNewSha256 = (Get-FileHash -LiteralPath $shortcutTempPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
+        # Persist the expected shortcut hash before publishing it so a fresh
+        # recovery process can safely identify the exact file created by this transaction.
         [IO.File]::Move($shortcutTempPath, $shortcutPath)
         $shortcutHash = (Get-FileHash -LiteralPath $shortcutPath -Algorithm SHA256 -ErrorAction Stop).Hash
         [IO.File]::WriteAllText($shortcutOwnershipFile, $shortcutHash, (New-Object Text.UTF8Encoding($false)))
