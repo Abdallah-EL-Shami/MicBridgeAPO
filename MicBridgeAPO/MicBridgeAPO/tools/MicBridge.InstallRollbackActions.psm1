@@ -1,11 +1,37 @@
 Set-StrictMode -Version Latest
 
+function Get-MBCanonicalPath {
+    param([Parameter(Mandatory)][string]$Path)
+    return [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+}
+
 function Test-MBPathWithinDirectory {
     param([Parameter(Mandatory)][string]$Candidate,[Parameter(Mandatory)][string]$Root)
     try {
-        $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-        $candidateFull = [IO.Path]::GetFullPath($Candidate)
+        $rootFull = (Get-MBCanonicalPath $Root) + [IO.Path]::DirectorySeparatorChar
+        $candidateFull = Get-MBCanonicalPath $Candidate
         return $candidateFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
+function Test-MBNoReparsePath {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$StopAt)
+    try {
+        $pathFull = Get-MBCanonicalPath $Path
+        $stopFull = Get-MBCanonicalPath $StopAt
+        if (-not [string]::Equals($pathFull,$stopFull,[StringComparison]::OrdinalIgnoreCase) -and
+            -not (Test-MBPathWithinDirectory -Candidate $pathFull -Root $stopFull)) { return $false }
+        $current = $pathFull
+        while ($true) {
+            if (Test-Path -LiteralPath $current) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            }
+            if ([string]::Equals($current,$stopFull,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+            $parent = [IO.Directory]::GetParent($current)
+            if (-not $parent) { return $false }
+            $current = $parent.FullName
+        }
     } catch { return $false }
 }
 
@@ -18,11 +44,16 @@ function Test-MBDllSnapshotRestored {
         [string]$OriginalSha256,
         [string]$BackupPath,
         [string]$BackupSha256,
-        [string]$BackupRoot
+        [string]$BackupRoot,
+        [Parameter(Mandatory)][string]$InstallRoot
     )
+    if (-not (Test-MBPathWithinDirectory -Candidate $InstalledDllPath -Root $InstallRoot) -or
+        -not (Test-MBNoReparsePath -Path (Split-Path -Parent $InstalledDllPath) -StopAt $InstallRoot)) { return $false }
     if (-not $DllExisted) { return -not (Test-Path -LiteralPath $InstalledDllPath) }
     if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not (Test-Path -LiteralPath $InstalledDllPath -PathType Leaf)) { return $false }
     try {
+        $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
         return [string]::Equals((Get-FileHash -LiteralPath $InstalledDllPath -Algorithm SHA256 -ErrorAction Stop).Hash,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)
     } catch { return $false }
 }
@@ -36,40 +67,47 @@ function Restore-MBDllSnapshot {
         [string]$OriginalSha256,
         [string]$BackupPath,
         [string]$BackupSha256,
-        [string]$BackupRoot
+        [string]$BackupRoot,
+        [Parameter(Mandatory)][string]$InstallRoot
     )
+    if (-not (Test-MBPathWithinDirectory -Candidate $InstalledDllPath -Root $InstallRoot) -or
+        -not (Test-MBNoReparsePath -Path (Split-Path -Parent $InstalledDllPath) -StopAt $InstallRoot)) {
+        throw 'Installed DLL destination escapes the protected install directory or traverses a reparse point.'
+    }
     if (-not $ReplacementStarted) {
         if (Test-MBDllSnapshotRestored @PSBoundParameters) { return $true }
         throw 'Installed DLL differs from its pre-transaction snapshot although replacement was not started.'
     }
     if (-not $DllExisted) {
-        if (Test-Path -LiteralPath $InstalledDllPath) { Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop }
+        if (Test-Path -LiteralPath $InstalledDllPath) {
+            $item = Get-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $item.PSIsContainer -eq $false) {
+                throw 'Refusing to remove a reparse point or non-file at the installed DLL destination.'
+            }
+            Remove-Item -LiteralPath $InstalledDllPath -Force -ErrorAction Stop
+        }
         if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) { throw 'New DLL removal could not be verified.' }
         return $true
     }
     if ($OriginalSha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Original DLL SHA-256 is missing or malformed.' }
-    # Replaying after a completed copy must succeed even if the backup was subsequently cleaned up.
     if (Test-MBDllSnapshotRestored @PSBoundParameters) { return $true }
     if ($BackupSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
         -not [string]::Equals($BackupSha256,$OriginalSha256,[StringComparison]::OrdinalIgnoreCase)) {
         throw 'DLL backup hash does not match the recorded original DLL snapshot.'
     }
     if ([string]::IsNullOrWhiteSpace($BackupRoot) -or [string]::IsNullOrWhiteSpace($BackupPath) -or
-        -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot)) {
-        throw 'DLL rollback backup path is missing or escapes the protected backup directory.'
+        -not (Test-MBPathWithinDirectory -Candidate $BackupPath -Root $BackupRoot) -or
+        -not (Test-MBNoReparsePath -Path $BackupPath -StopAt $BackupRoot)) {
+        throw 'DLL rollback backup path is missing, traverses a reparse point, or escapes the protected backup directory.'
     }
-    if (-not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) { throw 'DLL rollback backup is missing.' }
+    if (-not (Test-Path -LiteralPath $BackupRoot -PathType Container) -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) { throw 'DLL rollback backup is missing.' }
     $backupItem = Get-Item -LiteralPath $BackupPath -Force -ErrorAction Stop
     if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'DLL rollback backup must not be a reparse point.' }
     $actualBackupHash = (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256 -ErrorAction Stop).Hash
     if (-not [string]::Equals($actualBackupHash,$BackupSha256,[StringComparison]::OrdinalIgnoreCase)) {
         throw 'DLL rollback backup hash mismatch; refusing to restore an unverified binary.'
     }
-    $destinationFull = [IO.Path]::GetFullPath($InstalledDllPath)
-    $backupFull = [IO.Path]::GetFullPath($BackupPath)
-    if ([string]::Equals($destinationFull,$backupFull,[StringComparison]::OrdinalIgnoreCase)) {
-        throw 'DLL rollback source and destination must be different files.'
-    }
+    if (-not (Test-MBNoReparsePath -Path $BackupRoot -StopAt $BackupRoot)) { throw 'DLL backup root must not be a reparse point.' }
     Copy-Item -LiteralPath $BackupPath -Destination $InstalledDllPath -Force -ErrorAction Stop
     if (-not (Test-MBDllSnapshotRestored @PSBoundParameters)) {
         throw 'Restored DLL hash does not match the durable pre-transaction snapshot.'
