@@ -52,7 +52,7 @@ namespace MicBridge.LegacyFileHandleLease {
             FileIdentity = info.VolumeSerialNumber.ToString("X8") + ":" +
                 info.FileIndexHigh.ToString("X8") + info.FileIndexLow.ToString("X8");
             Length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
-            stream = new FileStream(handle, FileAccess.Read, 4096, true);
+            stream = new FileStream(handle, FileAccess.Read, 4096, false);
             using (SHA256 sha = SHA256.Create()) {
                 byte[] digest = sha.ComputeHash(stream);
                 Sha256 = BitConverter.ToString(digest).Replace("-", "");
@@ -112,12 +112,14 @@ namespace MicBridge.LegacyFileHandleLease {
                         throw new InvalidOperationException("Opened file handle resolves outside the audited installation root.");
                     var lease = new Lease(file, candidateFinal, fi);
                     file = null;
-                    if (!String.Equals(lease.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Opened file handle hash differs from signed approval.");
-                    if (!String.IsNullOrEmpty(expectedIdentity) &&
-                        !String.Equals(lease.FileIdentity, expectedIdentity, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Opened file identity differs from the approved identity.");
-                    return lease;
+                    try {
+                        if (!String.Equals(lease.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("Opened file handle hash differs from signed approval.");
+                        if (!String.IsNullOrEmpty(expectedIdentity) &&
+                            !String.Equals(lease.FileIdentity, expectedIdentity, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("Opened file identity differs from the approved identity.");
+                        return lease;
+                    } catch { lease.Dispose(); throw; }
                 } finally { if (file != null) file.Dispose(); }
             }
         }
