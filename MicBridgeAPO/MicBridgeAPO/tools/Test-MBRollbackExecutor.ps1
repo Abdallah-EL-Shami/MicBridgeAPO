@@ -181,6 +181,39 @@ try {
         throw 'FAIL: isolated DLL executor incorrectly marked the grouped main rollback step complete'
     }
 
+    # Simulate a process death after one side effect inside the grouped main
+    # step. The child marks the step Running, restores the support files, then
+    # terminates before Invoke-MBRecoveryStep can write Completed. New config
+    # files deliberately remain so the fresh executor must replay the group.
+    [IO.File]::WriteAllText((Join-Path $install 'MicBridgeUI.ps1'),'published:MicBridgeUI.ps1')
+    [IO.File]::Copy($iniPackageFixture,(Join-Path $data 'MicBridge.ini'))
+    [IO.File]::Copy($controlPackageFixture,(Join-Path $data 'control.ini'))
+    [IO.File]::Copy($shortcutPackageFixture,(Join-Path $desktop 'MicBridge.lnk'))
+    $crashScript=Join-Path $tx 'full-rollback-interruption-child.ps1'
+    $crashSource=@'
+param([string]$JournalModule,[string]$FileRollbackModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
+$ErrorActionPreference='Stop'
+Import-Module $JournalModule -Force
+Import-Module $FileRollbackModule -Force
+$state=Get-Content -LiteralPath (Join-Path $TransactionDirectory 'state.json') -Raw | ConvertFrom-Json
+$steps=@('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+$action={
+    Restore-MBInstallSupportFiles -State $state -TransactionDirectory $TransactionDirectory -InstallDirectory $InstallDirectory | Out-Null
+    Stop-Process -Id $PID -Force
+}.GetNewClosure()
+$verify={ $false }
+Invoke-MBRecoveryStep -Path (Join-Path $TransactionDirectory 'rollback-recovery.json') -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$DeviceId) -ExpectedStepIds $steps -Action $action -Verify $verify
+'@
+    [IO.File]::WriteAllText($crashScript,$crashSource,(New-Object Text.UTF8Encoding($false)))
+    $crashProcess=Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',$crashScript,
+        $journalModule,(Join-Path $PSScriptRoot 'MicBridge.InstallFileRollback.psm1'),$tx,$data,$install,$device.ToString('D')
+    ) -Wait -PassThru
+    if($crashProcess.ExitCode -eq 0) { throw 'FAIL: interruption child unexpectedly completed the main rollback step' }
+    Import-Module $journalModule -Force -Global
+    $interruptedMain=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    if($interruptedMain.Steps[2].State -ne 'Running' -or $interruptedMain.Steps[2].Attempts -ne 1) { throw 'FAIL: process death did not leave the grouped rollback step Running' }
+
     # Run the complete main transaction journal after the isolated components
     # have proven idempotent re-entry. Restore endpoint FX values and ACLs too.
     $fullResult=Invoke-MBInstallFullRollback -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -DesktopDirectory $desktop -ExpectedDeviceId $device -RegistryHive HKCU
