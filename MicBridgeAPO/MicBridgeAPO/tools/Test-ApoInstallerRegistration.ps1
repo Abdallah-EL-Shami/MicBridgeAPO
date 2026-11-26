@@ -278,7 +278,12 @@ $checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison
 if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $checkpointPosition) {
     throw 'FAIL: legacy audit must run before the restore point and all installation mutations'
 }
-$repoRoot = Split-Path -Parent $root
+$repoRoot = $root
+while (-not (Test-Path -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -PathType Leaf)) {
+    $parent = Split-Path -Parent $repoRoot
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $repoRoot) { throw 'FAIL: could not locate repository .github/workflows/build.yml' }
+    $repoRoot = $parent
+}
 $workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -Raw
 Assert-Contains $workflow 'MicBridge.LegacyInstallAudit.psm1' 'Build package stages the legacy audit module beside the installer'
 
