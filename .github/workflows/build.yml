@@ -27,17 +27,25 @@ jobs:
           $package = 'MicBridgeAPO-Package'
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item 'build/Release/MicBridgeAPO.dll' $package
-          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/MicBridge.RecoveryJournal.psm1')
+          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1')
           foreach ($file in $files) {
             $path = Join-Path $source $file
             if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }
             Copy-Item -LiteralPath $path -Destination $package
           }
-          Get-ChildItem $package | Select-Object Name,Length | Format-Table -AutoSize
+          # The installer imports this module from $PSScriptRoot\tools.
+          # Keep the same relative layout in the staged package.
+          $toolsPackage = Join-Path $package 'tools'
+          New-Item -ItemType Directory -Force -Path $toolsPackage | Out-Null
+          $recoveryModule = Join-Path $source 'tools/MicBridge.RecoveryJournal.psm1'
+          if (-not (Test-Path -LiteralPath $recoveryModule -PathType Leaf)) { throw "Required recovery module missing: $recoveryModule" }
+          Copy-Item -LiteralPath $recoveryModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.RecoveryJournal.psm1') -PathType Leaf)) { throw 'Recovery module was not staged in the required tools directory.' }
+          Get-ChildItem $package -Recurse | Select-Object FullName,Length | Format-Table -AutoSize
       - uses: actions/upload-artifact@v4
         with:
           name: MicBridgeAPO-Install-Package
-          path: MicBridgeAPO-Package/*
+          path: MicBridgeAPO-Package/**
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@v4
