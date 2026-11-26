@@ -74,6 +74,7 @@ function Restore-MBDllSnapshot {
         [string]$BackupPath,
         [string]$BackupSha256,
         [string]$BackupRoot,
+        [string]$NewDllSha256,
         [Parameter(Mandatory)][string]$InstallRoot
     )
     if (-not (Test-MBPathWithinDirectory -Candidate $InstalledDllPath -Root $InstallRoot) -or
