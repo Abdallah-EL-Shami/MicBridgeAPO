@@ -269,7 +269,7 @@ Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
 Assert-Contains $installer 'MicBridge.LegacyInstallAudit.psm1' 'Installer loads the read-only legacy installation audit'
 Assert-Contains $installer 'Test-MBLegacyInstallationState' 'Installer audits legacy backup, COM registration, and file provenance before upgrade'
 Assert-Contains $installer "Outcome -ne 'NoLegacyResidueDetected'" 'Installer blocks both ambiguous and inventory-only legacy state until its original Windows baseline can be established'
-Assert-Contains $legacyAuditModule 'Hashes establish integrity only against the manifest; they cannot prove' 'Legacy audit distinguishes file integrity from proof of an original Windows baseline'
+Assert-Contains $legacyAuditModule 'Hashes establish integrity only against the\\s+manifest; they cannot prove' 'Legacy audit distinguishes file integrity from proof of an original Windows baseline'
 Assert-Contains $installer 'BaselineAssessment=\$\(\$legacyAudit\.BaselineAssessment\)' 'Installer records the legacy baseline assessment in its diagnostics'
 $auditPosition = $installer.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
 $checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison]::Ordinal)
