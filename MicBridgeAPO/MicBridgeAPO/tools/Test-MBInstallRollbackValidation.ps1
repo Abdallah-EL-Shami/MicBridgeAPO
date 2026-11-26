@@ -37,6 +37,8 @@ try {
         ApoRegSha256=$null
         DllExisted=$false
         DllOriginalSha256=$null
+        DllNewSha256=('A' * 64)
+        DllReplacementStarted=$false
         IniExisted=$false
         ControlExisted=$false
         DataDirSddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
@@ -50,6 +52,11 @@ try {
 
     $valid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if (-not $valid.IsValid -or -not $valid.ReplaySafe) { throw "FAIL: valid fixture rejected: $($valid.Errors -join '; ')" }
+
+    $missingNewDllHash = $state.PSObject.Copy()
+    $missingNewDllHash.DllNewSha256 = 'bad-hash'
+    $invalidNewDllHash = Test-MBInstallRollbackSnapshot -State $missingNewDllHash -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if ($invalidNewDllHash.IsValid -or -not ($invalidNewDllHash.Errors -match 'package DLL SHA-256')) { throw 'FAIL: malformed new DLL hash accepted' }
 
     $wrongDevice = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId ([guid]::NewGuid())
     if ($wrongDevice.IsValid) { throw 'FAIL: wrong device identity accepted' }
