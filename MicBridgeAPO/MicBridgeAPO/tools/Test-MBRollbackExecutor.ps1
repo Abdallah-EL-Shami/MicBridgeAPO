@@ -74,6 +74,9 @@ try {
         throw 'FAIL: executor did not restore the previous DLL bytes'
     }
 
+    # The executor's module-scoped dependency imports can shadow the test's
+    # imported command binding; re-import in the test scope before assertions.
+    Import-Module $journalModule -Force -Global
     $dllJournal = Read-MBRecoveryJournal -Path $result.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreDll')
     if ($dllJournal.Steps[0].State -ne 'Completed' -or $dllJournal.Steps[0].Attempts -ne 1) {
         throw 'FAIL: component journal did not record verified completion'
