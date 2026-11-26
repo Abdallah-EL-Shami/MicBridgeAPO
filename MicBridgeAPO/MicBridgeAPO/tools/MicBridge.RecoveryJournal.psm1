@@ -84,7 +84,7 @@ function Restore-MBRecoveryPreviousJournal {
         $writeLock = New-Object IO.FileStream("$Path.write.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         $primaryArgs = @{ Path=$Path; NoPreviousFallback=$true }
         if ($ExpectedOperation) { $primaryArgs.ExpectedOperation=$ExpectedOperation }
-        if ($ExpectedDeviceId -ne [guid]::Empty) { $primaryArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($null -ne $ExpectedDeviceId -and $ExpectedDeviceId -ne [guid]::Empty) { $primaryArgs.ExpectedDeviceId=$ExpectedDeviceId }
         if (@($ExpectedStepIds).Count -gt 0) { $primaryArgs.ExpectedStepIds=$ExpectedStepIds }
         try {
             # A writer may have repaired/replaced the primary while we waited.
@@ -99,7 +99,7 @@ function Restore-MBRecoveryPreviousJournal {
         }
         $fallbackArgs = @{ Path=$previousPath; NoPreviousFallback=$true }
         if ($ExpectedOperation) { $fallbackArgs.ExpectedOperation=$ExpectedOperation }
-        if ($ExpectedDeviceId -ne [guid]::Empty) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
+        if ($null -ne $ExpectedDeviceId -and $ExpectedDeviceId -ne [guid]::Empty) { $fallbackArgs.ExpectedDeviceId=$ExpectedDeviceId }
         if (@($ExpectedStepIds).Count -gt 0) { $fallbackArgs.ExpectedStepIds=$ExpectedStepIds }
         $fallback = Read-MBRecoveryJournal @fallbackArgs
         $directory = Split-Path -Parent $Path
