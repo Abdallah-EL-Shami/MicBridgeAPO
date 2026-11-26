@@ -45,7 +45,8 @@ function Test-MBRegistryExportSnapshot {
     param(
         [Parameter(Mandatory)][string]$RegistryPath,
         [Parameter(Mandatory)][string]$ExpectedSha256,
-        [Parameter(Mandatory)][string]$TemporaryDirectory
+        [Parameter(Mandatory)][string]$TemporaryDirectory,
+        [scriptblock]$ExportAction
     )
     if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}    [CmdletBinding()]
     param(
@@ -177,8 +178,13 @@ Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExp
 
     $temporaryExport = Join-Path $TemporaryDirectory ('verify-' + [guid]::NewGuid().ToString('N') + '.reg')
     try {
-        & reg.exe export $RegistryPath $temporaryExport /y | Out-Null
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryExport -PathType Leaf)) { return $false }
+        if ($ExportAction) {
+            $exportSucceeded = [bool](& $ExportAction $RegistryPath $temporaryExport)
+        } else {
+            & reg.exe export $RegistryPath $temporaryExport /y | Out-Null
+            $exportSucceeded = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $exportSucceeded -or -not (Test-Path -LiteralPath $temporaryExport -PathType Leaf)) { return $false }
         $actualHash = (Get-FileHash -LiteralPath $temporaryExport -Algorithm SHA256 -ErrorAction Stop).Hash
         return [string]::Equals($actualHash,$ExpectedSha256,[StringComparison]::OrdinalIgnoreCase)
     } catch {
