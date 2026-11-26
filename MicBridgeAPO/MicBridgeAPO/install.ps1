@@ -85,6 +85,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
         if (-not $recoveryResult.Success) {
             throw "Interrupted MicBridge rollback did not complete. Preserve the transaction directory: $pendingTransactionDirectory"
         }
+        Import-Module -Name $recoveryModule -Force -Global -ErrorAction Stop
         $verifiedJournal = Read-MBRecoveryJournal -Path $pendingJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $pendingDeviceId -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
         if (@($verifiedJournal.Steps | Where-Object { $_.State -ne 'Completed' }).Count -gt 0) {
             throw "Full rollback executor returned without completing every main step. Preserve: $pendingTransactionDirectory"
@@ -634,6 +635,7 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             Import-Module -Name $fullRollbackModule -Force -ErrorAction Stop
             $rollbackResult = Invoke-MBInstallFullRollback -TransactionDirectory (Split-Path -Parent $transactionStateFile) -DataDirectory $dataDir -InstallDirectory $installDir -ExpectedDeviceId $rollbackDeviceId
             if (-not $rollbackResult.Success) { throw 'Full rollback executor did not report success.' }
+            Import-Module -Name $recoveryModule -Force -Global -ErrorAction Stop
             $verifiedRollbackJournal = Read-MBRecoveryJournal -Path $catchJournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
             if (@($verifiedRollbackJournal.Steps | Where-Object { $_.State -ne 'Completed' }).Count -gt 0) {
                 throw 'Full rollback executor returned before every durable main step reached Completed.'
