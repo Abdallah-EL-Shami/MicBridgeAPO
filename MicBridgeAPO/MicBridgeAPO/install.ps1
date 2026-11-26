@@ -332,9 +332,16 @@ if (Test-Path -LiteralPath $installedDll) {
     $dllBackupPath = Join-Path $dllBackupDir ("MicBridgeAPO-{0}.dll" -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     Copy-Item -LiteralPath $installedDll -Destination $dllBackupPath -ErrorAction Stop
     $dllBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
+    # Persist rollback-critical DLL provenance before replacing the installed binary.
+    $transactionState.DllBackupPath = $dllBackupPath
+    $transactionState.DllBackupSha256 = $dllBackupHash
+    $transactionState.DllReplacementStarted = $false
+    Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
     Write-InstallLog 'INFO' "Previous DLL backed up to '$dllBackupPath'. SHA256=$dllBackupHash"
 }
 $dllReplacementStarted = $true
+$transactionState.DllReplacementStarted = $true
+Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 Copy-Item -LiteralPath $DllSource -Destination $installedDll -Force -ErrorAction Stop
 Write-InstallLog 'INFO' "New DLL copied. SHA256=$((Get-FileHash -LiteralPath $installedDll -Algorithm SHA256).Hash)"
 foreach ($f in 'MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat') { if (Test-Path (Join-Path $PSScriptRoot $f)) { Copy-Item (Join-Path $PSScriptRoot $f) $installDir -Force } }
@@ -428,16 +435,31 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     if ($transactionStateFile -and (Test-Path -LiteralPath $transactionStateFile)) {
         try {
             Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
-                        if ($dllReplacementStarted -and $dllBackupPath -and $dllBackupHash -and (Test-Path -LiteralPath $dllBackupPath)) {
-                            try {
-                                $actualBackupHash = (Get-FileHash -LiteralPath $dllBackupPath -Algorithm SHA256).Hash
-                                if ($actualBackupHash -ne $dllBackupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
-                                Copy-Item -LiteralPath $dllBackupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
-                                Write-InstallLog 'WARN' "Previous DLL restored from '$dllBackupPath'."
-                            } catch { Write-InstallLog 'CRITICAL' "DLL restoration failed: $($_.Exception.ToString())" }
+                        # Reload the durable snapshot: process-local variables are not recovery evidence.
+                        $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                        if ([bool]$tx.DllReplacementStarted) {
+                            $backupPath = [string]$tx.DllBackupPath
+                            $backupHash = [string]$tx.DllBackupSha256
+                            if ([bool]$tx.DllExisted) {
+                                $backupRoot = [IO.Path]::GetFullPath((Join-Path $dataDir 'dll-backups') + [IO.Path]::DirectorySeparatorChar)
+                                if ([string]::IsNullOrWhiteSpace($backupPath) -or -not [IO.Path]::GetFullPath($backupPath).StartsWith($backupRoot,[StringComparison]::OrdinalIgnoreCase)) {
+                                    throw 'DLL rollback backup path is missing or outside the protected backup directory.'
+                                }
+                                if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf) -or [string]::IsNullOrWhiteSpace($backupHash)) {
+                                    throw 'DLL rollback backup or its recorded hash is missing; refusing to continue.'
+                                }
+                                $actualBackupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash
+                                if ($actualBackupHash -ne $backupHash) { throw 'DLL backup hash mismatch; refusing to restore an unverified backup.' }
+                                Copy-Item -LiteralPath $backupPath -Destination (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction Stop
+                                if ((Get-FileHash -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Algorithm SHA256).Hash -ne $backupHash) {
+                                    throw 'Restored DLL hash does not match the durable pre-install backup hash.'
+                                }
+                                Write-InstallLog 'INFO' "Previous DLL restored from verified backup '$backupPath'."
+                            } else {
+                                Remove-Item -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Force -ErrorAction SilentlyContinue
+                            }
                         }
                         # Roll back this installation attempt to the immediately preceding installed state.
-                            $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
                             $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
                             Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
                             Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
