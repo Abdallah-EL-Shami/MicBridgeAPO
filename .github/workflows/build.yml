@@ -70,6 +70,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $endpointRollbackModule -PathType Leaf)) { throw "Required endpoint rollback module missing: $endpointRollbackModule" }
           Copy-Item -LiteralPath $endpointRollbackModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.EndpointRegistryRollback.psm1') -PathType Leaf)) { throw 'Endpoint rollback module was not staged in the required tools directory.' }
+          $legacyAuditModule = Join-Path $source 'tools/MicBridge.LegacyInstallAudit.psm1'
+          if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) { throw "Required legacy audit module missing: $legacyAuditModule" }
+          Copy-Item -LiteralPath $legacyAuditModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.LegacyInstallAudit.psm1') -PathType Leaf)) { throw 'Legacy audit module was not staged in the required tools directory.' }
           $aclRollbackModule = Join-Path $source 'tools/MicBridge.RegistryAclRollback.psm1'
           if (-not (Test-Path -LiteralPath $aclRollbackModule -PathType Leaf)) { throw "Required ACL rollback module missing: $aclRollbackModule" }
           Copy-Item -LiteralPath $aclRollbackModule -Destination $toolsPackage
