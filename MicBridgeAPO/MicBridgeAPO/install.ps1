@@ -267,13 +267,16 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 }
 Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
-if ($legacyAudit.Outcome -eq 'ReviewRequired') {
-    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
+if ($legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
+    # InventoryOnly is not permission to upgrade: a structurally valid legacy
+    # backup and matching hashes do not prove that it captured the original
+    # Windows state before an older MicBridge release changed the machine.
+    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup','MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate','MicBridgeRecoveryEvidence','StructurallyValidCandidate') })
     $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
-    Write-InstallLog 'CRITICAL' "Read-only legacy installation audit requires manual review. BaselineAssessment=$($legacyAudit.BaselineAssessment). $reviewSummary"
-    throw "Legacy installation state is ambiguous or its permanent pre-install backup is insufficient. No upgrade changes were made. Preserve ProgramData and install folders for review. $reviewSummary"
+    Write-InstallLog 'CRITICAL' "Read-only legacy installation audit requires manual review. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment). $reviewSummary"
+    throw "Legacy MicBridge artifacts were detected or the original Windows baseline cannot be established. Upgrade stopped without cleanup or system changes. Preserve ProgramData and install folders for manual review. $reviewSummary"
 }
-Write-InstallLog 'INFO' "Read-only legacy audit passed with Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment). Original Windows baseline is not claimed as proven."
+Write-InstallLog 'INFO' 'Read-only legacy audit found no MicBridge residue; proceeding with a first-install snapshot.'
 
 # ---- 2) نقطة استعادة (قد تفشل، لا بأس)
 try { Checkpoint-Computer -Description 'قبل MicBridge APO' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host 'تم إنشاء نقطة استعادة' }
