@@ -559,6 +559,7 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -Exp
         }
         # The decision is complete; remove only the verified regular ownership marker.
         Remove-Item -LiteralPath $shortcutOwnershipFile -Force -ErrorAction Stop
+        Write-UninstallLog 'INFO' "Removed MicBridge shortcut ownership marker: '$shortcutOwnershipFile'."
     }
 } -Verify {
     -not (Test-Path -LiteralPath $shortcutOwnershipFile)
@@ -574,6 +575,7 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -Expec
     $audioService = Get-Service -Name Audiosrv -ErrorAction Stop
     (Test-Path -LiteralPath $serviceRestartMarker -PathType Leaf) -and ($audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running)
 }
+Write-UninstallLog 'INFO' 'Audio service restart step completed and verified.'
 
 $preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists)
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
@@ -599,4 +601,4 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveInstallDirectory' -Ex
     if ($operationLock) { $operationLock.Dispose() }
 }
 Write-UninstallLog 'INFO' 'Uninstall completed. ProgramData settings and diagnostic logs were retained.'
-Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."
+Write-Host "تمت الإزالة. الإعدادات والسجلات محفوظة في $dataDir. سجل الإزالة: $uninstallLog"
