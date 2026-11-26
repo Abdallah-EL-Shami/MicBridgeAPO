@@ -23,7 +23,6 @@ $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir    = Join-Path $env:ProgramData  'MicBridgeAPO'
 $backupFile = Join-Path $dataDir 'backup.json'
 $compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
-$audioKey   = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
 
@@ -410,21 +409,14 @@ if (Test-Path $backupFile) {
         Test-MBEndpointValueSnapshot -DeviceSubKey $devSub -LegacyValueName $fxValue -AssociationValueName $fxAssociationValue -CompositeValueName $fxCompositeValue -Clsid $clsid -Backup $b -CompositeBackupPath $compositeBackupFile
     }
 
-    if ($b.PSObject.Properties.Name -contains 'PrevDisableProtectedAudioDG') {
-        Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreWindowsAudioSetting' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
-            if ($null -ne $b.PrevDisableProtectedAudioDG) {
-                Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value ([int]$b.PrevDisableProtectedAudioDG) -Type DWord
-            } else {
-                Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue
-            }
-        } -Verify {
-            Test-MBRegistryDwordSnapshot -SubKey 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Audio' -ValueName 'DisableProtectedAudioDG' -ExpectedExists ($null -ne $b.PrevDisableProtectedAudioDG) -ExpectedValue $b.PrevDisableProtectedAudioDG
-        }
-    } else {
-        Write-Warning 'Backup has no DisableProtectedAudioDG snapshot; leaving the current Windows audio security setting unchanged.'
+    # Older releases saved this value from the wrong registry path. It is not a
+    # trustworthy snapshot of the real Windows setting, so never restore/delete it.
+    Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreWindowsAudioSetting' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
+        Write-Warning 'Leaving DisableProtectedAudioDG unchanged: legacy backup data is not a trustworthy snapshot.'
+    } -Verify {
+        return $true
     }
 
-    # Restore endpoint ACLs as a durable, independently verifiable recovery step.
     Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreEndpointAcl' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
         if ($b.FxKeySddl -and (Test-Path $fxPath)) { Restore-Sddl $fxSub $b.FxKeySddl }
         Restore-Sddl $devSub $b.DevKeySddl
