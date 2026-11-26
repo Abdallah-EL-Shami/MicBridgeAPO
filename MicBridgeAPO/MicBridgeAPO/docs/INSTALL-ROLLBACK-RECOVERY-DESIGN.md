@@ -16,10 +16,11 @@ Status: design only; not an implementation or release-readiness claim.
   installer process cannot call that action independently.
 - The `RestorePreviousInstallState` action restores DLL, COM registrations,
   installer-owned files, shortcut, ProgramData ACLs, and configuration in one
-  large callback. The current catch path also attempts an audio-service restart;
-  this must be reviewed separately and is not evidence of crash-safe rollback.
-  The journal can mark a step incomplete after a process crash, but there is no
-  transaction-level startup replay implementation.
+  large callback. It is not a durable, process-independent executor.
+- The rollback catch path deliberately does **not** restart or otherwise control
+  `Audiosrv`. Audio-service control is outside the rollback contract and must
+  remain out of any recovery executor. The journal can mark a step incomplete
+  after a process crash, but there is no transaction-level startup replay.
 - The durable transaction snapshot is written before the installation
   mutations. DLL backup provenance is appended later, immediately before the
   DLL replacement boundary. A replay implementation must treat a missing or
@@ -37,29 +38,38 @@ Status: design only; not an implementation or release-readiness claim.
      durable DLL backup directory).
    - Verify every required backup exists and matches its recorded SHA-256.
    - Validate COM export headers/root keys and hashes before any mutation.
-   - If any check fails, stop without changing Registry, ACLs, files, or service.
+   - If any check fails, stop without changing Registry, ACLs, or files.
 
 2. **Replay as small, independently journaled idempotent steps.**
-   Suggested ordered steps:
-   - RestoreEndpointValues
+   Proposed ordered steps:
+   - RestoreEndpointFxValues
    - RestoreEndpointAcl
-   - RestoreComRegistration
+   - RestoreComClsidRegistration
+   - RestoreAudioEngineApoRegistration
    - RestoreDll
-   - RestoreInstallerFilesAndShortcut
-   - RestoreProgramDataAclAndConfig
+   - RestoreInstallerFiles
+   - RestoreShortcut
+   - RestoreProgramDataAcl
+   - RestoreConfiguration
    - VerifyPreviousState
-   - RestartAudioService (only if the rollback contract requires it)
+
    Each step must use the journal's Action/Verify protocol. An incomplete step
    may be re-entered after a crash; its action must converge on the snapshot
-   rather than toggle or delete unrelated state.
+   rather than toggle or delete unrelated state. The existing three-step
+   journal must not be reinterpreted as this new plan: old or unknown schemas
+   remain fail-closed until an explicit compatibility path is implemented.
 
-3. **Ownership and scope constraints.**
+3. **Executor contract and ownership boundaries.**
+   - The executor accepts only a transaction directory and a validated durable
+     snapshot/journal; it must not depend on callbacks captured by the installer.
+   - Dispatch is by a fixed allow-list of step IDs implemented inside the
+     executor. Never deserialize or evaluate script text from the journal.
    - Registry writes/deletes must be limited to the exact endpoint and MicBridge
      CLSID/APO keys recorded by this transaction.
    - Preserve vendor EFX entries that appeared after the snapshot unless the
      transaction can prove they were introduced by this install attempt.
    - Restore ACLs only from the transaction's validated SDDL snapshot.
-   - Never alter AudioDG protection settings.
+   - Never alter AudioDG protection settings or control `Audiosrv`.
    - Do not remove a directory that contains files not owned by this transaction.
    - Do not delete snapshots or journals until every verification step succeeds.
 
@@ -74,16 +84,15 @@ Status: design only; not an implementation or release-readiness claim.
 - Unit tests for malformed/missing state, wrong endpoint GUID, path traversal,
   backup hash mismatch, malformed COM export, and stale/foreign transaction.
 - Child-process crash injection after each external effect but before journal
-  completion, followed by a fresh-process replay.
+  completion, followed by a fresh-process replay that reads only durable files.
 - Re-running a completed step must not change the restored state.
-- Tests must distinguish mocked Registry/ACL/service effects from real Windows
-  integration tests. A marker standing in for a service restart is not evidence
-  that Audiosrv was restarted.
+- Exercise every executor step independently in temporary directories and
+  HKCU-only registry fixtures; do not use real endpoint HKLM state in unit tests.
 - CI parser tests and all existing installer/uninstaller tests must pass.
 
 ## Release gate
 
 Do not enable automatic replay, remove the startup fail-closed guard, publish
 an install artifact as release-ready, or ask the user to install until the
-preflight, replay, crash-injection, verification, and artifact checks above
+preflight, executor, crash-injection, verification, and artifact checks above
 are implemented and green.
