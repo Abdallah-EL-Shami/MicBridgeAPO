@@ -192,17 +192,24 @@ release did not already leave incorrect changes behind.
   install/data directories. It does not mutate Registry, files, ACLs, or
   services; it never claims that the original Windows baseline is proven and
   always reports `CleanupAllowed = false`.
-- Added an HKCU/temp-only audit test and a Windows CI step. The test checks
-  candidate discovery and confirms that Registry values and file hashes remain
-  unchanged. This audit is currently a standalone diagnostic module; it is not
-  yet called by install.ps1 and is not staged into the install package.
+- The audit now validates the permanent `backup.json` schema, endpoint identity,
+  fixed COM backup paths, hashes and Registry roots, plus the composite EFX
+  backup schema. It distinguishes a structurally valid backup candidate from
+  proof of the true Windows baseline; it never asserts the latter.
+- `install.ps1` and `uninstall.ps1` now call this read-only audit before their
+  restore-point/recovery-plan and Registry/COM/file mutation phases. Both stop
+  on ambiguous legacy state and preserve the files for manual review. The module
+  is staged in the install package. No cleanup or automatic repair is performed.
+- HKCU/temp-only tests cover missing backup, valid candidate backup, endpoint
+  mismatch, tampered COM export, unknown install files, and no mutation of
+  Registry/file state.
 - Hardened transaction preflight so a hash-valid COM export must also have the
   Windows Registry Editor header, contain the exact fixed MicBridge CLSID or
   AudioEngine APO root, and contain no key outside that root or its children.
   Added a test that rejects an export containing an unrelated CLSID key.
-- These changes do not yet constitute a legacy cleanup routine or a durable
-  COM replay executor. Do not infer that COM rollback is complete from export
-  validation or the isolated registry import primitive.
+- These changes do not constitute a legacy cleanup routine. A structurally
+  valid permanent backup remains evidence, not cryptographic proof of the
+  original Windows state. Do not delete or rewrite it automatically.
 
 ## COM recovery prototype (isolated, not yet wired into installer)
 
@@ -217,12 +224,12 @@ release did not already leave incorrect changes behind.
 - Added `MicBridge.ComRegistrationExecutor.psm1` with a separate durable
   component journal. It deliberately leaves the existing three-step main
   transaction journal pending; it does not claim the entire rollback is done.
-- Added HKCU-only tests for restoration of pre-existing CLSID/APO keys, removal
-  of keys absent from the snapshot, idempotence, tampered snapshot rejection,
-  foreign CLSID preservation, and child-process termination after the Registry
-  side effect followed by fresh-process journal resume.
-- The COM executor is not yet called by `install.ps1` or startup recovery, and
-  is not yet staged into the installer package. Its HKCU action tests do not
-  constitute permission to run production writes against HKLM. The executor's
-  complete transaction preflight still needs an isolated test strategy before
-  integration. Do not install this branch yet.
+- HKCU-only action tests cover restoration of pre-existing CLSID/APO keys,
+  removal of keys absent from the snapshot, idempotence, tampered snapshot
+  rejection, foreign CLSID preservation, and child-process termination after
+  the Registry side effect followed by fresh-process journal resume.
+- The executor is still not called by `install.ps1` or startup recovery and is
+  not staged into the installer package. A full-transaction HKCU fixture has
+  now been added to the durable executor test, including fresh-process re-entry;
+  CI is the remaining verification gate. Production defaults remain HKLM and
+  have not been exercised by tests. Do not install this branch yet.
