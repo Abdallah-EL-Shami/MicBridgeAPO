@@ -19,6 +19,13 @@ try {
         $writeBlocked = $false
         try { [IO.File]::WriteAllBytes($dll,[byte[]](2,4,6)) } catch { $writeBlocked = $true }
         if (-not $writeBlocked) { throw 'FAIL: another writer modified a file while exclusive lease was held.' }
+        $renameBlocked = $false
+        $movedPath = Join-Path $root 'MicBridgeAPO.renamed.dll'
+        try { [IO.File]::Move($dll,$movedPath) } catch { $renameBlocked = $true }
+        if (-not $renameBlocked) {
+            [IO.File]::Move($movedPath,$dll)
+            throw 'FAIL: file was renamed while exclusive lease was held.'
+        }
         $wrongHashRejected = $false
         try {
             Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
