@@ -27,7 +27,11 @@ try {
         FxSddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
         FxKeyExisted=$true
         ClsidRegExisted=$false
+        ClsidRegBackup=$null
+        ClsidRegSha256=$null
         ApoRegExisted=$false
+        ApoRegBackup=$null
+        ApoRegSha256=$null
         DllExisted=$false
         DllOriginalSha256=$null
         IniExisted=$false
@@ -57,11 +61,19 @@ try {
     $hashMismatch = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if ($hashMismatch.IsValid -or -not ($hashMismatch.Errors -match 'hash')) { throw 'FAIL: modified backup accepted' }
 
+    $clsidExport = Join-Path $tx 'clsid.reg'
+    [IO.File]::WriteAllText($clsidExport,'Windows Registry Editor Version 5.00')
     $state.ClsidRegExisted = $true
-    $comUntrusted = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
-    if ($comUntrusted.IsValid -or -not ($comUntrusted.Errors -match 'COM registration snapshot lacks')) { throw 'FAIL: COM snapshot without durable hash was accepted' }
+    $state.ClsidRegBackup = $clsidExport
+    $state.ClsidRegSha256 = (Get-FileHash $clsidExport -Algorithm SHA256).Hash
+    $comValid = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if (-not $comValid.IsValid) { throw "FAIL: valid transaction-bound COM export rejected: $($comValid.Errors -join '; ')" }
 
-    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, and COM fail-closed checks'
+    [IO.File]::AppendAllText($clsidExport,'tampered')
+    $comTampered = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+    if ($comTampered.IsValid -or -not ($comTampered.Errors -match 'COM export snapshot hash')) { throw 'FAIL: modified COM export accepted' }
+
+    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, and transaction-bound COM export checks'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
