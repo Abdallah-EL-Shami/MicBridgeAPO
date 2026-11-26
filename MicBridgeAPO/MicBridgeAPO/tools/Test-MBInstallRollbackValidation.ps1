@@ -90,7 +90,24 @@ try {
     $registryTampered = Test-MBRegistryExportSnapshot -RegistryPath 'HKLM\SOFTWARE\Classes\CLSID\Example' -ExpectedSha256 $state.ClsidRegSha256 -TemporaryDirectory $tx -ExportAction $exportAction
     if ($registryTampered) { throw 'FAIL: modified restored COM registry contents accepted' }
 
-    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, and restored registry content verification'
+    # Exercise the production reg.exe export path against an isolated HKCU test key.
+    $registryLeaf = 'MicBridgeRollbackValidation-' + [guid]::NewGuid().ToString('N')
+    $registryProviderPath = "Registry::HKEY_CURRENT_USER\Software\$registryLeaf"
+    $registryPath = "HKCU\Software\$registryLeaf"
+    New-Item -Path $registryProviderPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $registryProviderPath -Name 'SnapshotValue' -Value 'before' -Type String
+    $realExport = Join-Path $tx 'real-registry-export.reg'
+    & reg.exe export $registryPath $realExport /y | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $realExport -PathType Leaf)) { throw 'FAIL: could not export isolated HKCU registry fixture' }
+    $realExportHash = (Get-FileHash -LiteralPath $realExport -Algorithm SHA256).Hash
+    $realRegistryMatches = Test-MBRegistryExportSnapshot -RegistryPath $registryPath -ExpectedSha256 $realExportHash -TemporaryDirectory $tx
+    if (-not $realRegistryMatches) { throw 'FAIL: real reg.exe export did not match its saved snapshot' }
+    Set-ItemProperty -LiteralPath $registryProviderPath -Name 'SnapshotValue' -Value 'after' -Type String
+    $realRegistryTampered = Test-MBRegistryExportSnapshot -RegistryPath $registryPath -ExpectedSha256 $realExportHash -TemporaryDirectory $tx
+    if ($realRegistryTampered) { throw 'FAIL: real reg.exe export accepted modified registry contents' }
+
+    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU reg.exe export verification'
 } finally {
+    if ($registryProviderPath -and (Test-Path -LiteralPath $registryProviderPath)) { Remove-Item -LiteralPath $registryProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
