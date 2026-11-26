@@ -119,6 +119,12 @@ function Invoke-MBInstallFullRollback {
         $preflight=Test-MBInstallRollbackTransaction -JournalPath $journalPath -StatePath $statePath -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $stepIds -RegistryHive $RegistryHive
         if(-not $preflight.IsValid -or -not $preflight.ReplaySafe) { throw "Full rollback preflight failed; no recovery actions attempted. $($preflight.Errors -join '; ')" }
         $state=$preflight.State
+        # Validate every component snapshot before the first endpoint Registry
+        # or ACL mutation. Old/partial transaction schemas fail closed here.
+        $fileSnapshotPreflight=Test-MBInstallFileRollbackState -State $state -TransactionDirectory $tx -InstallDirectory $install
+        if(-not $fileSnapshotPreflight.IsValid) { throw "Full rollback support-file preflight failed; no recovery actions attempted. $($fileSnapshotPreflight.Errors -join '; ')" }
+        $metadataSnapshotPreflight=Test-MBInstallMetadataSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -DesktopDirectory $desktop
+        if(-not $metadataSnapshotPreflight.IsValid) { throw "Full rollback metadata preflight failed; no recovery actions attempted. $($metadataSnapshotPreflight.Errors -join '; ')" }
         if([bool]$state.InstallDirExisted -and -not (Test-Path -LiteralPath $install -PathType Container)) {
             throw 'The pre-existing installation directory is missing and its original ACL was not captured; refusing to recreate it from assumptions.'
         }
