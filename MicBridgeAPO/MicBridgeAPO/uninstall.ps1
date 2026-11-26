@@ -12,6 +12,26 @@ if (-not $isAdmin) {
 $installDir = Join-Path $env:ProgramFiles 'MicBridgeAPO'
 $dataDir = Join-Path $env:ProgramData 'MicBridgeAPO'
 $uninstallLog = Join-Path $dataDir 'Uninstall.log'
+function Resolve-MBLogPath([string]$PrimaryPath, [string]$FallbackPath) {
+    try {
+        $parent = Split-Path -Parent $PrimaryPath
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Force -Path $parent -ErrorAction Stop | Out-Null }
+        $stream = New-Object IO.FileStream($PrimaryPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $stream.Dispose()
+        return $PrimaryPath
+    } catch {
+        try {
+            $fallbackParent = Split-Path -Parent $FallbackPath
+            if (-not (Test-Path -LiteralPath $fallbackParent -PathType Container)) { New-Item -ItemType Directory -Force -Path $fallbackParent -ErrorAction Stop | Out-Null }
+            $stream = New-Object IO.FileStream($FallbackPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            $stream.Dispose()
+            return $FallbackPath
+        } catch {
+            throw "Cannot create MicBridge uninstall log at either '$PrimaryPath' or '$FallbackPath'. $($_.Exception.Message)"
+        }
+    }
+}
+$uninstallLog = Resolve-MBLogPath $uninstallLog (Join-Path $env:TEMP 'MicBridgeAPO-Uninstall.log')
 function Write-UninstallLog([string]$Level,[string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$Message
     try {
