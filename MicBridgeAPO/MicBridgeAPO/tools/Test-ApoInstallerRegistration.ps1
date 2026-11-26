@@ -5,6 +5,9 @@ $uninstaller = Get-Content -LiteralPath (Join-Path $root 'uninstall.ps1') -Raw
 $rollbackModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
 $fullExecutor = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.FullInstallRollbackExecutor.psm1') -Raw
 $rollbackValidationModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Raw
+$legacyAuditModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.LegacyInstallAudit.psm1') -Raw
+$ui = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
+$readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw "FAIL: $Message" }
@@ -266,7 +269,8 @@ Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
 Assert-Contains $installer 'MicBridge.LegacyInstallAudit.psm1' 'Installer loads the read-only legacy installation audit'
 Assert-Contains $installer 'Test-MBLegacyInstallationState' 'Installer audits legacy backup, COM registration, and file provenance before upgrade'
 Assert-Contains $installer "Outcome -ne 'NoLegacyResidueDetected'" 'Installer blocks both ambiguous and inventory-only legacy state until its original Windows baseline can be established'
-Assert-Contains $installer 'Original Windows baseline is not claimed as proven' 'Installer does not overstate the trustworthiness of a historical backup'
+Assert-Contains $legacyAuditModule 'Hashes establish integrity only against the manifest; they cannot prove' 'Legacy audit distinguishes file integrity from proof of an original Windows baseline'
+Assert-Contains $installer 'BaselineAssessment=\$\(\$legacyAudit\.BaselineAssessment\)' 'Installer records the legacy baseline assessment in its diagnostics'
 $auditPosition = $installer.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
 $checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison]::Ordinal)
 if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $checkpointPosition) {
@@ -305,3 +309,17 @@ Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor 
 Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
 Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
 Assert-Contains $fullExecutor 'Test-MBInstallRollbackTransaction' 'Full executor binds its snapshot to the durable main journal'
+
+Assert-Contains $installer "Write-Host \"سجل التثبيت: \$installLog\"" 'Installer announces the dedicated install log path'
+Assert-Contains $installer "Write-Host \"سجل الاستعادة: \$recoveryLog\"" 'Installer announces the dedicated recovery log path'
+Assert-Contains $uninstaller "Write-Host \"سجل الإزالة: \$uninstallLog\"" 'Uninstaller announces the dedicated uninstall log path'
+Assert-Contains $uninstaller 'Write-UninstallLog .ERROR.' 'Uninstaller records failures in its own log'
+Assert-Contains $uninstaller 'Removed verified MicBridge-owned desktop shortcut' 'Uninstaller records verified shortcut deletion'
+Assert-Contains $uninstaller 'Preserved install directory' 'Uninstaller records why install files were retained'
+Assert-Contains $ui 'الإرسال:' 'UI shows simplified send status'
+Assert-Contains $ui 'الاستقبال:' 'UI shows simplified receive status'
+Assert-Contains $ui 'جودة الاتصال:' 'UI shows a concise connection-quality indicator'
+Assert-Contains $ui 'AudioDG التقريبي' 'UI reports estimated AudioDG CPU usage when available'
+Assert-NotContains $ui 'الحزم منذ التشغيل' 'UI does not display cumulative packet totals'
+Assert-Contains $readme 'Uninstall.log' 'README documents the separate uninstall log'
+Assert-Contains $readme 'Recovery.log' 'README documents the separate recovery log'
