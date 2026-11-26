@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1') -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeRollbackValidation-' + [guid]::NewGuid().ToString('N'))
 $tx = Join-Path $root 'transactions-test'
