@@ -51,13 +51,17 @@ function Invoke-MBInstallDllRecovery {
         }
 
         $state = $preflight.State
+        $backupPath = $null
+        $backupSha256 = $null
+        if ($state.PSObject.Properties.Name -contains 'DllBackupPath') { $backupPath = [string]$state.DllBackupPath }
+        if ($state.PSObject.Properties.Name -contains 'DllBackupSha256') { $backupSha256 = [string]$state.DllBackupSha256 }
         $dllArgs = @{
             InstalledDllPath=(Join-Path $installRoot 'MicBridgeAPO.dll')
             DllExisted=[bool]$state.DllExisted
             ReplacementStarted=[bool]$state.DllReplacementStarted
             OriginalSha256=[string]$state.DllOriginalSha256
-            BackupPath=[string]$state.DllBackupPath
-            BackupSha256=[string]$state.DllBackupSha256
+            BackupPath=$backupPath
+            BackupSha256=$backupSha256
             BackupRoot=(Join-Path $dataRoot 'dll-backups')
             NewDllSha256=[string]$state.DllNewSha256
             InstallRoot=$installRoot
