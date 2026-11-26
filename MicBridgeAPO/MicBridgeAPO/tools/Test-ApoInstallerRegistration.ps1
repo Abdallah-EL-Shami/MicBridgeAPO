@@ -95,8 +95,13 @@ Assert-Contains $uninstaller 'matchesBaseline' 'Uninstaller restores original co
 Assert-Contains $uninstaller 'backup.json is missing' 'Uninstaller fails closed when the recovery backup is missing'
 Assert-Contains $uninstaller 'preflightIds' 'Uninstaller validates all capture endpoint value types before registry changes'
 Assert-Contains $uninstaller 'cleanupIds' 'Uninstaller scans all capture endpoints for stale MicBridge references'
-Assert-Contains $uninstaller 'PrevDisableProtectedAudioDG' 'Uninstaller restores the Windows audio security setting only from a recorded snapshot'
-Assert-Contains $uninstaller 'leaving the current Windows audio security setting unchanged' 'Uninstaller does not guess a missing legacy audio security snapshot'
+Assert-Contains $installer 'Windows AudioDG protection setting left unchanged' 'Installer leaves Windows AudioDG protection unchanged'
+Assert-NotContains $installer 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Installer never changes DisableProtectedAudioDG'
+Assert-NotContains $installer 'PrevDisableProtectedAudioDG' 'New backups never record the legacy AudioDG value'
+Assert-NotContains $uninstaller 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never writes a legacy AudioDG value'
+Assert-NotContains $uninstaller 'Remove-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never deletes the Windows AudioDG setting'
+Assert-Contains $uninstaller 'legacy backup data is not a trustworthy snapshot' 'Uninstaller explicitly ignores the untrusted legacy AudioDG backup'
+
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
