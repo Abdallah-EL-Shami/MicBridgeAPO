@@ -16,7 +16,7 @@ try {
     $backupHash = $originalHash
     [IO.File]::WriteAllBytes($installed,$newBytes)
 
-    $args = @{
+    $restoreArgs = @{
         InstalledDllPath=$installed
         DllExisted=$true
         ReplacementStarted=$true
@@ -26,8 +26,8 @@ try {
         BackupRoot=$backupRoot
         InstallRoot=$installRoot
     }
-    Restore-MBDllSnapshot @args | Out-Null
-    if (-not (Test-MBDllSnapshotRestored @args)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
+    Restore-MBDllSnapshot @restoreArgs | Out-Null
+    if (-not (Test-MBDllSnapshotRestored @restoreArgs)) { throw 'FAIL: restored DLL did not satisfy its snapshot verifier' }
     Restore-MBDllSnapshot @args | Out-Null
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $originalHash) { throw 'FAIL: repeated recovery was not idempotent' }
 
@@ -39,12 +39,13 @@ try {
     [IO.File]::WriteAllBytes($backup,$originalBytes)
     [IO.File]::WriteAllBytes($installed,$newBytes)
     # Rejected tampered backup must leave these exact destination bytes unchanged.
-    $beforeTamperReject = [Convert]::ToBase64String([IO.File]::ReadAllBytes($installed))
+    $beforeTamperReject = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
     [IO.File]::AppendAllText($backup,'tampered')
     $rejected = $false
     try { Restore-MBDllSnapshot @args | Out-Null } catch { $rejected = $_.Exception.Message -match 'backup hash mismatch' }
     if (-not $rejected) { throw 'FAIL: tampered DLL backup was not rejected' }
-    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($installed)) -ne $beforeTamperReject) { throw 'FAIL: rejected tampered backup changed the destination DLL' }
+    $afterTamperReject = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+    if (-not [string]::Equals($afterTamperReject,$beforeTamperReject,[StringComparison]::OrdinalIgnoreCase)) { throw ('FAIL: rejected tampered backup changed destination DLL (before=' + $beforeTamperReject + ', after=' + $afterTamperReject + ')') }
 
     $newInstallDll = Join-Path $installRoot 'new-install.dll'
     [IO.File]::WriteAllBytes($newInstallDll,$newBytes)
@@ -74,7 +75,7 @@ try {
     }
     if (-not (Test-MBDllSnapshotRestored @untouchedArgs)) { throw 'FAIL: untouched original DLL did not verify' }
 
-    $escapeArgs = $args.Clone()
+    $escapeArgs = $restoreArgs.Clone()
     $escapeArgs.BackupPath = Join-Path $root 'outside.dll'
     $escapeRejected = $false
     try { Restore-MBDllSnapshot @escapeArgs | Out-Null } catch { $escapeRejected = $_.Exception.Message -match 'escapes' }
