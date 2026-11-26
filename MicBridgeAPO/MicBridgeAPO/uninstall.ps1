@@ -99,6 +99,18 @@ function Test-MBEndpointAclSnapshot([string]$DeviceSubKey, [string]$FxSubKey, [s
     } catch { return $false }
 }
 
+function Test-MBRegistryDwordSnapshot([string]$SubKey, [string]$ValueName, [bool]$ExpectedExists, $ExpectedValue) {
+    $key = $hklm.OpenSubKey($SubKey, $false)
+    if (-not $key) { return (-not $ExpectedExists) }
+    try {
+        $exists = $key.GetValueNames() -contains $ValueName
+        if ($exists -ne $ExpectedExists) { return $false }
+        if (-not $ExpectedExists) { return $true }
+        if ($key.GetValueKind($ValueName) -ne [Microsoft.Win32.RegistryValueKind]::DWord) { return $false }
+        return ([int]$key.GetValue($ValueName) -eq [int]$ExpectedValue)
+    } finally { $key.Close() }
+}
+
 # Fail closed before any mutation if the original recovery snapshot is unavailable.
 if (-not (Test-Path -LiteralPath $backupFile)) {
     throw 'backup.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
@@ -268,7 +280,7 @@ foreach ($endpointId in $preflightIds) {
 
 # Create the uninstall recovery plan after all read-only preflight checks and before the first mutation.
 $uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
-$uninstallStepIds = @('RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
+$uninstallStepIds = @('RestoreWindowsAudioSetting','RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
 if (-not (Test-Path -LiteralPath $uninstallJournal -PathType Leaf)) {
     New-MBRecoveryJournal -Path $uninstallJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $uninstallStepIds | Out-Null
 } else {
@@ -364,10 +376,14 @@ if (Test-Path $backupFile) {
         }
     }
     if ($b.PSObject.Properties.Name -contains 'PrevDisableProtectedAudioDG') {
-        if ($null -ne $b.PrevDisableProtectedAudioDG) {
-            Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value $b.PrevDisableProtectedAudioDG -Type DWord
-        } else {
-            Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue
+        Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreWindowsAudioSetting' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
+            if ($null -ne $b.PrevDisableProtectedAudioDG) {
+                Set-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -Value ([int]$b.PrevDisableProtectedAudioDG) -Type DWord
+            } else {
+                Remove-ItemProperty -LiteralPath $audioKey -Name DisableProtectedAudioDG -ErrorAction SilentlyContinue
+            }
+        } -Verify {
+            Test-MBRegistryDwordSnapshot -SubKey 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Audio' -ValueName 'DisableProtectedAudioDG' -ExpectedExists ($null -ne $b.PrevDisableProtectedAudioDG) -ExpectedValue $b.PrevDisableProtectedAudioDG
         }
     } else {
         Write-Warning 'Backup has no DisableProtectedAudioDG snapshot; leaving the current Windows audio security setting unchanged.'
