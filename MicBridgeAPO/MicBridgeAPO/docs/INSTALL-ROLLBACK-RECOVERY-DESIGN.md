@@ -184,3 +184,22 @@ release did not already leave incorrect changes behind.
   separate, explicit cleanup executor be designed. Cleanup must not be folded
   into ordinary install or rollback actions.
 
+## Implemented safety increments (not a release gate completion)
+
+- Added `tools/MicBridge.LegacyInstallAudit.psm1` with
+  `Test-MBLegacyInstallationState`. It inventories the fixed product CLSID and
+  AudioEngine APO registration, server path/hash, and files under the known
+  install/data directories. It does not mutate Registry, files, ACLs, or
+  services; it never claims that the original Windows baseline is proven and
+  always reports `CleanupAllowed = false`.
+- Added an HKCU/temp-only audit test and a Windows CI step. The test checks
+  candidate discovery and confirms that Registry values and file hashes remain
+  unchanged. This audit is currently a standalone diagnostic module; it is not
+  yet called by install.ps1 and is not staged into the install package.
+- Hardened transaction preflight so a hash-valid COM export must also have the
+  Windows Registry Editor header, contain the exact fixed MicBridge CLSID or
+  AudioEngine APO root, and contain no key outside that root or its children.
+  Added a test that rejects an export containing an unrelated CLSID key.
+- These changes do not yet constitute a legacy cleanup routine or a durable
+  COM replay executor. Do not infer that COM rollback is complete from export
+  validation or the isolated registry import primitive.
