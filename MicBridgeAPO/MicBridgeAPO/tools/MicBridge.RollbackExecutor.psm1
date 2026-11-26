@@ -16,7 +16,8 @@ function Invoke-MBInstallDllRecovery {
         [Parameter(Mandatory)][string]$TransactionDirectory,
         [Parameter(Mandatory)][string]$DataDirectory,
         [Parameter(Mandatory)][string]$InstallDirectory,
-        [Parameter(Mandatory)][guid]$ExpectedDeviceId
+        [Parameter(Mandatory)][guid]$ExpectedDeviceId,
+        [ValidateSet('HKLM','HKCU')][string]$RegistryHive = 'HKLM'
     )
 
     $ErrorActionPreference = 'Stop'
@@ -52,7 +53,7 @@ function Invoke-MBInstallDllRecovery {
 
         # Existing transaction format only. Never reinterpret its grouped
         # RestorePreviousInstallState step or mark it complete here.
-        $preflight = Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $transactionRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $legacyStepIds
+        $preflight = Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $transactionRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $legacyStepIds -RegistryHive $RegistryHive
         if (-not $preflight.IsValid -or -not $preflight.ReplaySafe) {
             throw "DLL recovery preflight failed; no DLL changes were attempted. $($preflight.Errors -join '; ')"
         }
