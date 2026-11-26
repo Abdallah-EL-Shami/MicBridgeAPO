@@ -90,6 +90,23 @@ Invoke-MBRecoveryStep -Path $JournalPath -StepId 'RestoreEndpointValues' -Action
     $retryStep = @($retryJournal.Steps | Where-Object Id -eq 'RestoreFiles')[0]
     if ($retryStep.State -ne 'Completed' -or $retryStep.Attempts -ne 2) { throw 'FAIL: retry did not complete correctly' }
 
+    # If the journal cannot be read/written (e.g. storage handle contention),
+    # the external action must not begin before its Running state is durable.
+    $blockedWritePath = Join-Path $tempRoot 'blocked-write.json'
+    New-MBRecoveryJournal -Path $blockedWritePath -Operation Uninstall -DeviceId $device -StepIds @('RestoreBeforeMutation') | Out-Null
+    $blockedWriteRan = $false
+    $exclusiveJournalHandle = New-Object IO.FileStream($blockedWritePath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        $writeBlocked = $false
+        try {
+            Invoke-MBRecoveryStep -Path $blockedWritePath -StepId 'RestoreBeforeMutation' -Action { $script:blockedWriteRan=$true } -Verify { $false }
+        } catch { $writeBlocked = $true }
+        if (-not $writeBlocked) { throw 'FAIL: recovery proceeded despite an unavailable journal file' }
+        if ($blockedWriteRan) { throw 'FAIL: external mutation ran before its Running journal state could be persisted' }
+    } finally { $exclusiveJournalHandle.Dispose() }
+    $stillValid = Read-MBRecoveryJournal -Path $blockedWritePath -ExpectedOperation Uninstall -ExpectedDeviceId $device -ExpectedStepIds @('RestoreBeforeMutation')
+    if ($stillValid.Steps[0].State -ne 'Pending') { throw 'FAIL: failed journal update damaged the last durable state' }
+
     # Persistent recovery artifacts are bound to their SHA-256 content.
     $manifestFile = Join-Path $tempRoot 'com-snapshot.reg'
     [IO.File]::WriteAllText($manifestFile,"Windows Registry Editor Version 5.00`r`n")
