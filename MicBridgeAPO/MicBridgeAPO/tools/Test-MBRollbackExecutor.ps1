@@ -6,7 +6,8 @@ $validationModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation
 $dllModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'
 $executorModule = Join-Path $PSScriptRoot 'MicBridge.RollbackExecutor.psm1'
 $comExecutorModule = Join-Path $PSScriptRoot 'MicBridge.ComRegistrationExecutor.psm1'
-foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule,$comExecutorModule)) {
+$fileExecutorModule = Join-Path $PSScriptRoot 'MicBridge.InstallFileExecutor.psm1'
+foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule,$comExecutorModule,$fileExecutorModule)) {
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw "Missing test dependency: $module" }
 }
 # Import the executor first: it loads its dependencies into its own module scope.
@@ -38,10 +39,13 @@ try {
     $fileEntries = @()
     foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
         $backup = Join-Path $installFiles $name
+        $current = Join-Path $install $name
         [IO.File]::WriteAllText($backup,"saved:$name")
+        [IO.File]::WriteAllText($current,"published:$name")
         $fileEntries += [pscustomobject]@{
             Name=$name; Existed=$true; Backup=$backup
             Sha256=(Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash
+            InstalledSha256=(Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash
         }
     }
 
@@ -91,6 +95,15 @@ try {
     $primaryJournal = Join-Path $tx 'rollback-recovery.json'
     New-MBRecoveryJournal -Path $primaryJournal -Operation InstallRollback -DeviceId $device -StepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState') -TransactionId $transaction | Out-Null
 
+    # Restore the four installer support files from the durable transaction snapshot.
+    $fileResult=Invoke-MBInstallSupportFileRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
+    if(-not $fileResult.Success -or -not $fileResult.MainTransactionStillPending) { throw 'FAIL: support-file executor returned an invalid result' }
+    if(-not (Test-MBInstallSupportFilesRestored -State $state -InstallDirectory $install)) { throw 'FAIL: support-file executor did not restore the previous files' }
+    $fileJournal=Read-MBRecoveryJournal -Path $fileResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreInstallSupportFiles')
+    if($fileJournal.Steps[0].State -ne 'Completed') { throw 'FAIL: support-file component journal did not complete' }
+    $mainAfterFiles=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    if($mainAfterFiles.Steps[2].State -ne 'Pending') { throw 'FAIL: support-file executor incorrectly marked grouped main step complete' }
+
     # Mutate only values beneath the product-owned HKCU CLSID/APO fixture.
     $comClsidKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($comClsidSub,$true)
     $comInproc=$comClsidKey.OpenSubKey('InprocServer32',$true)
@@ -132,8 +145,11 @@ try {
     # left behind in the process that performed the first restore.
     $childScript = Join-Path $tx 'dll-executor-reentry-child.ps1'
     $childSource = @'
-param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
+param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$FileExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
 $ErrorActionPreference = 'Stop'
+Import-Module $FileExecutorModule -Force
+$file = Invoke-MBInstallSupportFileRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
+if (-not $file.Success -or -not $file.MainTransactionStillPending) { throw 'Fresh-process support-file executor returned an invalid result.' }
 Import-Module $ComExecutorModule -Force
 $com = Invoke-MBInstallComRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
 if (-not $com.Success -or -not $com.MainTransactionStillPending) { throw 'Fresh-process COM executor returned an invalid result.' }
@@ -144,7 +160,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
     [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
     $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
         '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
-        $executorModule,$comExecutorModule,$tx,$data,$install,$device.ToString('D')
+        $executorModule,$comExecutorModule,$fileExecutorModule,$tx,$data,$install,$device.ToString('D')
     ) -Wait -PassThru
     if ($childProcess.ExitCode -ne 0) { throw "FAIL: fresh-process executor re-entry failed with exit code $($childProcess.ExitCode)" }
 
@@ -153,7 +169,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
         throw 'FAIL: fresh-process idempotent re-entry repeated the DLL restore side effect'
     }
 
-    Write-Host 'PASS: isolated COM and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
+    Write-Host 'PASS: isolated COM, support-file and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
 } finally {
     if ($comClsidSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comClsidSub,$false) }
     if ($comApoSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comApoSub,$false) }
