@@ -341,6 +341,9 @@ $installFilesDir = Join-Path $transactionDir 'install-files'
 New-Item -ItemType Directory -Force -Path $installFilesDir | Out-Null
 foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
     $target = Join-Path $installDir $name
+    $packageSource = Join-Path $PSScriptRoot $name
+    if (-not (Test-Path -LiteralPath $packageSource -PathType Leaf)) { throw "Required installer support file is missing from package: $packageSource" }
+    $installedPackageHash = (Get-FileHash -LiteralPath $packageSource -Algorithm SHA256 -ErrorAction Stop).Hash
     $backupPath = Join-Path $installFilesDir $name
     $existed = Test-Path -LiteralPath $target
     $backupHash = $null
@@ -348,7 +351,7 @@ foreach ($name in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninsta
         Copy-Item -LiteralPath $target -Destination $backupPath -Force -ErrorAction Stop
         $backupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash
     }
-    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath; Sha256=$backupHash }
+    $installFilesBackup += [pscustomobject]@{ Name=$name; Existed=$existed; Backup=$backupPath; Sha256=$backupHash; InstalledSha256=$installedPackageHash }
 }
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'MicBridge.lnk'
 $shortcutBackup = Join-Path $transactionDir 'MicBridge.lnk'
