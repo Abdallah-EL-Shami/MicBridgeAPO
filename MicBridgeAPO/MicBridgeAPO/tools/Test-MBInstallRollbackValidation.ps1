@@ -190,7 +190,56 @@ try {
     }
     Remove-Item -LiteralPath $restoreProviderPath -Recurse -Force -ErrorAction SilentlyContinue
 
-    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU reg.exe export verification'
+    # Kill a separate PowerShell process after importing a COM-style registry
+    # snapshot but before the recovery journal can persist Completed.
+    $recoveryModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
+    Import-Module $recoveryModule -Force
+    $crashLeaf = 'MicBridgeRollbackCrash-' + [guid]::NewGuid().ToString('N')
+    $crashProviderPath = "Registry::HKEY_CURRENT_USER\\Software\\$crashLeaf"
+    $crashRegistryPath = "HKCU\\Software\\$crashLeaf"
+    $crashSnapshot = Join-Path $tx 'crash-registry.reg'
+    New-Item -Path $crashProviderPath -Force | Out-Null
+    Set-ItemProperty -LiteralPath $crashProviderPath -Name 'OriginalValue' -Value 'before' -Type String
+    & reg.exe export $crashRegistryPath $crashSnapshot /y | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'FAIL: could not export crash-recovery registry fixture' }
+    $crashHash = (Get-FileHash -LiteralPath $crashSnapshot -Algorithm SHA256).Hash
+    Set-ItemProperty -LiteralPath $crashProviderPath -Name 'OriginalValue' -Value 'after' -Type String
+    $crashJournal = Join-Path $tx 'registry-crash-resume.json'
+    $crashDevice = [guid]::NewGuid()
+    New-MBRecoveryJournal -Path $crashJournal -Operation InstallRollback -DeviceId $crashDevice -StepIds @('RestoreCom') | Out-Null
+    $childScript = Join-Path $tx 'registry-crash-child.ps1'
+    $childSource = @'
+param([string]$RecoveryModule,[string]$ValidationModule,[string]$Journal,[string]$RegistryPath,[string]$Snapshot,[string]$Hash,[string]$TemporaryDirectory,[string]$Device)
+$ErrorActionPreference = 'Stop'
+Import-Module $RecoveryModule -Force
+Import-Module $ValidationModule -Force
+$action = {
+    Restore-MBRegistryExportSnapshot -RegistryPath $RegistryPath -SnapshotPath $Snapshot -ExpectedSha256 $Hash -TemporaryDirectory $TemporaryDirectory | Out-Null
+    [Environment]::FailFast('Injected process death after COM registry restore side effect')
+}.GetNewClosure()
+$verify = { Test-MBRegistryExportSnapshot -RegistryPath $RegistryPath -ExpectedSha256 $Hash -TemporaryDirectory $TemporaryDirectory }.GetNewClosure()
+Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreCom' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreCom') -Action $action -Verify $verify
+'@
+    [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
+    $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
+        '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
+        $recoveryModule,(Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1'),
+        $crashJournal,$crashRegistryPath,$crashSnapshot,$crashHash,$tx,$crashDevice.ToString('D')
+    ) -Wait -PassThru
+    if ($childProcess.ExitCode -eq 0) { throw 'FAIL: COM registry crash-injection child exited successfully' }
+    $interruptedRegistry = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreCom')
+    if ($interruptedRegistry.Steps[0].State -ne 'Running' -or
+        -not (Test-MBRegistryExportSnapshot -RegistryPath $crashRegistryPath -ExpectedSha256 $crashHash -TemporaryDirectory $tx)) {
+        throw 'FAIL: COM registry restore was not durable after process interruption'
+    }
+    Invoke-MBRecoveryStep -Path $crashJournal -StepId 'RestoreCom' -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreCom') -Action { throw 'COM registry import repeated after fresh-process recovery' } -Verify { Test-MBRegistryExportSnapshot -RegistryPath $crashRegistryPath -ExpectedSha256 $crashHash -TemporaryDirectory $tx }
+    $resumedRegistry = Read-MBRecoveryJournal -Path $crashJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $crashDevice -ExpectedStepIds @('RestoreCom')
+    if ($resumedRegistry.Steps[0].State -ne 'Completed' -or $resumedRegistry.Steps[0].Attempts -ne 1) {
+        throw 'FAIL: fresh-process COM recovery did not complete without repeating registry import'
+    }
+    Remove-Item -LiteralPath $crashProviderPath -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU export verification and fresh-process COM crash recovery'
 } finally {
     if ($registryProviderPath -and (Test-Path -LiteralPath $registryProviderPath)) { Remove-Item -LiteralPath $registryProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
     if ($restoreProviderPath -and (Test-Path -LiteralPath $restoreProviderPath)) { Remove-Item -LiteralPath $restoreProviderPath -Recurse -Force -ErrorAction SilentlyContinue }
