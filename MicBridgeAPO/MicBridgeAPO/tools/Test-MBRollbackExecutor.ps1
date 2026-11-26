@@ -5,13 +5,15 @@ $journalModule = Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1'
 $validationModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1'
 $dllModule = Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'
 $executorModule = Join-Path $PSScriptRoot 'MicBridge.RollbackExecutor.psm1'
-foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule)) {
+$comExecutorModule = Join-Path $PSScriptRoot 'MicBridge.ComRegistrationExecutor.psm1'
+foreach ($module in @($journalModule,$validationModule,$dllModule,$executorModule,$comExecutorModule)) {
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw "Missing test dependency: $module" }
 }
 # Import the executor first: it loads its dependencies into its own module scope.
 # Import the journal explicitly afterward for the test's direct journal assertions.
 Import-Module $executorModule -Force
 Import-Module $journalModule -Force
+Import-Module $comExecutorModule -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeRollbackExecutor-' + [guid]::NewGuid().ToString('N'))
 $tx = Join-Path $root ('transactions-' + [guid]::NewGuid().ToString('N'))
@@ -41,6 +43,26 @@ try {
         }
     }
 
+    # Build a transaction-owned COM snapshot using HKCU only. The production
+    # executor uses the same fixed CLSID/APO key names under HKLM by default.
+    $comClsid='{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
+    $comClsidSub="Software\Classes\CLSID\$comClsid"
+    $comApoSub="Software\Classes\AudioEngine\AudioProcessingObjects\$comClsid"
+    $comClsidKey=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($comClsidSub)
+    $comInproc=$comClsidKey.CreateSubKey('InprocServer32')
+    $comInproc.SetValue('', $installedDll, [Microsoft.Win32.RegistryValueKind]::String)
+    $comInproc.Dispose(); $comClsidKey.Dispose()
+    $comApoKey=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($comApoSub)
+    $comApoKey.SetValue('FriendlyName','MicBridge previous APO',[Microsoft.Win32.RegistryValueKind]::String)
+    $comApoKey.Dispose()
+    $clsidBackup=Join-Path $tx 'clsid.reg'
+    $apoBackup=Join-Path $tx 'audioengine-apo.reg'
+    $regExe=Join-Path $env:SystemRoot 'System32\reg.exe'
+    & $regExe export "HKCU\$comClsidSub" $clsidBackup /y | Out-Null
+    if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export transaction CLSID fixture' }
+    & $regExe export "HKCU\$comApoSub" $apoBackup /y | Out-Null
+    if($LASTEXITCODE -ne 0) { throw 'FAIL: could not export transaction APO fixture' }
+
     $state = [pscustomobject]@{
         DeviceId=$device.ToString('D')
         TransactionId=$transaction.ToString('D')
@@ -50,8 +72,8 @@ try {
         DevSddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
         FxSddl='O:SYG:SYD:PAI(A;;FA;;;SY)'
         FxKeyExisted=$true
-        ClsidRegExisted=$false; ClsidRegBackup=$null; ClsidRegSha256=$null
-        ApoRegExisted=$false; ApoRegBackup=$null; ApoRegSha256=$null
+        ClsidRegExisted=$true; ClsidRegBackup=$clsidBackup; ClsidRegSha256=(Get-FileHash $clsidBackup -Algorithm SHA256).Hash
+        ApoRegExisted=$true; ApoRegBackup=$apoBackup; ApoRegSha256=(Get-FileHash $apoBackup -Algorithm SHA256).Hash
         DllExisted=$true; DllOriginalSha256=$originalHash
         DllNewSha256=$newHash; DllReplacementStarted=$true
         DllBackupPath=$originalDll; DllBackupSha256=$originalHash
@@ -66,6 +88,22 @@ try {
 
     $primaryJournal = Join-Path $tx 'rollback-recovery.json'
     New-MBRecoveryJournal -Path $primaryJournal -Operation InstallRollback -DeviceId $device -StepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState') -TransactionId $transaction | Out-Null
+
+    # Mutate only values beneath the product-owned HKCU CLSID/APO fixture.
+    $comClsidKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($comClsidSub,$true)
+    $comInproc=$comClsidKey.OpenSubKey('InprocServer32',$true)
+    $comInproc.SetValue('ThreadingModel','Both',[Microsoft.Win32.RegistryValueKind]::String)
+    $comInproc.Dispose(); $comClsidKey.Dispose()
+    $comApoKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($comApoSub,$true)
+    $comApoKey.SetValue('FriendlyName','MicBridge failed update',[Microsoft.Win32.RegistryValueKind]::String)
+    $comApoKey.Dispose()
+
+    $comResult=Invoke-MBInstallComRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device -RegistryHive HKCU
+    if(-not $comResult.Success -or -not $comResult.MainTransactionStillPending) { throw 'FAIL: COM executor returned an invalid result' }
+    $comJournal=Read-MBRecoveryJournal -Path $comResult.JournalPath -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreComCLSID','RestoreComAudioEngineAPO')
+    if(@($comJournal.Steps | Where-Object State -ne 'Completed').Count -ne 0) { throw 'FAIL: COM executor did not complete both registration restores' }
+    $mainAfterCom=Read-MBRecoveryJournal -Path $primaryJournal -ExpectedOperation InstallRollback -ExpectedDeviceId $device -ExpectedStepIds @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
+    if($mainAfterCom.Steps[2].State -ne 'Pending') { throw 'FAIL: COM executor incorrectly marked the grouped main rollback step complete' }
 
     $result = Invoke-MBInstallDllRecovery -TransactionDirectory $tx -DataDirectory $data -InstallDirectory $install -ExpectedDeviceId $device
     if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw 'FAIL: executor returned an invalid completion result' }
@@ -91,16 +129,19 @@ try {
     # left behind in the process that performed the first restore.
     $childScript = Join-Path $tx 'dll-executor-reentry-child.ps1'
     $childSource = @'
-param([string]$ExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
+param([string]$ExecutorModule,[string]$ComExecutorModule,[string]$TransactionDirectory,[string]$DataDirectory,[string]$InstallDirectory,[string]$DeviceId)
 $ErrorActionPreference = 'Stop'
+Import-Module $ComExecutorModule -Force
+$com = Invoke-MBInstallComRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId) -RegistryHive HKCU
+if (-not $com.Success -or -not $com.MainTransactionStillPending) { throw 'Fresh-process COM executor returned an invalid result.' }
 Import-Module $ExecutorModule -Force
 $result = Invoke-MBInstallDllRecovery -TransactionDirectory $TransactionDirectory -DataDirectory $DataDirectory -InstallDirectory $InstallDirectory -ExpectedDeviceId ([guid]$DeviceId)
-if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw 'Fresh-process executor returned an invalid result.' }
+if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw 'Fresh-process DLL executor returned an invalid result.' }
 '@
     [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
     $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
         '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
-        $executorModule,$tx,$data,$install,$device.ToString('D')
+        $executorModule,$comExecutorModule,$tx,$data,$install,$device.ToString('D')
     ) -Wait -PassThru
     if ($childProcess.ExitCode -ne 0) { throw "FAIL: fresh-process executor re-entry failed with exit code $($childProcess.ExitCode)" }
 
@@ -109,7 +150,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
         throw 'FAIL: fresh-process idempotent re-entry repeated the DLL restore side effect'
     }
 
-    Write-Host 'PASS: isolated DLL executor preflight, durable component journal, verified restore, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
+    Write-Host 'PASS: isolated COM and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
