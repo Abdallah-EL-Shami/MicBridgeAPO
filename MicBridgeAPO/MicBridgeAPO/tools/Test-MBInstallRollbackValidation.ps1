@@ -72,6 +72,32 @@ try {
     if ($pathEscape.IsValid -or -not ($pathEscape.Errors -match 'escapes')) { throw 'FAIL: path escape accepted' }
     $state.InstallFiles[0].Backup = $originalBackup
 
+    # A lexically in-root backup can still escape through a junction/reparse parent.
+    # Exercise the production validator when the Windows runner permits junction creation.
+    $junctionTarget = Join-Path $root 'junction-target'
+    $junctionPath = Join-Path $files 'redirected'
+    New-Item -ItemType Directory -Force -Path $junctionTarget | Out-Null
+    $junctionFile = Join-Path $junctionTarget 'backup.ps1'
+    [IO.File]::WriteAllText($junctionFile,'junction-escape')
+    $junctionCreated = $false
+    try {
+        New-Item -ItemType Junction -Path $junctionPath -Target $junctionTarget -ErrorAction Stop | Out-Null
+        $junctionCreated = $true
+    } catch {
+        Write-Host 'INFO: Junction creation unavailable; reparse-parent test skipped.'
+    }
+    if ($junctionCreated) {
+        $state.InstallFiles[0].Backup = Join-Path $junctionPath 'backup.ps1'
+        $state.InstallFiles[0].Sha256 = (Get-FileHash $junctionFile -Algorithm SHA256).Hash
+        $junctionRejected = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
+        if ($junctionRejected.IsValid -or -not ($junctionRejected.Errors -match 'reparse point')) {
+            throw 'FAIL: rollback validator accepted a backup path redirected by a junction'
+        }
+        $state.InstallFiles[0].Backup = $originalBackup
+        $state.InstallFiles[0].Sha256 = (Get-FileHash $originalBackup -Algorithm SHA256).Hash
+        Remove-Item -LiteralPath $junctionPath -Force
+    }
+
     [IO.File]::AppendAllText($originalBackup,'tampered')
     $hashMismatch = Test-MBInstallRollbackSnapshot -State $state -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device
     if ($hashMismatch.IsValid -or -not ($hashMismatch.Errors -match 'hash')) { throw 'FAIL: modified backup accepted' }
