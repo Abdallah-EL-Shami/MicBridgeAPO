@@ -63,7 +63,7 @@ Assert-Contains $installer "\$rollbackStepIds = @\('RestoreEndpointFxValues','Re
 Assert-Contains $installer 'Invoke-MBInstallFullRollback' 'Installer startup recovery and failure handling use the full durable rollback executor'
 Assert-Contains $installer 'pendingRollbackJournals.Count -eq 1' 'Installer replays only one unambiguous pending transaction'
 Assert-Contains $installer 'Multiple interrupted MicBridge rollback transactions were found' 'Installer refuses automatic replay when transaction order is ambiguous'
-Assert-Contains $installer 'Full rollback executor did not complete' 'Installer blocks a new install if rollback replay does not finish'
+Assert-Contains $installer 'Interrupted MicBridge rollback did not complete' 'Installer blocks a new install if rollback replay does not finish'
 Assert-NotContains $installer 'Recovery replay is not yet automated' 'Installer no longer leaves validated pending transactions permanently blocked'
 Assert-Contains $fullExecutor 'Restore-MBEndpointRegistrySnapshot' 'Full executor restores the endpoint FX snapshot'
 Assert-Contains $fullExecutor 'Restore-MBRegistryAclSddl' 'Full executor restores capture endpoint ACLs'
