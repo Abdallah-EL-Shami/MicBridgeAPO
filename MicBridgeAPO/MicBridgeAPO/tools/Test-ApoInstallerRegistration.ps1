@@ -171,6 +171,13 @@ Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{'
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
 Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
+Assert-Contains $installer 'MicBridge.InstallRollbackValidation.psm1' 'Installer loads the rollback snapshot validator before recovery mutations'
+Assert-Contains $installer 'Test-MBInstallRollbackSnapshot' 'Installer validates the durable transaction snapshot before rollback'
+Assert-Contains $installer 'no rollback mutations were attempted' 'Installer fails closed when rollback snapshot validation fails'
+Assert-Contains $installer 'ClsidRegBackup' 'Transaction snapshot records the previous CLSID export path'
+Assert-Contains $installer 'ClsidRegSha256' 'Transaction snapshot records the previous CLSID export hash'
+Assert-Contains $installer 'ApoRegBackup' 'Transaction snapshot records the previous AudioEngine export path'
+Assert-Contains $installer 'ApoRegSha256' 'Transaction snapshot records the previous AudioEngine export hash'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
@@ -197,7 +204,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
