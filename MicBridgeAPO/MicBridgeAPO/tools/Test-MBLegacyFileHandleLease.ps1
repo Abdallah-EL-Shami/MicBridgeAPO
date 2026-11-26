@@ -35,6 +35,33 @@ try {
         Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult
     }
 
+    # A second hard link makes path-based cleanup ambiguous even while one handle is exclusive.
+    if (-not ('MicBridgeHandleLeaseHardLink.Native' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace MicBridgeHandleLeaseHardLink {
+    public static class Native {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CreateHardLink(string newName, string existingName, IntPtr security);
+    }
+}
+'@
+    }
+    $hardLink = Join-Path $root 'MicBridgeAPO-hardlink.dll'
+    $hardLinkCreated = [MicBridgeHandleLeaseHardLink.Native]::CreateHardLink($hardLink,$dll,[IntPtr]::Zero)
+    if ($hardLinkCreated) {
+        $hardLinkRejected = $false
+        try { Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash | Out-Null }
+        catch { $hardLinkRejected = $_.Exception.Message -match 'multiple hard links' }
+        if (-not $hardLinkRejected) { throw 'FAIL: file with multiple hard links was not rejected.' }
+        Remove-Item -LiteralPath $hardLink -Force
+    } else {
+        $win32 = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "FAIL: could not create hard-link test fixture (Win32 $win32)."
+    }
+
     $outside = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeOutside-' + [guid]::NewGuid().ToString('N') + '.dll')
     [IO.File]::WriteAllBytes($outside,[byte[]](8,6,4,2))
     try {
