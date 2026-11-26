@@ -122,7 +122,7 @@ function Invoke-MBInstallFullRollback {
         if([bool]$state.InstallDirExisted -and -not (Test-Path -LiteralPath $install -PathType Container)) {
             New-Item -ItemType Directory -Force -Path $install | Out-Null
         }
-        if(Test-Path -LiteralPath $install -PathType Container -and -not (Test-MBFullRollbackNoReparse $install)) {
+        if((Test-Path -LiteralPath $install -PathType Container) -and -not (Test-MBFullRollbackNoReparse $install)) {
             throw 'Installation directory traverses a reparse point; refusing full rollback.'
         }
         $device=[guid]$state.DeviceId
