@@ -113,6 +113,12 @@ try {
     try { Restore-MBDllSnapshot @escapeArgs | Out-Null } catch { $escapeRejected = $_.Exception.Message -match 'escapes' }
     if (-not $escapeRejected) { throw 'FAIL: backup path outside the protected directory was not rejected' }
 
+    $rollbackArtifacts = @(Get-ChildItem -LiteralPath $installRoot -Force -ErrorAction Stop | Where-Object { $_.Name -like '.MicBridgeAPO.rollback.*.tmp' -or $_.Name -like '.MicBridgeAPO.rollback.*.bak' })
+    if ($rollbackArtifacts.Count -ne 0) { throw 'FAIL: DLL rollback left temporary or replacement-backup artifacts behind' }
+    $rollbackModuleText = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
+    if ($rollbackModuleText -notmatch '\[IO\.File\]::Replace\(\$stagedPath,\$InstalledDllPath,\$replacementBackupPath\)') { throw 'FAIL: File.Replace must use a non-empty replacement backup path' }
+    if ($rollbackModuleText -match '\[IO\.File\]::Replace\([^\r\n]*,\$null') { throw 'FAIL: File.Replace contains a null backup path' }
+
     Write-Host 'PASS: DLL rollback restore, postcondition verification, idempotent replay, tamper rejection, new-file removal, untouched-file verification, and path confinement'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
