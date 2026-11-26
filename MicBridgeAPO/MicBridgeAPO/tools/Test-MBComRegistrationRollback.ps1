@@ -66,7 +66,7 @@ try {
     }
     Restore-MBComRegistrySnapshot -Target AudioEngineAPO -State $absentState -TransactionDirectory $tx -InstallDirectory $install -RegistryHive HKCU | Out-Null
     Restore-MBComRegistrySnapshot -Target CLSID -State $absentState -TransactionDirectory $tx -InstallDirectory $install -RegistryHive HKCU | Out-Null
-    if(Test-Path "HKCU:\$clsidSub" -or Test-Path "HKCU:\$apoSub") { throw 'FAIL: newly-created MicBridge COM registrations remained after rollback' }
+    if((Test-Path "HKCU:\$clsidSub") -or (Test-Path "HKCU:\$apoSub")) { throw 'FAIL: newly-created MicBridge COM registrations remained after rollback' }
 
     # Foreign live registration must be preserved; no key deletion or overwrite.
     $foreignDll=Join-Path $root 'foreign.dll'
