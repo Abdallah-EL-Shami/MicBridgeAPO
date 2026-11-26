@@ -250,7 +250,7 @@ Assert-Contains $uninstaller 'Read-only global preflight: every capture endpoint
 Assert-Contains $uninstaller 'OpenSubKey\("\$capSub\\\$endpointId\\FxProperties"' 'Uninstaller uses normalized single-separator registry paths'
 if ([regex]::Matches($uninstaller, [regex]::Escape('Read-only global preflight: every capture endpoint value must have its documented registry type')).Count -ne 1) { throw 'FAIL: Uninstaller must contain exactly one global preflight block' }
 Write-Host 'PASS: Uninstaller contains exactly one global preflight block'
-$completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."'
+$completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجلات محفوظة في $dataDir. سجل الإزالة: $uninstallLog"'
 $completionIndex = $uninstaller.LastIndexOf($completionLine)
 if ($completionIndex -lt 0 -or $uninstaller.Substring($completionIndex + $completionLine.Length).Trim().Length -ne 0) { throw 'FAIL: Uninstaller has executable content after its completion message' }
 Write-Host 'PASS: No executable content follows the uninstall completion message'
