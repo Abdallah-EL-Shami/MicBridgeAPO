@@ -385,3 +385,6 @@ function Test-MBInstallRollbackTransaction {
         }
     }
 }
+
+
+Export-ModuleMember -Function Test-MBInstallRollbackSnapshot, Test-MBRegistryExportSnapshot, Restore-MBRegistryExportSnapshot, Test-MBInstallRollbackTransaction
