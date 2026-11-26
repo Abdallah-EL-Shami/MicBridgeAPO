@@ -10,7 +10,7 @@ $inv = [Globalization.CultureInfo]::InvariantCulture
 $script:lastTx = $null
 $script:lastTxAt = [DateTime]::UtcNow
 $script:lastUnderruns = $null
-$script:recentUnderrun = $false
+$script:lastUnderrunAt = $null
 $script:lastCpuAt = [DateTime]::UtcNow
 $script:lastCpuSeconds = $null
 $script:cpuPercent = $null
@@ -127,10 +127,10 @@ function Refresh-Ui {
     $lblIo.Text = "الإرسال: $sendText    |    الاستقبال: $receiveText"
 
     $underruns = [long](Num $h 'underruns')
-    if ($null -ne $script:lastUnderruns -and $underruns -gt $script:lastUnderruns) { $script:recentUnderrun = $true }
-    elseif ($null -ne $script:lastUnderruns -and $underruns -eq $script:lastUnderruns) { $script:recentUnderrun = $false }
+    if ($null -ne $script:lastUnderruns -and $underruns -gt $script:lastUnderruns) { $script:lastUnderrunAt = $now }
     $script:lastUnderruns = $underruns
-    if ($h['state'] -eq 'PROCESSING' -and -not $script:recentUnderrun) {
+    $recentUnderrun = ($null -ne $script:lastUnderrunAt) -and (($now - $script:lastUnderrunAt).TotalSeconds -lt 5.0)
+    if ($h['state'] -eq 'PROCESSING' -and -not $recentUnderrun) {
         $lblQuality.Text = 'جودة الاتصال: جيدة'
         $lblQuality.ForeColor = [Drawing.Color]::DarkGreen
     } elseif ($h['state'] -eq 'PROCESSING') {
