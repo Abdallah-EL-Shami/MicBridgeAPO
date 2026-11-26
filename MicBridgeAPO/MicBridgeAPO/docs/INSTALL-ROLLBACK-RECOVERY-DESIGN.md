@@ -7,14 +7,19 @@ Status: design only; not an implementation or release-readiness claim.
 - The installer serializes operations with the MicBridge recovery operation lock.
 - It scans `ProgramData\\MicBridgeAPO\\transactions-*` for an unfinished
   `rollback-recovery.json` and fails closed. It does not replay the transaction.
-- Each install transaction currently declares one journal step:
-  `RestorePreviousInstallState`.
+- Each install transaction currently declares three journal steps:
+  `RestoreEndpointFxValues`, `RestoreEndpointAcl`, and
+  `RestorePreviousInstallState`. The first two are independently journaled;
+  the third still groups DLL, COM, installer files, shortcut, configuration,
+  and ProgramData ACL restoration into one action.
 - The rollback action is embedded in the installer's `catch` block. A new
   installer process cannot call that action independently.
-- The action restores endpoint values, endpoint ACLs, COM registrations,
-  installer-owned files, shortcut, ProgramData ACLs, and possibly the audio
-  service in one large callback. The journal can mark this step incomplete
-  after a process crash, but there is no startup replay implementation.
+- The `RestorePreviousInstallState` action restores DLL, COM registrations,
+  installer-owned files, shortcut, ProgramData ACLs, and configuration in one
+  large callback. The current catch path also attempts an audio-service restart;
+  this must be reviewed separately and is not evidence of crash-safe rollback.
+  The journal can mark a step incomplete after a process crash, but there is no
+  transaction-level startup replay implementation.
 - The durable transaction snapshot is written before the installation
   mutations. DLL backup provenance is appended later, immediately before the
   DLL replacement boundary. A replay implementation must treat a missing or
