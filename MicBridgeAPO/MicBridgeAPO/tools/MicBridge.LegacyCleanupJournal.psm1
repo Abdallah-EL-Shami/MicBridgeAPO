@@ -89,10 +89,21 @@ function Set-MBLegacyCleanupReviewDecision {
     if ($matches.Count -ne 1) { throw 'Item identity is missing or ambiguous.' }
     $entry = $matches[0]
     if ($entry.Status -ne 'Planned') { throw 'Only Planned entries can receive a review decision.' }
-    if ($Approve -and ($entry.ProposedAction -ne 'CandidateForReviewedRemoval' -or
-        $entry.Kind -ne 'File' -or $entry.Classification -ne 'MicBridgeBinaryCandidate' -or
-        [string]$entry.Path -notmatch '(^|\\)MicBridgeAPO\.dll$' -or [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}$')) {
-        throw 'Approval is restricted to a hash-verified product DLL candidate; registrations and unknown files remain blocked.'
+    if ($Approve) {
+        if ($entry.ProposedAction -ne 'CandidateForReviewedRemoval' -or $entry.Kind -ne 'File' -or
+            $entry.Classification -ne 'MicBridgeBinaryCandidate' -or
+            [IO.Path]::GetFileName([string]$entry.Path) -ine 'MicBridgeAPO.dll' -or
+            [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+            throw 'Approval is restricted to a hash-verified product DLL candidate; registrations and unknown files remain blocked.'
+        }
+        $candidatePath = [IO.Path]::GetFullPath([string]$entry.Path)
+        if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw 'Candidate file is missing; review cannot proceed.' }
+        $candidate = Get-Item -LiteralPath $candidatePath -Force -ErrorAction Stop
+        if (($candidate.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Candidate file is a reparse point; review is blocked.' }
+        $actualHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not $actualHash.Equals([string]$entry.Sha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Candidate content changed since audit; review is blocked.'
+        }
     }
     $entry.Status = if ($Approve) { 'ReviewApproved' } else { 'Blocked' }
     $entry.Reviewer = $Reviewer.Trim()
