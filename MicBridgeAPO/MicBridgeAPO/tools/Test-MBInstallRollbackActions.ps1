@@ -152,7 +152,7 @@ $verify = { Test-MBDllSnapshotRestored @argsForRestore }.GetNewClosure()
 Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$Device) -ExpectedStepIds @('RestoreDll') -Action $action -Verify $verify
 '@
     [IO.File]::WriteAllText($childScript,$childSource,(New-Object Text.UTF8Encoding($false)))
-    $childProcess = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @(
+    $childProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @(
         '-NoProfile','-ExecutionPolicy','Bypass','-File',$childScript,
         $recoveryModule,(Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1'),
         $crashJournal,$crashInstalled,$crashBackup,$backupRoot,$installRoot,
