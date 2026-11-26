@@ -45,7 +45,9 @@ try {
     $registryKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subKey,$true)
     $acl = $registryKey.GetAccessControl([System.Security.AccessControl.AccessControlSections]'Owner,Group,Access')
     $acl.SetAccessRuleProtection($true,$false)
-    $rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid,[System.Security.AccessControl.RegistryRights]::ReadKey,[System.Security.AccessControl.AccessControlType]::Allow)
+    # Keep the test process able to perform the rollback (TakeOwnership/ChangePermissions),
+    # while still changing the descriptor so crash recovery has a real side effect to replay.
+    $rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid,[System.Security.AccessControl.RegistryRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow)
     $acl.ResetAccessRule($rule)
     $registryKey.SetAccessControl($acl)
     $registryKey.Close(); $registryKey = $null
