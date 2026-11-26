@@ -37,7 +37,7 @@ function Get-MBEndpointRegistrySnapshot {
         @($ValueNames | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -match '[\\/]'}).Count -gt 0) {
         throw 'ValueNames must be a non-empty list of unique registry value names.'
     }
-    $key = $location.Hive.OpenSubKey($location.SubKey,[Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree,[Microsoft.Win32.RegistryRights]::ReadKey)
+    $key = $location.Hive.OpenSubKey($location.SubKey,$false)
     $keyExists = ($null -ne $key)
     $values = @()
     try {
@@ -102,7 +102,7 @@ function Restore-MBEndpointRegistrySnapshot {
     }
 
     if ($Snapshot.KeyExists) {
-        $key = $location.Hive.CreateSubKey($location.SubKey,[Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree)
+        $key = $location.Hive.CreateSubKey($location.SubKey)
         if (-not $key) { throw "Could not create or open endpoint registry key: $($location.Path)" }
         try {
             foreach ($entry in $Snapshot.Values) {
@@ -117,7 +117,7 @@ function Restore-MBEndpointRegistrySnapshot {
             $key.Flush()
         } finally { $key.Close() }
     } else {
-        $key = $location.Hive.OpenSubKey($location.SubKey,[Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,[Microsoft.Win32.RegistryRights]'ReadKey,WriteKey,Delete')
+        $key = $location.Hive.OpenSubKey($location.SubKey,$true)
         if ($key) {
             try {
                 foreach ($entry in $Snapshot.Values) { $key.DeleteValue([string]$entry.Name,$false) }
