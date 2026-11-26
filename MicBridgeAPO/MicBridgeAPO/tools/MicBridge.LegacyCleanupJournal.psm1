@@ -55,7 +55,8 @@ function Get-MBLegacyCleanupJournal {
     }
     $payload.InstallDirectory = [IO.Path]::GetFullPath([string]$payload.InstallDirectory)
     $ids = @($payload.Entries | ForEach-Object { [string]$_.Id })
-    if (($ids | Select-Object -Unique).Count -ne $ids.Count) { throw 'Journal contains duplicate item identities.' }
+    $uniqueIds = @($ids | Select-Object -Unique)
+    if ($uniqueIds.Count -ne $ids.Count) { throw 'Journal contains duplicate item identities.' }
     return $payload
 }
 
