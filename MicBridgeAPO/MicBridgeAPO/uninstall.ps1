@@ -310,6 +310,20 @@ foreach ($endpointId in $preflightIds) {
     } finally { $key.Close() }
 }
 
+# Re-audit permanent backup provenance and legacy files before creating the recovery plan
+# or mutating endpoint/COM registrations. Ambiguous state is preserved for manual review.
+$legacyAuditModule = Join-Path $PSScriptRoot 'tools\MicBridge.LegacyInstallAudit.psm1'
+if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
+    throw "Legacy installation audit module is missing; refusing to uninstall without a safe preflight: $legacyAuditModule"
+}
+Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
+$legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId $parsedDeviceId
+if ($legacyAudit.Outcome -eq 'ReviewRequired') {
+    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
+    $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
+    throw "Legacy installation audit requires manual review. No Registry, COM, ACL, or file changes were made. Preserve the installation and ProgramData data. $reviewSummary"
+}
+
 # Create the uninstall recovery plan after all read-only preflight checks and before the first mutation.
 $uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
 $uninstallStepIds = @('RestoreEndpointValues','RestoreWindowsAudioSetting','RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
