@@ -21,6 +21,8 @@ $data = Join-Path $root 'data'
 $install = Join-Path $root 'install'
 $installFiles = Join-Path $tx 'install-files'
 $dllBackups = Join-Path $data 'dll-backups'
+$comClsidSub = $null
+$comApoSub = $null
 New-Item -ItemType Directory -Force -Path $tx,$data,$install,$installFiles,$dllBackups | Out-Null
 
 try {
@@ -152,5 +154,7 @@ if (-not $result.Success -or -not $result.MainTransactionStillPending) { throw '
 
     Write-Host 'PASS: isolated COM and DLL executors, HKCU COM snapshot restoration, durable component journals, transaction identity binding, fresh-process idempotent re-entry, and preservation of main fail-closed journal'
 } finally {
+    if ($comClsidSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comClsidSub,$false) }
+    if ($comApoSub) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($comApoSub,$false) }
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
