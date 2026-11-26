@@ -171,6 +171,18 @@ function Test-RegistryValueSnapshot([string]$sub, [string]$name, $snapshot) {
     return [string]::Equals($left,$right,[StringComparison]::Ordinal)
 }
 
+function Get-MBTransactionFxRegistrySnapshot($tx) {
+    return [pscustomobject]@{
+        RegistryPath = "HKLM\$capSub\$($tx.DeviceId)\FxProperties"
+        KeyExists = [bool]$tx.FxKeyExisted
+        Values = @(
+            [pscustomobject]@{ Name=$fxValue; Exists=[bool]$tx.FxEffect.Exists; Kind=[string]$tx.FxEffect.Kind; Value=$tx.FxEffect.Value }
+            [pscustomobject]@{ Name=$fxAssociationValue; Exists=[bool]$tx.FxAssociation.Exists; Kind=[string]$tx.FxAssociation.Kind; Value=$tx.FxAssociation.Value }
+            [pscustomobject]@{ Name=$fxCompositeValue; Exists=[bool]$tx.FxComposite.Exists; Kind=[string]$tx.FxComposite.Kind; Value=$tx.FxComposite.Value }
+        )
+    }
+}
+
 try {
 if (-not (Test-Path $DllSource)) { throw "لم أجد $DllSource . ضع MicBridgeAPO.dll بجانب هذا السكربت." }
 
@@ -364,7 +376,7 @@ Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 # Durable rollback journal is created from the verified pre-install snapshot.
 $rollbackJournalPath = Join-Path $transactionDir 'rollback-recovery.json'
 $rollbackDeviceId = [guid]$dev.Id
-$rollbackStepIds = @('RestorePreviousInstallState')
+$rollbackStepIds = @('RestoreEndpointFxValues','RestorePreviousInstallState')
 $rollbackJournal = New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds
 $transactionState.TransactionId = [string]$rollbackJournal.TransactionId
 Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
@@ -550,6 +562,18 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             if ([string]$rollbackSnapshot.TransactionId -ne [string]$rollbackJournal.TransactionId) {
                 throw 'Rollback journal and snapshot belong to different transactions; no rollback mutations were attempted.'
             }
+            Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestoreEndpointFxValues' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
+                $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                $endpointRollbackModule = Join-Path $PSScriptRoot 'tools\MicBridge.EndpointRegistryRollback.psm1'
+                Import-Module -Name $endpointRollbackModule -Force -ErrorAction Stop
+                Restore-MBEndpointRegistrySnapshot -Snapshot (Get-MBTransactionFxRegistrySnapshot $tx) | Out-Null
+                Write-InstallLog 'INFO' 'Endpoint Fx registry values restored and verified by the isolated rollback module.'
+            } -Verify {
+                $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
+                $endpointRollbackModule = Join-Path $PSScriptRoot 'tools\MicBridge.EndpointRegistryRollback.psm1'
+                Import-Module -Name $endpointRollbackModule -Force -ErrorAction Stop
+                Test-MBEndpointRegistrySnapshot -Snapshot (Get-MBTransactionFxRegistrySnapshot $tx)
+            }
             Invoke-MBRecoveryStep -Path $rollbackJournalPath -StepId 'RestorePreviousInstallState' -ExpectedOperation InstallRollback -ExpectedDeviceId $rollbackDeviceId -ExpectedStepIds $rollbackStepIds -Action {
                         # Reload the durable snapshot: process-local variables are not recovery evidence.
                         $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
@@ -571,19 +595,8 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                             Write-InstallLog 'INFO' 'DLL rollback action completed and verified against transaction hashes.'
                         }
                         # Roll back this installation attempt to the immediately preceding installed state.
-                            $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
-                            Restore-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect
-                            Restore-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation
-                            Restore-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite
                             if ($tx.FxSddl -and (Test-Path -LiteralPath "$capRoot\$($tx.DeviceId)\FxProperties")) { Restore-Sddl "$capSub\$($tx.DeviceId)\FxProperties" $tx.FxSddl }
                             if ($tx.DevSddl) { Restore-Sddl "$capSub\$($tx.DeviceId)" $tx.DevSddl }
-                            if (-not $tx.FxKeyExisted) {
-                                $fxNowPath = "$capRoot\$($tx.DeviceId)\FxProperties"
-                                if (Test-Path -LiteralPath $fxNowPath) {
-                                    $fxKey = $hklm.OpenSubKey("$capSub\$($tx.DeviceId)\FxProperties")
-                                    if ($fxKey) { $empty = ($fxKey.GetValueNames().Count -eq 0 -and $fxKey.GetSubKeyNames().Count -eq 0); $fxKey.Close(); if ($empty) { Remove-Item -LiteralPath $fxNowPath -Force } }
-                                }
-                            }
                             $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
                             $apoPath = "HKLM:\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
                             Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
@@ -626,11 +639,9 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
             } -Verify {
                 $tx = Get-Content -LiteralPath $transactionStateFile -Raw | ConvertFrom-Json
                 $fxNowSub = "$capSub\$($tx.DeviceId)\FxProperties"
-                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxValue $tx.FxEffect)) { return $false }
-                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxAssociationValue $tx.FxAssociation)) { return $false }
-                if (-not (Test-RegistryValueSnapshot $fxNowSub $fxCompositeValue $tx.FxComposite)) { return $false }
-                $fxKeyPath = "$capRoot\$($tx.DeviceId)\FxProperties"
-                if (-not [bool]$tx.FxKeyExisted -and (Test-Path -LiteralPath $fxKeyPath)) { return $false }
+                $endpointRollbackModule = Join-Path $PSScriptRoot 'tools\MicBridge.EndpointRegistryRollback.psm1'
+                Import-Module -Name $endpointRollbackModule -Force -ErrorAction Stop
+                if (-not (Test-MBEndpointRegistrySnapshot -Snapshot (Get-MBTransactionFxRegistrySnapshot $tx))) { return $false }
                 if ([bool]$tx.IniExisted -ne [bool](Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))) { return $false }
                 if ([bool]$tx.ControlExisted -ne [bool](Test-Path -LiteralPath $controlPath)) { return $false }
                 if (-not [bool]$tx.InstallDirExisted -and (Test-Path -LiteralPath $installDir)) { return $false }
