@@ -1,5 +1,12 @@
 Set-StrictMode -Version Latest
 
+# Import dependencies when this module is loaded, into this module's own
+# session state. Imports performed inside Invoke-MBInstallDllRecovery are
+# scoped to that call and are not reliably visible to its deferred ScriptBlocks.
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.RecoveryJournal.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Force -ErrorAction Stop
+
 function Invoke-MBInstallDllRecovery {
     [CmdletBinding()]
     param(
@@ -31,11 +38,6 @@ function Invoke-MBInstallDllRecovery {
             throw "Required rollback module is missing: $modulePath"
         }
     }
-    # Import into this module's function scope for internal calls, and into
-    # the caller's global scope for post-return journal inspection.
-    Import-Module $journalModule -Force -ErrorAction Stop
-    Import-Module $journalModule -Force -Global -ErrorAction Stop
-
     # Use the same exclusive operation lock as install.ps1 across the full
     # preflight, DLL side effect, verification, and journal completion.
     $operationLockPath = Join-Path $dataRoot 'operation'
@@ -47,7 +49,6 @@ function Invoke-MBInstallDllRecovery {
 
         # Existing transaction format only. Never reinterpret its grouped
         # RestorePreviousInstallState step or mark it complete here.
-        Import-Module $validationModule -Force -ErrorAction Stop
         $preflight = Test-MBInstallRollbackTransaction -JournalPath $primaryJournal -StatePath $statePath -TransactionDirectory $transactionRoot -DataDirectory $dataRoot -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $legacyStepIds
         if (-not $preflight.IsValid -or -not $preflight.ReplaySafe) {
             throw "DLL recovery preflight failed; no DLL changes were attempted. $($preflight.Errors -join '; ')"
@@ -85,10 +86,6 @@ function Invoke-MBInstallDllRecovery {
             New-MBRecoveryJournal -Path $dllJournalPath -Operation InstallRollback -DeviceId $ExpectedDeviceId -StepIds $dllStepIds -TransactionId ([guid]$preflight.Journal.TransactionId) | Out-Null
         }
 
-        # Load action commands locally for this executor's deferred ScriptBlocks,
-        # and globally so a caller can inspect/reuse the exported commands.
-        Import-Module $dllModule -Force -ErrorAction Stop
-        Import-Module $dllModule -Force -Global -ErrorAction Stop
         $action = { Restore-MBDllSnapshot @dllArgs | Out-Null }.GetNewClosure()
         $verify = { Test-MBDllSnapshotRestored @dllArgs }.GetNewClosure()
         Invoke-MBRecoveryStep -Path $dllJournalPath -StepId 'RestoreDll' -ExpectedOperation InstallRollback -ExpectedDeviceId $ExpectedDeviceId -ExpectedStepIds $dllStepIds -Action $action -Verify $verify
