@@ -68,10 +68,11 @@ function Test-MBLegacyInstallationState {
 
             $comBackupRoot=Join-Path $dataFull 'com-registration-backup'
             foreach($entry in @(
-                [pscustomobject]@{Name='CLSID';Exists=[bool]$backup.PrevClsidRegistrationExists;Path=[string]$backup.PrevClsidRegistrationFile;Hash=[string]$backup.PrevClsidRegistrationSha256;File='previous-clsid.reg';Key='SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'},
-                [pscustomobject]@{Name='AudioEngine APO';Exists=[bool]$backup.PrevApoRegistrationExists;Path=[string]$backup.PrevApoRegistrationFile;Hash=[string]$backup.PrevApoRegistrationSha256;File='previous-audioengine-apo.reg';Key='SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'}
+                [pscustomobject]@{Name='CLSID';Exists=[bool]$backup.PrevClsidRegistrationExists;ExistsField='PrevClsidRegistrationExists';Path=[string]$backup.PrevClsidRegistrationFile;Hash=[string]$backup.PrevClsidRegistrationSha256;File='previous-clsid.reg';Key='SOFTWARE\Classes\CLSID\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'},
+                [pscustomobject]@{Name='AudioEngine APO';Exists=[bool]$backup.PrevApoRegistrationExists;ExistsField='PrevApoRegistrationExists';Path=[string]$backup.PrevApoRegistrationFile;Hash=[string]$backup.PrevApoRegistrationSha256;File='previous-audioengine-apo.reg';Key='SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'}
             )) {
                 $expectedPath=[IO.Path]::GetFullPath((Join-Path $comBackupRoot $entry.File))
+                if($backup.($entry.ExistsField) -isnot [bool]) { throw "$($entry.Name) existence flag is not Boolean." }
                 if(-not $entry.Exists) {
                     if(-not [string]::IsNullOrWhiteSpace($entry.Hash)) { throw "$($entry.Name) backup has a hash although the original key was absent." }
                     if(Test-Path -LiteralPath $expectedPath) { throw "$($entry.Name) backup file exists although the original key was recorded absent." }
@@ -150,6 +151,10 @@ function Test-MBLegacyInstallationState {
                     $classification = 'MicBridgeBinaryCandidate'
                 } elseif ($directory.Name -eq 'InstallDirectory' -and $item.Name -in @('MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
                     $classification = 'MicBridgeSupportFileCandidate'
+                } elseif ($directory.Name -eq 'DataDirectory' -and $item.Name -in @('backup.json','composite-efx-backup.json','control.ini','MicBridge.ini','MicBridge.log','desktop-shortcut.sha256','previous-clsid.reg','previous-audioengine-apo.reg')) {
+                    $classification = 'MicBridgeRecoveryEvidence'
+                } elseif ($directory.Name -eq 'DataDirectory' -and ($item.FullName -match '\\com-registration-backup\\|\\dll-backups\\|\\transactions-[^\\]+\\')) {
+                    $classification = 'MicBridgeRecoveryEvidence'
                 } elseif ($directory.Name -eq 'DataDirectory') {
                     $classification = 'PreserveDataFile'
                 }
@@ -164,7 +169,7 @@ function Test-MBLegacyInstallationState {
         }
     }
 
-    if($baselineAssessment -eq 'NotPresent' -and @($findings | Where-Object { $_.Classification -in @('MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate') }).Count -gt 0) {
+    if($baselineAssessment -eq 'NotPresent' -and @($findings | Where-Object { $_.Classification -in @('MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate','MicBridgeRecoveryEvidence') }).Count -gt 0) {
         $baselineAssessment='Missing'
         $findings.Add([pscustomobject]@{Kind='PermanentBackup';Name='backup.json';Classification='MissingPermanentBackup';Path=$backupJson;ServerPath=$null;Sha256=$null})
     }
