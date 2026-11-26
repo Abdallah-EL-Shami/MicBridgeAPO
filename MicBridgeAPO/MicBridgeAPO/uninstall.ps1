@@ -111,6 +111,35 @@ function Test-MBRegistryDwordSnapshot([string]$SubKey, [string]$ValueName, [bool
     } finally { $key.Close() }
 }
 
+function Test-MBEndpointValueSnapshot([string]$DeviceSubKey, [string]$LegacyValueName, [string]$AssociationValueName, [string]$CompositeValueName, [string]$Clsid, $Backup, [string]$CompositeBackupPath) {
+    $key = $hklm.OpenSubKey($DeviceSubKey + '\\FxProperties', $false)
+    if (-not $key) { return $false }
+    try {
+        if ($Backup.PSObject.Properties.Name -contains 'PrevFxAssociation') {
+            $associationExists = $key.GetValueNames() -contains $AssociationValueName
+            $expectedAssociationExists = -not [string]::IsNullOrEmpty([string]$Backup.PrevFxAssociation)
+            if ($associationExists -ne $expectedAssociationExists) { return $false }
+            if ($expectedAssociationExists -and [string]$key.GetValue($AssociationValueName) -ne [string]$Backup.PrevFxAssociation) { return $false }
+        }
+        if ($key.GetValueNames() -contains $LegacyValueName) {
+            if ([string]$key.GetValue($LegacyValueName) -eq $Clsid) { return $false }
+        }
+        if (Test-Path -LiteralPath $CompositeBackupPath -PathType Leaf) {
+            $snapshot = Get-Content -LiteralPath $CompositeBackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$snapshot.DeviceId -ne [string]$Backup.DeviceId) { return $false }
+            $original = @($snapshot.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            $present = $key.GetValueNames() -contains $CompositeValueName
+            if ($present -and $key.GetValueKind($CompositeValueName) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) { return $false }
+            $current = if ($present) { @($key.GetValue($CompositeValueName,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)) } else { @() }
+            if ($original -contains $Clsid) {
+                if ($current -notcontains $Clsid) { return $false }
+            } elseif ($current -contains $Clsid) { return $false }
+        }
+        return $true
+    } catch { return $false }
+    finally { $key.Close() }
+}
+
 # Fail closed before any mutation if the original recovery snapshot is unavailable.
 if (-not (Test-Path -LiteralPath $backupFile)) {
     throw 'backup.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
@@ -280,7 +309,7 @@ foreach ($endpointId in $preflightIds) {
 
 # Create the uninstall recovery plan after all read-only preflight checks and before the first mutation.
 $uninstallJournal = Join-Path $dataDir 'uninstall-recovery.json'
-$uninstallStepIds = @('RestoreWindowsAudioSetting','RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
+$uninstallStepIds = @('RestoreEndpointValues','RestoreWindowsAudioSetting','RestoreEndpointAcl','RestoreAudioEngineApo','RestoreComClsid')
 if (-not (Test-Path -LiteralPath $uninstallJournal -PathType Leaf)) {
     New-MBRecoveryJournal -Path $uninstallJournal -Operation Uninstall -DeviceId $parsedDeviceId -StepIds $uninstallStepIds | Out-Null
 } else {
@@ -293,88 +322,94 @@ if (Test-Path $backupFile) {
     $fxSub  = "$devSub\FxProperties"
     $fxPath = "$capRoot\$($b.DeviceId)\FxProperties"
 
-    # 1) القيم (والمفاتيح ما زالت بصلاحيات كاملة للمسؤولين)
-    if (Test-Path $fxPath) {
-        # The current installer leaves the legacy single-CLSID value untouched.
-        # Only undo it when it still contains MicBridge from an older installer.
-        $currentLegacy = (Get-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue).$fxValue
-        if ([string]$currentLegacy -eq $clsid) {
-            if ($b.PrevEndpointEffect) { Set-ItemProperty -LiteralPath $fxPath -Name $fxValue -Value $b.PrevEndpointEffect -Type String }
-            else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue }
-        }
-
-        # Restore the association only if it still has the value installed by MicBridge.
-        $currentAssociation = (Get-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue
-        $expectedAssociation = if ($b.PrevFxAssociation) { [string]$b.PrevFxAssociation } else { '{00000000-0000-0000-0000-000000000000}' }
-        if ([string]$currentAssociation -eq $expectedAssociation) {
-            if ($b.PSObject.Properties.Name -contains 'PrevFxAssociation') {
-                if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
-                else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
-            } elseif (($b.CreatedFx -eq $true) -and ($null -eq $b.FxKeySddl)) {
-                # Legacy backup proves FxProperties did not exist before MicBridge's first install.
-                Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue
-            } else {
-                Write-Warning 'Legacy backup does not prove the original FX association; leaving that property untouched.'
+    # Restore endpoint FX values as one durable, verified step.
+    Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreEndpointValues' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
+        # 1) القيم (والمفاتيح ما زالت بصلاحيات كاملة للمسؤولين)
+        if (Test-Path $fxPath) {
+            # The current installer leaves the legacy single-CLSID value untouched.
+            # Only undo it when it still contains MicBridge from an older installer.
+            $currentLegacy = (Get-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue).$fxValue
+            if ([string]$currentLegacy -eq $clsid) {
+                if ($b.PrevEndpointEffect) { Set-ItemProperty -LiteralPath $fxPath -Name $fxValue -Value $b.PrevEndpointEffect -Type String }
+                else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxValue -ErrorAction SilentlyContinue }
             }
-        }
 
-        # The old installer may have created FxProperties. Delete it only if it is empty;
-        # never recursively delete driver/vendor properties added later.
-        # Remove only MicBridge from the live composite list; retain vendor entries added after installation.
-        if (Test-Path -LiteralPath $compositeBackupFile) {
-            $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
-            if ([string]$compositeState.DeviceId -ne [string]$b.DeviceId) { throw 'Composite EFX backup endpoint mismatch; refusing to restore another device.' }
-            $originalList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-            $baselineList = @($originalList)
-            if (-not $compositeState.Exists -and $b.PrevEndpointEffect -and [string]$b.PrevEndpointEffect -ne $clsid) {
-                $baselineList = @([string]$b.PrevEndpointEffect)
+            # Restore the association only if it still has the value installed by MicBridge.
+            $currentAssociation = (Get-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue).$fxAssociationValue
+            $expectedAssociation = if ($b.PrevFxAssociation) { [string]$b.PrevFxAssociation } else { '{00000000-0000-0000-0000-000000000000}' }
+            if ([string]$currentAssociation -eq $expectedAssociation) {
+                if ($b.PSObject.Properties.Name -contains 'PrevFxAssociation') {
+                    if ($b.PrevFxAssociation) { Set-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -Value $b.PrevFxAssociation -Type String }
+                    else { Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue }
+                } elseif (($b.CreatedFx -eq $true) -and ($null -eq $b.FxKeySddl)) {
+                    # Legacy backup proves FxProperties did not exist before MicBridge's first install.
+                    Remove-ItemProperty -LiteralPath $fxPath -Name $fxAssociationValue -ErrorAction SilentlyContinue
+                } else {
+                    Write-Warning 'Legacy backup does not prove the original FX association; leaving that property untouched.'
+                }
             }
-            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\$($b.DeviceId)\FxProperties", $true)
-            if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
-            try {
-                $currentList = @()
-                if ($key.GetValueNames() -contains $fxCompositeValue) {
-                    if ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
-                        throw 'Current composite EFX value is not REG_MULTI_SZ; refusing to alter it during uninstall.'
+
+            # The old installer may have created FxProperties. Delete it only if it is empty;
+            # never recursively delete driver/vendor properties added later.
+            # Remove only MicBridge from the live composite list; retain vendor entries added after installation.
+            if (Test-Path -LiteralPath $compositeBackupFile) {
+                $compositeState = Get-Content -LiteralPath $compositeBackupFile -Raw | ConvertFrom-Json
+                if ([string]$compositeState.DeviceId -ne [string]$b.DeviceId) { throw 'Composite EFX backup endpoint mismatch; refusing to restore another device.' }
+                $originalList = @($compositeState.Value | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+                $baselineList = @($originalList)
+                if (-not $compositeState.Exists -and $b.PrevEndpointEffect -and [string]$b.PrevEndpointEffect -ne $clsid) {
+                    $baselineList = @([string]$b.PrevEndpointEffect)
+                }
+                $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("$capSub\$($b.DeviceId)\FxProperties", $true)
+                if (-not $key) { throw 'FxProperties key is missing while restoring composite EFX.' }
+                try {
+                    $currentList = @()
+                    if ($key.GetValueNames() -contains $fxCompositeValue) {
+                        if ($key.GetValueKind($fxCompositeValue) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+                            throw 'Current composite EFX value is not REG_MULTI_SZ; refusing to alter it during uninstall.'
+                        }
+                        $currentList = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+                    } else {
+                        $currentList = @($baselineList)
                     }
-                    $currentList = @($key.GetValue($fxCompositeValue, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
-                } else {
-                    $currentList = @($baselineList)
-                }
-                $originalHadMicBridge = ($originalList -contains $clsid)
-                if ($originalHadMicBridge) {
-                    if ($currentList -notcontains $clsid) { $currentList += $clsid }
-                } else {
-                    $currentList = @($currentList | Where-Object { [string]$_ -ne $clsid })
-                }
-
-                $matchesBaseline = ($currentList.Count -eq $baselineList.Count)
-                if ($matchesBaseline) {
-                    for ($index = 0; $index -lt $currentList.Count; $index++) {
-                        if ([string]$currentList[$index] -ne [string]$baselineList[$index]) { $matchesBaseline = $false; break }
+                    $originalHadMicBridge = ($originalList -contains $clsid)
+                    if ($originalHadMicBridge) {
+                        if ($currentList -notcontains $clsid) { $currentList += $clsid }
+                    } else {
+                        $currentList = @($currentList | Where-Object { [string]$_ -ne $clsid })
                     }
-                }
-                if (-not $compositeState.Exists -and $matchesBaseline) {
-                    # No vendor additions occurred; restore the original absence of the composite property.
-                    $key.DeleteValue($fxCompositeValue, $false)
-                } elseif ($currentList.Count -gt 0) {
-                    $key.SetValue($fxCompositeValue, [string[]]$currentList, [Microsoft.Win32.RegistryValueKind]::MultiString)
-                } else {
-                    $key.DeleteValue($fxCompositeValue, $false)
-                }
-            } finally { $key.Close() }
-        }
 
-        if ($b.CreatedFx) {
-            $relativeFx = "$capSub\$($b.DeviceId)\FxProperties"
-            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relativeFx)
-            if ($key) {
-                $empty = ($key.GetValueNames().Count -eq 0 -and $key.GetSubKeyNames().Count -eq 0)
-                $key.Close()
-                if ($empty) { Remove-Item -LiteralPath $fxPath -Force -ErrorAction SilentlyContinue }
+                    $matchesBaseline = ($currentList.Count -eq $baselineList.Count)
+                    if ($matchesBaseline) {
+                        for ($index = 0; $index -lt $currentList.Count; $index++) {
+                            if ([string]$currentList[$index] -ne [string]$baselineList[$index]) { $matchesBaseline = $false; break }
+                        }
+                    }
+                    if (-not $compositeState.Exists -and $matchesBaseline) {
+                        # No vendor additions occurred; restore the original absence of the composite property.
+                        $key.DeleteValue($fxCompositeValue, $false)
+                    } elseif ($currentList.Count -gt 0) {
+                        $key.SetValue($fxCompositeValue, [string[]]$currentList, [Microsoft.Win32.RegistryValueKind]::MultiString)
+                    } else {
+                        $key.DeleteValue($fxCompositeValue, $false)
+                    }
+                } finally { $key.Close() }
+            }
+
+            if ($b.CreatedFx) {
+                $relativeFx = "$capSub\$($b.DeviceId)\FxProperties"
+                $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relativeFx)
+                if ($key) {
+                    $empty = ($key.GetValueNames().Count -eq 0 -and $key.GetSubKeyNames().Count -eq 0)
+                    $key.Close()
+                    if ($empty) { Remove-Item -LiteralPath $fxPath -Force -ErrorAction SilentlyContinue }
+                }
             }
         }
+    } -Verify {
+        Test-MBEndpointValueSnapshot -DeviceSubKey $devSub -LegacyValueName $fxValue -AssociationValueName $fxAssociationValue -CompositeValueName $fxCompositeValue -Clsid $clsid -Backup $b -CompositeBackupPath $compositeBackupFile
     }
+
     if ($b.PSObject.Properties.Name -contains 'PrevDisableProtectedAudioDG') {
         Invoke-MBRecoveryStep -Path $uninstallJournal -StepId 'RestoreWindowsAudioSetting' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $uninstallStepIds -Action {
             if ($null -ne $b.PrevDisableProtectedAudioDG) {
