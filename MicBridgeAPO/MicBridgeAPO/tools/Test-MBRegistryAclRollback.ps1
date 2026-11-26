@@ -33,7 +33,7 @@ try {
 
     Restore-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -Sddl $originalSddl
     if (-not (Test-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -ExpectedSddl $originalSddl)) {
-        throw 'ACL restore did not reproduce the original SDDL.'
+        throw ("ACL restore did not reproduce original SDDL. Expected=[$originalSddl] Actual=[{0}]" -f (Get-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey))
     }
     # Idempotency: restoring the same descriptor twice must preserve exact state.
     Restore-MBRegistryAclSddl -Hive HKCU -SubKeyPath $subKey -Sddl $originalSddl
