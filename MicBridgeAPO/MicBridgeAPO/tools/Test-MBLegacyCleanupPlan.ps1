@@ -42,6 +42,28 @@ try {
         throw 'FAIL: planning modified a file.'
     }
 
+    # A stale or forged inventory hash must never produce a review candidate.
+    $tamperedAudit = [pscustomobject]@{
+        IsReadOnly = $true
+        CleanupAllowed = $false
+        OriginalWindowsBaselineProven = $false
+        Outcome = 'InventoryOnly'
+        Findings = @([pscustomobject]@{
+            Kind='File'; Name='MicBridgeAPO.dll'; Classification='MicBridgeBinaryCandidate'
+            Path=$dll; ServerPath=$null; Sha256=('0' * 64)
+        })
+    }
+    $tamperedPlan = New-MBLegacyCleanupPlan -Audit $tamperedAudit -InstallDirectory $install
+    if (-not ($tamperedPlan.Items | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' -and $_.ProposedAction -eq 'Preserve' })) {
+        throw 'FAIL: DLL with a stale/mismatched hash was not preserved.'
+    }
+    if ($tamperedPlan.CanProceedToCleanupReview) {
+        throw 'FAIL: mismatched DLL hash did not block cleanup review.'
+    }
+    if ($tamperedPlan.CleanupExecutionAllowed -or $tamperedPlan.InstallAllowed) {
+        throw 'FAIL: tampered inventory enabled cleanup or installation.'
+    }
+
     $cleanAudit = [pscustomobject]@{
         IsReadOnly = $true
         CleanupAllowed = $false
