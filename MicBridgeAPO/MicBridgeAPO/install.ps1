@@ -67,12 +67,23 @@ function Write-JsonAtomic([object]$Value, [string]$Path, [int]$Depth = 8) {
     $directory = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
     $temp = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $replacementBackup = $null
     try {
         $json = ConvertTo-Json -InputObject $Value -Depth $Depth
         [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding($false)))
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp, $Path, $null, $true) }
+        if (Test-Path -LiteralPath $Path) {
+            # File.Replace requires a real backup path on supported .NET runtimes.
+            # Keep it beside the target so replacement remains on the same volume.
+            $replacementBackup = Join-Path $directory (([IO.Path]::GetFileName($Path)) + '.replace.' + [guid]::NewGuid().ToString('N') + '.bak')
+            [IO.File]::Replace($temp, $Path, $replacementBackup, $true)
+        }
         else { [IO.File]::Move($temp, $Path) }
-    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        if ($replacementBackup -and (Test-Path -LiteralPath $replacementBackup)) {
+            Remove-Item -LiteralPath $replacementBackup -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 function Write-InstallLog([string]$Level, [string]$Message) {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
