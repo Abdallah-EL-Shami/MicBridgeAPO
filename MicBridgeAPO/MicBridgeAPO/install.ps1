@@ -310,6 +310,7 @@ $transactionState = [pscustomobject]@{
     ClsidRegExisted = $clsidRegExisted
     ApoRegExisted = $apoRegExisted
     DllExisted = (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll'))
+    DllOriginalSha256 = if (Test-Path -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -PathType Leaf) { (Get-FileHash -LiteralPath (Join-Path $installDir 'MicBridgeAPO.dll') -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
     IniExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini'))
     ControlExisted = (Test-Path -LiteralPath (Join-Path $dataDir 'control.ini'))
     DataDirSddl = $dataDirSddl
@@ -537,10 +538,8 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
                 $installedDllPath = Join-Path $installDir 'MicBridgeAPO.dll'
                 if ([bool]$tx.DllExisted) {
                     if (-not (Test-Path -LiteralPath $installedDllPath -PathType Leaf)) { return $false }
-                    if ([bool]$tx.DllReplacementStarted) {
-                        $expectedDllHash = [string]$tx.DllBackupSha256
-                        if ([string]::IsNullOrWhiteSpace($expectedDllHash) -or (Get-FileHash -LiteralPath $installedDllPath -Algorithm SHA256).Hash -ne $expectedDllHash) { return $false }
-                    }
+                    $expectedDllHash = if ([bool]$tx.DllReplacementStarted) { [string]$tx.DllBackupSha256 } else { [string]$tx.DllOriginalSha256 }
+                    if ([string]::IsNullOrWhiteSpace($expectedDllHash) -or (Get-FileHash -LiteralPath $installedDllPath -Algorithm SHA256).Hash -ne $expectedDllHash) { return $false }
                 } elseif ([bool]$tx.DllReplacementStarted -and (Test-Path -LiteralPath $installedDllPath)) { return $false }
                 foreach ($fileState in @($tx.InstallFiles)) {
                     $target = Join-Path $installDir $fileState.Name
