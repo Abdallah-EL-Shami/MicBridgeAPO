@@ -499,12 +499,14 @@ Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RemoveDesktopShortcut' -Exp
     -not (Test-Path -LiteralPath $shortcutPath)
 }
 
+$serviceRestartMarker = "$cleanupJournal.service-restarted"
 Invoke-MBRecoveryStep -Path $cleanupJournal -StepId 'RestartAudioService' -ExpectedOperation Uninstall -ExpectedDeviceId $parsedDeviceId -ExpectedStepIds $cleanupStepIds -Action {
     Restart-Service -Name Audiosrv -Force -ErrorAction Stop
     Start-Sleep -Seconds 2
+    [IO.File]::WriteAllText($serviceRestartMarker,[DateTime]::UtcNow.ToString('o'),(New-Object Text.UTF8Encoding($false)))
 } -Verify {
     $audioService = Get-Service -Name Audiosrv -ErrorAction Stop
-    $audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running
+    (Test-Path -LiteralPath $serviceRestartMarker -PathType Leaf) -and ($audioService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running)
 }
 
 $preserveInstallDirectory = [bool]($b.PrevClsidRegistrationExists -or $b.PrevApoRegistrationExists)
