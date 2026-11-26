@@ -81,15 +81,33 @@ function Test-MBComNoReparsePath {
         return $true
     } catch { return $false }
 }
+function Get-MBComCanonicalRegFileHash {
+    param([string]$Path)
+    $lines=[IO.File]::ReadAllLines($Path)
+    $canonical=[Collections.Generic.List[string]]::new()
+    foreach($line in $lines) {
+        $v=$line.Trim()
+        if([string]::IsNullOrWhiteSpace($v) -or $v -in @('Windows Registry Editor Version 5.00','REGEDIT4')) { continue }
+        if($v.StartsWith('[HKEY_',[StringComparison]::OrdinalIgnoreCase) -and $v.EndsWith(']')) {
+            $canonical.Add('['+$v.Substring(1,$v.Length-2).ToUpperInvariant()+']')
+        } else {
+            $canonical.Add($v)
+        }
+    }
+    $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes([string]::Join([string][char]10,$canonical))
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','') } finally { $sha.Dispose() }
+}
 function Get-MBComRegistryExportHash {
     param([string]$RegistryKey,[string]$TemporaryDirectory)
     $temp=Join-Path $TemporaryDirectory ('com-verify-'+[guid]::NewGuid().ToString('N')+'.reg')
     try {
         & reg.exe export $RegistryKey $temp /y | Out-Null
         if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temp -PathType Leaf)) { return $null }
-        return (Get-FileHash -LiteralPath $temp -Algorithm SHA256 -ErrorAction Stop).Hash
+        return Get-MBComCanonicalRegFileHash -Path $temp
     } finally { if(Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
 }
+
 function Test-MBComRegistrySnapshotRestored {
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('CLSID','AudioEngineAPO')][string]$Target,[Parameter(Mandatory)][object]$State,[Parameter(Mandatory)][string]$TransactionDirectory,[ValidateSet('HKLM','HKCU')][string]$RegistryHive='HKLM')
@@ -105,8 +123,9 @@ function Test-MBComRegistrySnapshotRestored {
     try {
         $backupHash=(Get-FileHash -LiteralPath $backup -Algorithm SHA256 -ErrorAction Stop).Hash
         if(-not $backupHash.Equals($hash,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $expectedCanonical=Get-MBComCanonicalRegFileHash -Path $backup
         $actual=Get-MBComRegistryExportHash $registryKey $TransactionDirectory
-        return $null -ne $actual -and $actual.Equals($hash,[StringComparison]::OrdinalIgnoreCase)
+        return $null -ne $actual -and $actual.Equals($expectedCanonical,[StringComparison]::OrdinalIgnoreCase)
     } catch { return $false }
 }
 function Restore-MBComRegistrySnapshot {
