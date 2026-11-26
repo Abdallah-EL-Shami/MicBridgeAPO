@@ -117,6 +117,7 @@ Assert-Contains $installer 'DllBackupPath\s*=\s*\$null' 'Transaction snapshot de
 Assert-Contains $installer 'The previous-DLL backup path is outside the MicBridge-owned backup directory' 'Rollback rejects DLL backup paths outside ProgramData ownership'
 Assert-Contains $installer 'The previous-DLL backup hash does not match the transaction snapshot' 'Rollback verifies the previous DLL hash before restoration'
 Assert-Contains $installer 'Interrupted installation rollback resumed and verified' 'Installer reports only a verified resumed rollback'
+Assert-Contains $installer 'Invoke-MBInstallRollbackRecovery -JournalPath \$rollbackJournalPath -TransactionDir \$transactionDir' 'Immediate rollback and restart recovery share the same verified recovery path'
 $backupMetadataIndex = $installer.IndexOf('$transactionState.DllBackupPath = $dllBackupPath')
 $backupPersistIndex = $installer.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10', $backupMetadataIndex)
 $dllCopyIndex = $installer.IndexOf('Copy-Item -LiteralPath $DllSource -Destination $installedDll', $backupPersistIndex)
