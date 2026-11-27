@@ -59,18 +59,20 @@ try {
         } finally {
             Close-MBLegacyExclusiveFileLease -LeaseResult $nestedLease
         }
-        $wrongHashRejected = $false
-        try {
-            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
-        } catch { $wrongHashRejected = $true }
-        if (-not $wrongHashRejected) { throw 'FAIL: incorrect expected hash was accepted.' }
-
-        $identityProbe = Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash
-        try { $actualIdentity = [string]$identityProbe.FileIdentity }
-        finally { Close-MBLegacyExclusiveFileLease -LeaseResult $identityProbe }
+        # Capture the identity from the already-open lease, then release it before
+        # attempting fresh opens. The exclusive share mode must not be mistaken for
+        # successful hash/identity rejection in the negative tests.
+        $actualIdentity = [string]$leaseResult.FileIdentity
+        Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult
         if ([string]::IsNullOrWhiteSpace($actualIdentity) -or $actualIdentity.Length -lt 2) {
             throw 'FAIL: lease did not return a usable file identity.'
         }
+
+        $wrongHashRejected = $false
+        try {
+            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
+        } catch { $wrongHashRejected = $_.Exception.ToString() -match 'hash differs' }
+        if (-not $wrongHashRejected) { throw 'FAIL: incorrect expected hash was accepted for a reason other than hash mismatch.' }
         $replacementFirst = if ($actualIdentity[0] -eq '0') { '1' } else { '0' }
         $wrongIdentity = $replacementFirst + $actualIdentity.Substring(1)
         if ($wrongIdentity -eq $actualIdentity) { throw 'FAIL: test did not construct a distinct file identity.' }
