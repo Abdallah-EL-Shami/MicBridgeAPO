@@ -20,7 +20,6 @@ $firstRegistryMutation = $source.IndexOf('Invoke-MBRecoveryStep -Path $uninstall
 if ($auditCall -lt 0 -or $gate -le $auditCall -or $journal -le $gate -or $firstRegistryMutation -le $gate) {
     throw 'FAIL: uninstaller ownership gate is missing or is not before recovery journal/mutation work.'
 }
-$gateEnd = $source.IndexOf('}', $gate, [StringComparison]::Ordinal)
 $gateText = $source.Substring($gate,[Math]::Max(0,$journal-$gate))
 foreach ($required in @('$legacyAudit.OwnershipProven -ne $true','$legacyAudit.OwnershipEvidenceStatus -ne ''Proven''')) {
     if (-not $gateText.Contains($required)) { throw "FAIL: uninstaller does not require independent ownership proof: $required" }
