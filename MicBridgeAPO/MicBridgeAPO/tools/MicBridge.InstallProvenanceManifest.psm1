@@ -173,13 +173,39 @@ function Test-MBInstallProvenanceManifest {
         }
     }
 
+    # Re-open every signed payload through a mutation-resistant Windows handle.
+    # The lease re-hashes the opened handle, validates its final path and file ID,
+    # pins every parent directory, rejects hard links/reparse points, and blocks
+    # write/delete sharing while still permitting the installer to read/copy it.
+    $leaseResults=[Collections.Generic.List[object]]::new()
+    try {
+        $leaseModule=Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1'
+        if(-not (Test-Path -LiteralPath $leaseModule -PathType Leaf)) {
+            throw 'Mutation-resistant package file lease module is missing.'
+        }
+        Import-Module -Name $leaseModule -Force -ErrorAction Stop
+        foreach($record in $verified) {
+            $leaseResult=Open-MBLegacyExclusiveFileLease -CandidatePath $record.Path -InstallRoot $root -ExpectedSha256 $record.Sha256
+            if(-not $leaseResult.FinalHandleValidationPassed -or -not $leaseResult.Lease.IsOpen) {
+                throw "Package file could not be pinned to its verified handle: $($record.RelativePath)"
+            }
+            $record | Add-Member -NotePropertyName LeaseResult -NotePropertyValue $leaseResult -Force
+            $leaseResults.Add($leaseResult)
+        }
+    } catch {
+        foreach($leaseResult in $leaseResults) {
+            try { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult } catch {}
+        }
+        throw
+    }
+
     [pscustomobject]@{
         IsReadOnly=$true
         SignatureVerified=$true
         ManifestVerified=$true
         FileProvenanceVerified=$true
-        VerificationConsistency='PathBasedNonAtomic'
-        RaceSafeForExecution=$false
+        VerificationConsistency='ExclusiveHandlePinned'
+        RaceSafeForExecution=$true
         CertificateChainValidated=$chainValidated
         CertificateDownloadsDisabled=$certificateDownloadsDisabled
         RevocationChecked=$false
@@ -194,8 +220,18 @@ function Test-MBInstallProvenanceManifest {
         ProductVersion=[string]$manifest.ProductVersion
         InstallTransactionId=$transaction.ToString()
         VerifiedFiles=@($verified)
-        Note='Signed manifest and listed file hashes verified. Certificate-chain building is offline-only and uses locally available certificates; revocation is not checked online. This is provenance evidence only; it does not prove shared COM ownership or authorize deletion.'
+        Note='Signed manifest and listed file hashes verified, then every payload was re-opened and re-hashed through a mutation-resistant handle with parent directories pinned. Handles remain open in VerifiedFiles.LeaseResult until Close-MBInstallProvenanceLeases is called or the process exits. Certificate-chain building is offline-only; revocation is not checked online. This does not prove shared COM ownership or authorize deletion.'
     }
 }
 
-Export-ModuleMember -Function Test-MBInstallProvenanceManifest
+function Close-MBInstallProvenanceLeases {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Verification)
+    foreach($record in @($Verification.VerifiedFiles)) {
+        if($null -ne $record.LeaseResult) {
+            Close-MBLegacyExclusiveFileLease -LeaseResult $record.LeaseResult
+        }
+    }
+}
+
+Export-ModuleMember -Function Test-MBInstallProvenanceManifest,Close-MBInstallProvenanceLeases
