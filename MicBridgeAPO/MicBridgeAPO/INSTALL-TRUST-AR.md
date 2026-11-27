@@ -53,7 +53,7 @@ if ($s.Status -notin @([Management.Automation.SignatureStatus]::Valid,[Managemen
 $s = Get-AuthenticodeSignature -FilePath .\install.ps1
 if ($null -eq $s.SignerCertificate -or $s.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369' -or $s.SignerCertificate.Thumbprint -ne '29BAC42BFC53F2586559A9B95D1FEEB658E8891A' -or $s.Status -notin @([Management.Automation.SignatureStatus]::Valid,[Management.Automation.SignatureStatus]::NotTrusted)) { throw 'Installer signature or publisher pin mismatch.' }
 
-& .\tools\Inspect-MBLegacyInstallation.ps1 -PublisherSignatureVerified | Tee-Object -FilePath .\\legacy-inventory.json
+& .\tools\Inspect-MBLegacyInstallation.ps1 | Tee-Object -FilePath .\legacy-inventory.json
 ```
 
 
