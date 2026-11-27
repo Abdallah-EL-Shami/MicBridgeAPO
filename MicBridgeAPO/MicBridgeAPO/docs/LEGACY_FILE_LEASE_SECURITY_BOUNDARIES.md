@@ -12,6 +12,13 @@ Status: experimental, read-only prototype. This document describes the implement
 - Computes SHA-256 through the same opened file handle used to obtain file identity. It checks identity, link count, length, last-write timestamp, and stream length again after hashing.
 - Exposes read-only status and explicitly reports that execution is not authorized. It contains no delete, rename, registry mutation, or install operation.
 
+## Audit reparse-point coverage
+
+- The legacy installation audit rejects an install or data root that is itself a reparse point and reports it as `ReparsePointPreserved`.
+- The audit reports nested reparse-point directories and does not intentionally descend through them; Windows CI tests cover root and nested directory junctions for both install and data trees.
+- These tests cover directory junction behavior only. They do not establish equivalent behavior for symbolic links, volume mount points, UNC shares, DFS, cloud-backed placeholders, or third-party filesystem/filter drivers.
+- The file-handle lease has separate component-level reparse-point checks, but neither the audit tests nor the lease tests currently establish a universal race-free guarantee for every filesystem or namespace.
+
 ## What this does not prove
 
 - It does not prove that a file or COM registration historically belongs to MicBridge. A matching name, path, hash, or CLSID is not ownership evidence.
