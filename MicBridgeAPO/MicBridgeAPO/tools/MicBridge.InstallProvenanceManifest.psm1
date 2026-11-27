@@ -227,7 +227,7 @@ function Test-MBInstallProvenanceManifest {
                 $full=[IO.Path]::GetFullPath($entry.FullName)
                 if([string]::Equals($full,$manifestFull,[StringComparison]::OrdinalIgnoreCase) -or
                    [string]::Equals($full,$signatureFull,[StringComparison]::OrdinalIgnoreCase)) { continue }
-                $relativeActual=$full.Substring($root.Length + 1).Replace('\\','/')
+                $relativeActual=$full.Substring($root.Length + 1).Replace('\','/')
                 if(-not $pinnedActualFiles.Add($relativeActual)) {
                     throw "Pinned install tree contains a duplicate normalized file path: $relativeActual"
                 }
