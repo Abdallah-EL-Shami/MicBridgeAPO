@@ -1,13 +1,11 @@
 #include "MicBridgeBootstrapTrust.h"
 
 #include <windows.h>
-#include <wincrypt.h>
 #include <wintrust.h>
 #include <softpub.h>
 #include <bcrypt.h>
 
 #include <array>
-#include <vector>
 
 #pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -40,45 +38,16 @@ bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
     return CompareStringOrdinal(actual, -1, kPinnedSignerSha256, -1, TRUE) == CSTR_EQUAL;
 }
 
-bool ExtractAndCheckSigner(const std::wstring& filePath)
+bool ExtractAndCheckSigner(WINTRUST_DATA& trust)
 {
-    DWORD encoding = 0, contentType = 0, formatType = 0;
-    HCERTSTORE store = nullptr;
-    HCRYPTMSG message = nullptr;
-    bool valid = false;
-
-    if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, filePath.c_str(),
-                          CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
-                          CERT_QUERY_FORMAT_FLAG_BINARY, 0,
-                          &encoding, &contentType, &formatType,
-                          &store, &message, nullptr)) {
-        return false;
-    }
-
-    DWORD signerBytes = 0;
-    if (CryptMsgGetParam(message, CMSG_SIGNER_INFO_PARAM, 0, nullptr, &signerBytes) &&
-        signerBytes >= sizeof(CMSG_SIGNER_INFO)) {
-        std::vector<BYTE> buffer(signerBytes);
-        if (CryptMsgGetParam(message, CMSG_SIGNER_INFO_PARAM, 0,
-                             buffer.data(), &signerBytes)) {
-            const auto* signer = reinterpret_cast<const CMSG_SIGNER_INFO*>(buffer.data());
-            CERT_INFO query{};
-            query.Issuer = signer->Issuer;
-            query.SerialNumber = signer->SerialNumber;
-            PCCERT_CONTEXT certificate = CertFindCertificateInStore(
-                store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
-                CERT_FIND_SUBJECT_CERT, &query, nullptr);
-            if (certificate != nullptr) {
-                valid = IsPinnedCertificate(certificate);
-                CertFreeCertificateContext(certificate);
-            }
-        }
-    }
-
-    if (message) CryptMsgClose(message);
-    if (store) CertCloseStore(store, 0);
-    return valid;
-}
+    if (trust.hWVTStateData == nullptr) return false;
+    CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(trust.hWVTStateData);
+    if (provider == nullptr) return false;
+    CRYPT_PROVIDER_SGNR* signer = WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0);
+    if (signer == nullptr || signer->csCertChain == 0) return false;
+    CRYPT_PROVIDER_CERT* signerCertificate = WTHelperGetProvCertFromChain(signer, 0);
+    if (signerCertificate == nullptr || signerCertificate->pCert == nullptr) return false;
+    return IsPinnedCertificate(signerCertificate->pCert);
 }
 
 namespace micbridge::bootstrap {
@@ -103,10 +72,10 @@ bool VerifyPinnedAuthenticodeSigner(const std::wstring& filePath)
 
     GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const LONG status = WinVerifyTrust(nullptr, &policy, &trust);
+    const bool signerPinned = status == ERROR_SUCCESS && ExtractAndCheckSigner(trust);
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &policy, &trust);
 
-    if (status != ERROR_SUCCESS) return false;
-    return ExtractAndCheckSigner(filePath);
+    return status == ERROR_SUCCESS && signerPinned;
 }
 }
