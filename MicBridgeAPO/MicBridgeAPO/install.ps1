@@ -23,6 +23,7 @@ if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVe
     -not $verifiedPackage.FileProvenanceVerified -or
     $verifiedPackage.SignerThumbprint -ne $trustedReleaseThumbprint -or
     $verifiedPackage.IsExecutionAuthorized -or $verifiedPackage.OwnershipProven) {
+    try { Close-MBInstallProvenanceLeases -Verification $verifiedPackage } catch {}
     throw 'Signed package verification did not return the required integrity evidence; installation was blocked.'
 }
 $expectedPackageDll = @($verifiedPackage.VerifiedFiles | Where-Object {
@@ -30,6 +31,7 @@ $expectedPackageDll = @($verifiedPackage.VerifiedFiles | Where-Object {
 })
 if ($expectedPackageDll.Count -ne 1 -or
     -not [string]::Equals([IO.Path]::GetFullPath($DllSource),[IO.Path]::GetFullPath([string]$expectedPackageDll[0].Path),[StringComparison]::OrdinalIgnoreCase)) {
+    Close-MBInstallProvenanceLeases -Verification $verifiedPackage
     throw 'DllSource must resolve to the exact MicBridgeAPO.dll covered by the signed release manifest.'
 }
 
@@ -37,7 +39,8 @@ if ($expectedPackageDll.Count -ne 1 -or
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
-    Start-Process powershell -Verb RunAs -ArgumentList $a
+    try { Start-Process powershell -Verb RunAs -ArgumentList $a }
+    finally { Close-MBInstallProvenanceLeases -Verification $verifiedPackage }
     exit
 }
 
