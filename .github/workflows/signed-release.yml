@@ -117,7 +117,9 @@ jobs:
           $package = 'MicBridgeAPO-Package'
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item 'build/Release/MicBridgeAPO.dll' $package
-          $uiVersion = if ($env:GITHUB_REF -match '^refs/tags/v(.+)          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','INSTALL-TRUST-AR.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1')
+          $uiVersion = '0.1.1-dev'
+          if ($env:GITHUB_REF.StartsWith('refs/tags/v')) { $uiVersion = $env:GITHUB_REF.Substring('refs/tags/v'.Length) }
+          [IO.File]::WriteAllText((Join-Path $package 'version.txt'),$uiVersion,[Text.UTF8Encoding]::new($false))
           foreach ($file in $files) {
             $path = Join-Path $source $file
             if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }
