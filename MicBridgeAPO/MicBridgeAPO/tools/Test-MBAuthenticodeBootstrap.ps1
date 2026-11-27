@@ -30,8 +30,11 @@ try {
 
     $scriptPath = Join-Path $root 'SignedProbe.ps1'
     [IO.File]::WriteAllText($scriptPath,"Write-Output 'AUTHENTICODE_PROBE_OK'"+[Environment]::NewLine,[Text.UTF8Encoding]::new($true))
+    Write-Host 'AUTHENTICODE TEST: signing fixture'
     $signed = Set-AuthenticodeSignature -FilePath $scriptPath -Certificate $cert -HashAlgorithm SHA256
+    Write-Host "AUTHENTICODE TEST: Set-AuthenticodeSignature status=$($signed.Status)"
     $verified = Get-AuthenticodeSignature -FilePath $scriptPath
+    Write-Host "AUTHENTICODE TEST: Get-AuthenticodeSignature status=$($verified.Status)"
     if ($signed.Status -ne [Management.Automation.SignatureStatus]::Valid -or
         $verified.Status -ne [Management.Automation.SignatureStatus]::Valid -or
         $verified.SignerCertificate.Thumbprint -ne $cert.Thumbprint) {
@@ -39,18 +42,21 @@ try {
     }
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    & $powershell -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File $scriptPath
-    $validExitCode = $LASTEXITCODE
-    if ($validExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$validExitCode" }
+    $arguments = "-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File `"$scriptPath`""
+    Write-Host 'AUTHENTICODE TEST: launching valid script under AllSigned'
+    $validProcess = Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -NoNewWindow
+    if (-not $validProcess.WaitForExit(20000)) { $validProcess.Kill(); throw 'FAIL: AllSigned valid-script probe exceeded 20 seconds.' }
+    if ($validProcess.ExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$($validProcess.ExitCode)" }
 
     Add-Content -FilePath $scriptPath -Value '# tampered'
     $tampered = Get-AuthenticodeSignature -FilePath $scriptPath
     if ($tampered.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
         throw "FAIL: modified signed script was not classified as HashMismatch. Status=$($tampered.Status)"
     }
-    & $powershell -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File $scriptPath
-    $tamperedExitCode = $LASTEXITCODE
-    if ($tamperedExitCode -eq 0) { throw 'FAIL: AllSigned executed a modified signed script.' }
+    Write-Host 'AUTHENTICODE TEST: launching tampered script under AllSigned'
+    $tamperedProcess = Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -NoNewWindow
+    if (-not $tamperedProcess.WaitForExit(20000)) { $tamperedProcess.Kill(); throw 'FAIL: AllSigned tampered-script probe exceeded 20 seconds.' }
+    if ($tamperedProcess.ExitCode -eq 0) { throw 'FAIL: AllSigned executed a modified signed script.' }
 
     Write-Host 'PASS: Authenticode signature validates for the pinned trusted publisher.'
     Write-Host 'PASS: Windows PowerShell AllSigned executes a valid signed script.'
