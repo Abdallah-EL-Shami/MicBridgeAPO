@@ -39,6 +39,7 @@ $cmake = [IO.File]::ReadAllText($cmakePath)
 $launcherSource = [IO.File]::ReadAllText($launcherSourcePath)
 $trustSource = [IO.File]::ReadAllText($trustSourcePath)
 $trustHeader = [IO.File]::ReadAllText($trustHeaderPath)
+$revocationDesign = [IO.File]::ReadAllText($launcherDesignPath)
 $signatureTest = [IO.File]::ReadAllText($signatureTestPath)
 $launcherTest = [IO.File]::ReadAllText($launcherTestPath)
 
@@ -118,6 +119,16 @@ if ($launcherDesign -notmatch '(?im)Status: \*\*native fail-closed launcher scaf
     $launcherDesign -notmatch '(?im)Required negative and adversarial tests') {
     throw 'FAIL: independent native launcher design and its blocked/not-implemented status must remain present.'
 }
+if ($trustSource -notmatch '(?s)WTD_REVOKE_NONE' -or
+    $trustSource -notmatch '(?s)WTD_REVOCATION_CHECK_NONE' -or
+    $trustSource -notmatch '(?s)WTD_CACHE_ONLY_URL_RETRIEVAL' -or
+    $trustSource -notmatch '(?s)WTD_STATEACTION_CLOSE' -or
+    $revocationDesign -notmatch '(?im)does \*\*not\*\* establish fresh revocation status' -or
+    $revocationDesign -notmatch '(?im)Strict online release validation' -or
+    $revocationDesign -notmatch '(?im)Offline-capable pinned-certificate policy') {
+    throw 'FAIL: Authenticode revocation behavior and its online/offline limitation must be explicit and consistent with the native verifier flags.'
+}
+
 if ($readiness -notmatch '(?im)Bootstrap trust boundary \(not yet closed\)' -or
     $readiness -notmatch '(?im)Execution policy is not a security boundary') {
     throw 'FAIL: security readiness document must explicitly retain the unresolved bootstrap trust limitation.'
