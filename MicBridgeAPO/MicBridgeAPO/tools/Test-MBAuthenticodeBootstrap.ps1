@@ -39,17 +39,18 @@ try {
     }
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = "-NoProfile -ExecutionPolicy AllSigned -File `"$scriptPath`""
-    $process = Start-Process -FilePath $powershell -ArgumentList $arguments -Wait -PassThru -NoNewWindow
-    if ($process.ExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$($process.ExitCode)" }
+    & $powershell -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File $scriptPath
+    $validExitCode = $LASTEXITCODE
+    if ($validExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$validExitCode" }
 
     Add-Content -LiteralPath $scriptPath -Value '# tampered'
     $tampered = Get-AuthenticodeSignature -LiteralPath $scriptPath
     if ($tampered.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
         throw "FAIL: modified signed script was not classified as HashMismatch. Status=$($tampered.Status)"
     }
-    $tamperedProcess = Start-Process -FilePath $powershell -ArgumentList $arguments -Wait -PassThru -NoNewWindow
-    if ($tamperedProcess.ExitCode -eq 0) { throw 'FAIL: AllSigned executed a modified signed script.' }
+    & $powershell -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File $scriptPath
+    $tamperedExitCode = $LASTEXITCODE
+    if ($tamperedExitCode -eq 0) { throw 'FAIL: AllSigned executed a modified signed script.' }
 
     Write-Host 'PASS: Authenticode signature validates for the pinned trusted publisher.'
     Write-Host 'PASS: Windows PowerShell AllSigned executes a valid signed script.'
