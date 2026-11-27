@@ -38,6 +38,13 @@ foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstall
     }
 }
 if ($build -notmatch 'Test-MBInstallTransactionReceipt\.ps1') { throw 'Ordinary CI must execute transaction receipt security tests.' }
+foreach ($workflowName in @('build','release')) {
+    $workflowContent = if ($workflowName -eq 'build') { $build } else { $release }
+    if ($workflowContent -notmatch 'powershell[.]exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest[.]ps1' -or
+        $workflowContent -notmatch 'powershell[.]exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallTransactionReceipt[.]ps1') {
+        throw "$workflowName workflow must exercise manifest and receipt modules under Windows PowerShell 5.1."
+    }
+}
 if ($build -match 'MB_RELEASE_SIGNING_PFX_(BASE64|PASSWORD)') { throw 'Ordinary build workflow must never reference release signing secrets.' }
 if ($build -match '(?im)^\s*environment:\s*release-signing\s*$') { throw 'Ordinary build workflow must never enter the protected signing environment.' }
 
