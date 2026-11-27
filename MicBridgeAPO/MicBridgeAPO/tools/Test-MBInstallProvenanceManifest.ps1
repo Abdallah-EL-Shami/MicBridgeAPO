@@ -396,7 +396,7 @@ try {
         throw 'FAIL: verifier must re-enumerate and compare the exact package file set after all mutation-resistant file leases are held.'
     }
     $postPinRegion=$verifierSource.Substring($postPinEnumerationIndex,$leaseReturnIndex-$postPinEnumerationIndex)
-    foreach($requiredPostPinCheck in @('Get-ChildItem -LiteralPath $root -Force -Recurse','FileAttributes]::ReparsePoint','$pinnedActualFiles.Count -ne $seen.Count','Install tree contains a file outside the signed manifest after pinning')) {
+    foreach($requiredPostPinCheck in @('Get-ChildItem -LiteralPath $root -Force -Recurse','FileAttributes]::ReparsePoint','$pinnedActualFiles.Count -ne $seen.Count','Install tree contains a file outside the signed manifest after pinning','empty directory that cannot be covered by a payload lease','gained or retained an empty directory during pinning')) {
         if($postPinRegion -notmatch [regex]::Escape($requiredPostPinCheck)) {
             throw "FAIL: post-pin package revalidation is missing invariant: $requiredPostPinCheck"
         }
