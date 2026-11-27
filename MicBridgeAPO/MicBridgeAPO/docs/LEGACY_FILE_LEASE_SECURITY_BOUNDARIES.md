@@ -19,6 +19,21 @@ Status: experimental, read-only prototype. This document describes the implement
 - These tests cover directory junction behavior only. They do not establish equivalent behavior for symbolic links, volume mount points, UNC shares, DFS, cloud-backed placeholders, or third-party filesystem/filter drivers.
 - The file-handle lease has separate component-level reparse-point checks, but neither the audit tests nor the lease tests currently establish a universal race-free guarantee for every filesystem or namespace.
 
+## Ownership provenance: current release blocker
+
+The current audit intentionally returns `OwnershipProven = false` and `OwnershipEvidenceStatus = NotEstablished`. No existing audit input is allowed to promote those fields to `true` merely because a path, filename, CLSID, registry server path, or SHA-256 matches.
+
+The CMS approval module is a separate reviewer-approval mechanism. Its signature binds a review decision to a journal digest, candidate path/hash, reviewer SID, machine, expiry, and trusted signer thumbprint. It does **not** establish who originally installed a file or created a COM registration, and it must never be treated as the missing ownership provenance.
+
+A future provenance source would need, at minimum:
+- A versioned installation manifest created during a successful MicBridge installation, not reconstructed during cleanup.
+- A cryptographic signature from a product-release signing identity whose trust anchor is provisioned independently of the manifest and journal.
+- Exact canonical relative paths, file hashes, product/version identity, installation transaction ID, and the relevant COM registration values created by that transaction.
+- Verification against the currently installed file and registration state, with explicit handling for upgrades, interrupted rollback, manifest loss, certificate rotation/revocation, and shared COM registrations.
+- A policy that still preserves any shared or ambiguous registration, even if a product binary manifest is valid.
+
+No such end-to-end manifest/trust-anchor lifecycle is currently implemented or validated. Therefore `OwnershipProven` remains false, cleanup review cannot be promoted, and no executor may be connected to the installer. Existing installations without trustworthy historical provenance require manual review or preservation, not inferred ownership.
+
 ## What this does not prove
 
 - It does not prove that a file or COM registration historically belongs to MicBridge. A matching name, path, hash, or CLSID is not ownership evidence.
