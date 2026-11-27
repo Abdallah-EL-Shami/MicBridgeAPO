@@ -11,6 +11,7 @@ try {
         throw
     }
 }
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallPackageFileLease.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Force
 
 $root=Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeProvenance-' + [guid]::NewGuid().ToString('N'))
