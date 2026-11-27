@@ -397,10 +397,21 @@ try {
         throw 'FAIL: verifier must re-enumerate and compare the exact package file set after all mutation-resistant file leases are held.'
     }
     $postPinRegion=$verifierSource.Substring($postPinEnumerationIndex,$leaseReturnIndex-$postPinEnumerationIndex)
-    foreach($requiredPostPinCheck in @('Get-ChildItem -LiteralPath $root -Force -Recurse','FileAttributes]::ReparsePoint','$pinnedActualFiles.Count -ne $seen.Count','Install tree contains a file outside the signed manifest after pinning','empty directory that cannot be covered by a payload lease','gained or retained an empty directory during pinning')) {
+    foreach($requiredPostPinCheck in @('Get-ChildItem -LiteralPath $root -Force -Recurse','FileAttributes]::ReparsePoint','$pinnedActualFiles.Count -ne $seen.Count','Install tree contains a file outside the signed manifest after pinning','gained or retained an empty directory during pinning')) {
         if($postPinRegion -notmatch [regex]::Escape($requiredPostPinCheck)) {
             throw "FAIL: post-pin package revalidation is missing invariant: $requiredPostPinCheck"
         }
+    }
+    $initialEnumerationIndex=$verifierSource.IndexOf('$actualFiles=',[StringComparison]::Ordinal)
+    if($initialEnumerationIndex -lt 0 -or $initialEnumerationIndex -ge $pinLoopIndex) {
+        throw 'FAIL: verifier must perform an initial exact package enumeration before acquiring leases.'
+    }
+    $initialRegion=$verifierSource.Substring($initialEnumerationIndex,$pinLoopIndex-$initialEnumerationIndex)
+    if($initialRegion -notmatch [regex]::Escape('Install tree contains an empty directory that cannot be covered by a payload lease')) {
+        throw 'FAIL: initial package enumeration must reject empty directories.'
+    }
+    if($postPinRegion -notmatch [regex]::Escape('Install tree gained or retained an empty directory during pinning')) {
+        throw 'FAIL: post-pin package enumeration must reject empty directories.'
     }
 
     Write-Host 'PASS: signed manifest trust, signer purpose, transaction identity and file hashes verified; COM ownership and execution remain unproven.'
