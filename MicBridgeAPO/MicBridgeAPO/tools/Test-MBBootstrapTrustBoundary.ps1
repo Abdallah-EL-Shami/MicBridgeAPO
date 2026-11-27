@@ -53,6 +53,9 @@ $bootstrapPrefix = $installer.Substring(0,$verifyIndex)
 if ($bootstrapPrefix -match '(?im)\b(Start-Process|New-Item|Add-Content|Set-ItemProperty|Remove-Item|reg\.exe|Enter-MBRecoveryOperationLock)\b') {
     throw 'FAIL: bootstrap prefix contains a process launch, file/log creation, registry mutation, or lock acquisition before verification.'
 }
+if ($installer -notmatch '(?s)-not\s+\$verifiedPackage\.BootstrapTrustEstablished') {
+    throw 'FAIL: installer must refuse installation unless an independent bootstrap trust mechanism explicitly establishes trust.'
+}
 if ($installer -notmatch '(?s)\$verifiedPackage\s*=\s*Test-MBInstallProvenanceManifest\b[^\r\n]*-PinFiles' -or
     $installer -notmatch '(?s)\$verifiedPackage\.BootstrapTrustEstablished') {
     throw 'FAIL: installer must request pinned package files and explicitly retain the bootstrap-trust boundary result.'
