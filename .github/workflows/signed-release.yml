@@ -194,6 +194,9 @@ jobs:
           $pfxPath = Join-Path $env:RUNNER_TEMP 'micbridge-signing.pfx'
           $cert = $null
           $raw = $null
+          $publicCert = $null
+          $rootStore = $null
+          $publisherStore = $null
           try {
             if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Signing secrets are unavailable.' }
             if ($env:GITHUB_REF_NAME -notlike 'v*' -or $env:GITHUB_REF_NAME.Length -lt 2) { throw 'Only version tags beginning with v may be signed.' }
