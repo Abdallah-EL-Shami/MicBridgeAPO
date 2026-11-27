@@ -104,7 +104,7 @@ if ($cmake -notmatch '(?s)add_executable\(MicBridgeBootstrap\s+src/MicBridgeBoot
     $launcherTest -notmatch '(?s)exitCode != 78') {
     throw 'FAIL: native bootstrap scaffold must compile as a CMake target and CTest must prove it exits fail-closed without launching a payload.'
 }
-if ($launcherDesign -notmatch '(?im)Status: \*\*security design documented; fail-closed native CMake scaffold and CTest added; signature/manifest verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked\.\*\*' -or
+if ($launcherDesign -notmatch '(?im)Status: \*\*native fail-closed launcher scaffold plus a separately compiled WinVerifyTrust/pinned-SHA256 signer-verification component and unsigned-file negative test are implemented; the verifier is not yet called by the launcher; manifest/CMS verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked\.\*\*' -or
     $launcherDesign -notmatch '(?im)Required verification sequence' -or
     $launcherDesign -notmatch '(?im)Required negative and adversarial tests') {
     throw 'FAIL: independent native launcher design and its blocked/not-implemented status must remain present.'
