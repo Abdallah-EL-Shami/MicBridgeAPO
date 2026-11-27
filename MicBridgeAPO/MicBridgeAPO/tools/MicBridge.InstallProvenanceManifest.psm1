@@ -19,7 +19,17 @@ function Test-MBInstallProvenanceManifest {
         [string[]]$RevokedSignerThumbprints=@(),
         [switch]$RequireCertificateChain
     )
+    try {
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
+} catch {
+    # Windows PowerShell 5.1 runs on .NET Framework, where SignedCms is
+    # provided by System.Security.dll rather than the modern Pkcs assembly name.
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+    } else {
+        throw
+    }
+}
     $manifestFull=Test-MBRegularNonReparseFile -Path $ManifestPath -Label 'Manifest'
     $signatureFull=Test-MBRegularNonReparseFile -Path $SignaturePath -Label 'Manifest signature'
     $rootItem=Get-Item -LiteralPath $InstallDirectory -Force -ErrorAction Stop
