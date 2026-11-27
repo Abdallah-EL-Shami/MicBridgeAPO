@@ -104,7 +104,15 @@ The package manifest covers the release package, whereas the installer copies on
 
 Until that design and its tests are implemented, do not treat the current signed artifact as installable/approved, and do not connect the cleanup executor to the installer or uninstaller. Unknown or unproven files and registrations must be preserved; if the current uninstaller cannot safely distinguish them, it must stop before mutation rather than guess.
 
-### Offline revocation and trust limitations
+#### Machine-bound installation transaction receipt
+
+The development branch now includes `MicBridge.InstallTransactionReceipt.psm1`. It can create a no-overwrite transaction receipt after installation files have been placed and verified. The receipt binds the product version, release-manifest SHA-256, signer thumbprint, canonical install root, transaction GUID, optional baseline-evidence digest, and each installed relative path/hash. Its payload is protected with Windows DPAPI `LocalMachine` scope and path-specific entropy, written to a new temporary file, flushed, ACL-restricted to SYSTEM/Administrators/the current identity, and atomically moved into place. Verification can re-hash the installed files and rejects path traversal, reparse points, modified files, modified receipt bytes, and attempts to overwrite an existing receipt.
+
+This is a machine-bound integrity record, **not a release signature** and not an administrator-proof ownership authority. A local administrator can control the machine, DPAPI context, files, and scripts; therefore the receipt alone cannot prove historical ownership against a malicious local administrator or establish the pre-install Windows baseline. The module deliberately always reports `OwnershipProven=false`, `ComOwnershipProven=false`, and `IsExecutionAuthorized=false`. It does not authorize uninstall, cleanup, COM mutation, or restoration. It is not yet invoked by `install.ps1` or `uninstall.ps1`; integration is deliberately withheld until a trusted installer/uninstaller bootstrap and transaction flow are designed and tested.
+
+The receipt module is included in the signed-release package staging, and its temporary-directory test is part of ordinary Windows CI. The test covers receipt creation and verification, no-overwrite behavior, installed-file tampering, receipt tampering, and traversal rejection. This does not replace the independent package-manifest signature check.
+
+## Offline revocation and trust limitations
 
 The verifier deliberately disables certificate downloads and sets revocation mode to `NoCheck`. Consequently `RevocationChecked=false` and `CertificateRevocationMode=NotCheckedOffline` are expected, not evidence that the certificate is unrevoked. A locally available certificate chain and a pinned thumbprint do not provide fresh revocation status. A caller-supplied denylist can reject a known-revoked thumbprint, but cannot discover a newly revoked certificate without updated trusted information.
 
