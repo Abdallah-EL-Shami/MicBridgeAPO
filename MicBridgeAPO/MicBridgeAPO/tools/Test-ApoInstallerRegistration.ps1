@@ -274,7 +274,7 @@ Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
 
 Assert-Contains $installer 'MicBridge.LegacyInstallAudit.psm1' 'Installer loads the read-only legacy installation audit'
 Assert-Contains $installer 'Test-MBLegacyInstallationState' 'Installer audits legacy backup, COM registration, and file provenance before upgrade'
-Assert-Contains $installer '$blockingLegacyClasses' 'Clean install blocks live or ambiguous legacy state while preserving old recovery evidence'
+Assert-Contains $installer '\$blockingLegacyClasses' 'Clean install blocks live or ambiguous legacy state while preserving old recovery evidence'
 Assert-Contains $installer 'No current-installer receipt exists' 'Managed upgrades require a current machine-bound install receipt'
 Assert-Contains $legacyAuditModule 'Hashes establish integrity only against' 'Legacy audit checks backup byte integrity'
 Assert-Contains $legacyAuditModule 'they cannot prove that the captured values were historically correct' 'Legacy audit distinguishes file integrity from proof of an original Windows baseline'
