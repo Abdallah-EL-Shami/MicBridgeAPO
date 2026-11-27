@@ -182,13 +182,13 @@ function Test-MBInstallProvenanceManifest {
         # write/delete sharing while still permitting the installer to read/copy it.
         $leaseResults=[Collections.Generic.List[object]]::new()
         try {
-            $leaseModule=Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1'
+            $leaseModule=Join-Path $PSScriptRoot 'MicBridge.InstallPackageFileLease.psm1'
             if(-not (Test-Path -LiteralPath $leaseModule -PathType Leaf)) {
                 throw 'Mutation-resistant package file lease module is missing.'
             }
             Import-Module -Name $leaseModule -Force -ErrorAction Stop
             foreach($record in $verified) {
-                $leaseResult=Open-MBLegacyExclusiveFileLease -CandidatePath $record.Path -InstallRoot $root -ExpectedSha256 $record.Sha256
+                $leaseResult=Open-MBInstallPackageFileLease -CandidatePath $record.Path -InstallRoot $root -ExpectedSha256 $record.Sha256
                 if(-not $leaseResult.FinalHandleValidationPassed -or -not $leaseResult.Lease.IsOpen) {
                     throw "Package file could not be pinned to its verified handle: $($record.RelativePath)"
                 }
@@ -197,7 +197,7 @@ function Test-MBInstallProvenanceManifest {
             }
         } catch {
             foreach($leaseResult in $leaseResults) {
-                try { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult } catch {}
+                try { Close-MBInstallPackageFileLease -LeaseResult $leaseResult } catch {}
             }
             throw
         }
@@ -234,7 +234,7 @@ function Close-MBInstallProvenanceLeases {
     param([Parameter(Mandatory)][object]$Verification)
     foreach($record in @($Verification.VerifiedFiles)) {
         if($null -ne $record.LeaseResult) {
-            Close-MBLegacyExclusiveFileLease -LeaseResult $record.LeaseResult
+            Close-MBInstallPackageFileLease -LeaseResult $record.LeaseResult
         }
     }
 }
