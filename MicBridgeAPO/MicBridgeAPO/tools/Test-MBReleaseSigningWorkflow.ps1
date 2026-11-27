@@ -32,6 +32,11 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
+foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
+    if ($release -notmatch [regex]::Escape($testName.Replace('[.]','.'))) {
+        throw "Signed release workflow must run the provenance integration test: $testName"
+    }
+}
 if ($build -notmatch 'Test-MBInstallTransactionReceipt\.ps1') { throw 'Ordinary CI must execute transaction receipt security tests.' }
 if ($build -match 'MB_RELEASE_SIGNING_PFX_(BASE64|PASSWORD)') { throw 'Ordinary build workflow must never reference release signing secrets.' }
 if ($build -match '(?im)^\s*environment:\s*release-signing\s*$') { throw 'Ordinary build workflow must never enter the protected signing environment.' }
