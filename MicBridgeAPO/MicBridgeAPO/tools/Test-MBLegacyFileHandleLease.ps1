@@ -96,6 +96,19 @@ try {
         Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult
     }
 
+    # Closing a successful lease must release every pinned directory handle as well.
+    $releaseParent = Join-Path $sandboxParent 'release-check'
+    $releaseRoot = Join-Path $releaseParent 'install'
+    New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+    $releaseDll = Join-Path $releaseRoot 'MicBridgeAPO.dll'
+    [IO.File]::WriteAllBytes($releaseDll,[byte[]](21,22,23,24))
+    $releaseHash = (Get-FileHash -LiteralPath $releaseDll -Algorithm SHA256).Hash
+    $releaseLease = Open-MBLegacyExclusiveFileLease -CandidatePath $releaseDll -InstallRoot $releaseRoot -ExpectedSha256 $releaseHash
+    Close-MBLegacyExclusiveFileLease -LeaseResult $releaseLease
+    $releaseMoved = $releaseParent + '.closed'
+    [IO.Directory]::Move($releaseParent,$releaseMoved)
+    [IO.Directory]::Move($releaseMoved,$releaseParent)
+
     # A second hard link makes path-based cleanup ambiguous even while one handle is exclusive.
     if (-not ('MicBridgeHandleLeaseHardLink.Native' -as [type])) {
         Add-Type -TypeDefinition @'
