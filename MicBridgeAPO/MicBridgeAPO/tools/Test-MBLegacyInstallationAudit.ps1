@@ -87,6 +87,12 @@ try {
     [IO.File]::AppendAllText($clsidExport,'tampered')
     $tampered=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
     if($tampered.Outcome -ne 'ReviewRequired' -or $tampered.BaselineAssessment -ne 'InvalidOrInsufficient') { throw 'FAIL: tampered permanent COM backup was accepted' }
+    $legacyEvidenceHash=(Get-FileHash $backupJson -Algorithm SHA256).Hash
+    $ignoredLegacy=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice -IgnoreLegacyRecoveryBackups
+    if($ignoredLegacy.BaselineAssessment -ne 'IgnoredLegacyEvidence' -or $ignoredLegacy.Findings | Where-Object { $_.Classification -eq 'InvalidOrInsufficient' }) {
+        throw 'FAIL: clean-install audit did not ignore malformed legacy recovery backup content.'
+    }
+    if((Get-FileHash $backupJson -Algorithm SHA256).Hash -ne $legacyEvidenceHash) { throw 'FAIL: ignoring legacy recovery evidence modified backup.json.' }
     [IO.File]::WriteAllBytes($clsidExport,$clsidExportBytes)
     $permanentBackup.DeviceId=[guid]::NewGuid().ToString('D')
     [IO.File]::WriteAllText($backupJson,(ConvertTo-Json -InputObject $permanentBackup -Depth 8),(New-Object Text.UTF8Encoding($false)))
