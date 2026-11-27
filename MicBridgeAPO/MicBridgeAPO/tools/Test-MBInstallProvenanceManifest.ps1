@@ -58,6 +58,7 @@ try {
     if(-not $malformedTrustRejected) { throw 'FAIL: malformed trust anchor was not rejected explicitly.' }
 
     # A thumbprint-pinned certificate without the Code Signing EKU is not an acceptable signer.
+    $baselineManifestBytes=[IO.File]::ReadAllBytes($manifestPath)
     $noEkuRsa=[Security.Cryptography.RSA]::Create(2048)
     $noEkuCert=$null
     try {
@@ -68,7 +69,7 @@ try {
         $noEkuRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
             [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,$true))
         $noEkuCert=$noEkuRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-2),[DateTimeOffset]::UtcNow.AddHours(1))
-        $noEkuCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($signedManifestBytes),$false)
+        $noEkuCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
         $noEkuSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
             [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$noEkuCert)
         $noEkuSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
@@ -86,7 +87,7 @@ try {
         $noEkuRsa.Dispose()
     }
     # Restore the original valid signature for subsequent negative cases.
-    $restoreCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($signedManifestBytes),$false)
+    $restoreCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
     $restoreSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
         [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
     $restoreSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
