@@ -74,6 +74,9 @@ jobs:
       - name: Test protected release signing workflow invariants (static)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBReleaseSigningWorkflow.ps1
+      - name: Test Authenticode bootstrap and AllSigned enforcement (temporary certificate)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBAuthenticodeBootstrap.ps1
       - name: Test exclusive legacy file handle lease (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyFileHandleLease.ps1
