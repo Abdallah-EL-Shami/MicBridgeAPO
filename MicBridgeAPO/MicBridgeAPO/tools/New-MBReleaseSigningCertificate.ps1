@@ -9,7 +9,7 @@ if (Test-Path -LiteralPath $output) {
     if (@(Get-ChildItem -LiteralPath $output -Force -ErrorAction Stop).Count -gt 0) { throw "Output directory is not empty; refusing to overwrite signing material: $output" }
 } else { New-Item -ItemType Directory -Path $output -Force | Out-Null }
 $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-& icacls.exe $output /inheritance:r /grant:r "*\${currentSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+& icacls.exe $output /inheritance:r /grant:r "*${currentSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not restrict permissions on the signing output directory.' }
 $subject = 'CN=MicBridgeAPO Release Signing'
 $cert = $null
