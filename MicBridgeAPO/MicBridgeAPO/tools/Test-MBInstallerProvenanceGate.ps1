@@ -67,12 +67,12 @@ if ($installer -notmatch 'Close-MBInstallProvenanceLeases' -or
     throw 'FAIL: installer must release package leases and bind DLL input to the signed package file.'
 }
 if ($build -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
-    $build -notmatch 'MicBridge[.]LegacyFileHandleLease[.]psm1' -or
+    $build -notmatch 'MicBridge[.]InstallPackageFileLease[.]psm1' -or
     $build -notmatch 'Test-MBInstallerProvenanceGate[.]ps1') {
     throw 'FAIL: ordinary CI package staging or installer provenance integration test is missing.'
 }
 if ($release -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
-    $release -notmatch 'MicBridge[.]LegacyFileHandleLease[.]psm1' -or
+    $release -notmatch 'MicBridge[.]InstallPackageFileLease[.]psm1' -or
     $release -notmatch 'Test-MBInstallProvenanceManifest') {
     throw 'FAIL: signed release workflow must stage lease/receipt support and verify the release manifest after signing.'
 }
