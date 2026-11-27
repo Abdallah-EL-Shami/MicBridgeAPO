@@ -31,12 +31,11 @@ The launcher itself is not a trust anchor just because it is in the package. The
 
 The current verifier sets `fdwRevocationChecks = WTD_REVOKE_NONE` and uses cache-only URL retrieval. This is an explicit offline-availability choice, not evidence that the certificate has not been revoked. A successful result therefore establishes Windows Authenticode policy acceptance under the locally available trust state plus the pinned certificate identity; it does **not** establish fresh revocation status. Do not describe this mode as revocation-checked.
 
-Before production release, choose and document one of these policies:
+**Selected project policy: offline-capable pinned-certificate policy.** Retain cache-only retrieval and no online revocation checks so first-time installation and normal operation can work without Internet. The current flags implement this availability choice; they do not establish fresh revocation status, and compromise/revocation risk is accepted and documented.
 
-- **Strict online release validation:** require a successful revocation check at release/bootstrap time, fail closed when revocation data cannot be obtained, and clearly disclose that initial verification requires network access.
-- **Offline-capable pinned-certificate policy:** retain cache-only/no-revocation behavior for offline installation, but document the residual revocation risk, define certificate-compromise response (including a new pinned fingerprint and replacement launcher), and ensure users receive the updated trust material through an independently authenticated channel.
+The active release signer remains the single existing publisher certificate, pinned by SHA-256 fingerprint. Do not generate a certificate per build or per development release. Certificate rotation is an exceptional, separately approved security operation: publish the replacement fingerprint and launcher through an independently authenticated channel, overlap trust only for a documented migration window if needed, and retain old public certificates for historical signature verification. Never distribute or log the private key.
 
-The product requirement that normal installed operation works without Internet does not by itself decide whether first-time release verification may require network access. That decision must be explicit; neither behavior is to be inferred from the current flags.
+If the signing key is suspected compromised, stop publishing, treat artifacts signed after the suspected compromise as untrusted, and issue a replacement launcher/trust package with a newly approved pin through the independent channel. Since this policy performs no fresh revocation check, the pin update—not an assumed online revocation result—is the emergency rejection mechanism.
 
 ## Privilege boundary
 
