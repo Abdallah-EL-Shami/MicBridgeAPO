@@ -12,6 +12,18 @@ function New-MBLegacyCleanupPlan {
     $items = [Collections.Generic.List[object]]::new()
     $blockers = [Collections.Generic.List[string]]::new()
 
+    # Older or incomplete audit objects may not carry the ownership fields.
+    # Under StrictMode, access through PSObject.Properties avoids throwing;
+    # missing evidence always defaults to unproven and therefore fails closed.
+    $ownershipProven = $false
+    $ownershipEvidenceStatus = 'NotEstablished'
+    $ownershipProperty = $Audit.PSObject.Properties['OwnershipProven']
+    if ($null -ne $ownershipProperty) { $ownershipProven = ($ownershipProperty.Value -eq $true) }
+    $ownershipStatusProperty = $Audit.PSObject.Properties['OwnershipEvidenceStatus']
+    if ($null -ne $ownershipStatusProperty -and -not [string]::IsNullOrWhiteSpace([string]$ownershipStatusProperty.Value)) {
+        $ownershipEvidenceStatus = [string]$ownershipStatusProperty.Value
+    }
+
     if (-not $Audit.IsReadOnly) { $blockers.Add('Audit is not explicitly read-only.') }
     if ($Audit.CleanupAllowed -ne $false) { $blockers.Add('Audit does not explicitly deny direct cleanup.') }
     if ($Audit.OriginalWindowsBaselineProven -ne $false) { $blockers.Add('Original Windows baseline must not be assumed.') }
@@ -42,7 +54,7 @@ function New-MBLegacyCleanupPlan {
                     }
                 }
             } catch {}
-            if ($Audit.OwnershipProven -eq $true -and $Audit.OwnershipEvidenceStatus -eq 'Proven' -and
+            if ($ownershipProven -eq $true -and $ownershipEvidenceStatus -eq 'Proven' -and
                 $serverFull -and $serverFull.StartsWith($installFull + '\',[StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($serverFull) -ieq 'MicBridgeAPO.dll' -and $serverHashValid) {
                 $action = 'CandidateForReviewedRemoval'
@@ -68,7 +80,7 @@ function New-MBLegacyCleanupPlan {
                     }
                 }
             } catch {}
-            if ($Audit.OwnershipProven -eq $true -and $Audit.OwnershipEvidenceStatus -eq 'Proven' -and
+            if ($ownershipProven -eq $true -and $ownershipEvidenceStatus -eq 'Proven' -and
                 $binaryFull -and
                 $binaryFull.StartsWith($installFull + '\',[StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($binaryFull) -ieq 'MicBridgeAPO.dll' -and
