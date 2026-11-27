@@ -111,6 +111,9 @@ function Test-MBInstallProvenanceManifest {
         FileProvenanceVerified=$true
         VerificationConsistency='PathBasedNonAtomic'
         RaceSafeForExecution=$false
+        CertificateChainValidated=$false
+        RevocationChecked=$false
+        IsReleaseTrustEstablished=$false
         OwnershipProven=$false
         ComOwnershipProven=$false
         IsExecutionAuthorized=$false
