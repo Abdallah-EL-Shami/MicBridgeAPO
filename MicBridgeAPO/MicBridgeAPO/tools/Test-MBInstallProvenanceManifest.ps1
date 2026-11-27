@@ -391,7 +391,8 @@ try {
     $verifierSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Raw
     $pinLoopIndex=$verifierSource.IndexOf('foreach($record in $verified)',[StringComparison]::Ordinal)
     $postPinEnumerationIndex=$verifierSource.IndexOf('$pinnedActualFiles=',[StringComparison]::Ordinal)
-    $leaseReturnIndex=$verifierSource.IndexOf("`n    [pscustomobject]@{`n        IsReadOnly=",[StringComparison]::Ordinal)
+    $leaseReturnMatch=[regex]::Match($verifierSource,'(?m)^\s*\[pscustomobject\]@\{\s*IsReadOnly=')
+    $leaseReturnIndex=if($leaseReturnMatch.Success){$leaseReturnMatch.Index}else{-1}
     if($pinLoopIndex -lt 0 -or $postPinEnumerationIndex -le $pinLoopIndex -or $leaseReturnIndex -le $postPinEnumerationIndex) {
         throw 'FAIL: verifier must re-enumerate and compare the exact package file set after all mutation-resistant file leases are held.'
     }
