@@ -47,13 +47,18 @@ if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPol
     throw 'FAIL: install.bat must launch install.ps1 with AllSigned and a script path anchored to the package directory.'
 }
 
+$signatureLoopIndex = $installer.IndexOf('foreach ($scriptFile in $packageScripts)',[StringComparison]::Ordinal)
+$signatureCallIndex = $installer.IndexOf('Get-AuthenticodeSignature -FilePath $scriptFile.FullName',[StringComparison]::Ordinal)
 $verifierImportIndex = $installer.IndexOf('Import-Module -Name $provenanceVerifier',[StringComparison]::Ordinal)
 $verifyCallIndex = $installer.IndexOf('$verifiedPackage = Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
-if ($verifierImportIndex -lt 0 -or $verifyCallIndex -lt 0 -or $verifierImportIndex -ge $verifyCallIndex) {
-    throw 'FAIL: bootstrap audit expected to detect the current verifier-module execution before manifest verification; review and replace this test when an independent bootstrap is implemented.'
+if ($signatureLoopIndex -lt 0 -or $signatureCallIndex -lt 0 -or $verifierImportIndex -lt 0 -or $verifyCallIndex -lt 0 -or
+    -not ($signatureLoopIndex -lt $signatureCallIndex -and $signatureCallIndex -lt $verifierImportIndex -and $verifierImportIndex -lt $verifyCallIndex)) {
+    throw 'FAIL: every packaged PowerShell script/module must pass Authenticode signer-pin verification before the manifest verifier module is imported.'
 }
-if ($readiness -notmatch '(?im)code therefore runs before the package authenticates that module') {
-    throw 'FAIL: readiness document must explicitly disclose that the package verifier executes before package authentication.'
+if ($installer -notmatch '(?s)PublisherSignatureVerified' -or
+    $installer -notmatch '(?s)manualBootstrapTrustEstablished\s*=\s*\$true' -or
+    $installer -notmatch '(?s)if\s*\(-not\s*\$PublisherSignatureVerified\).*?throw') {
+    throw 'FAIL: installer must require an explicit out-of-band publisher-signature confirmation before package verification or mutation.'
 }
 $verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
 $elevationIndex = $installer.IndexOf('Start-Process powershell -Verb RunAs',[StringComparison]::Ordinal)
@@ -68,12 +73,9 @@ $bootstrapPrefix = $installer.Substring(0,$verifyIndex)
 if ($bootstrapPrefix -match '(?im)\b(Start-Process|New-Item|Add-Content|Set-ItemProperty|Remove-Item|reg\.exe|Enter-MBRecoveryOperationLock)\b') {
     throw 'FAIL: bootstrap prefix contains a process launch, file/log creation, registry mutation, or lock acquisition before verification.'
 }
-if ($installer -notmatch '(?s)-not\s+\$verifiedPackage\.BootstrapTrustEstablished') {
-    throw 'FAIL: installer must refuse installation unless an independent bootstrap trust mechanism explicitly establishes trust.'
-}
 if ($installer -notmatch '(?s)\$verifiedPackage\s*=\s*Test-MBInstallProvenanceManifest\b[^\r\n]*-PinFiles' -or
-    $installer -notmatch '(?s)\$verifiedPackage\.BootstrapTrustEstablished') {
-    throw 'FAIL: installer must request pinned package files and explicitly retain the bootstrap-trust boundary result.'
+    $installer -notmatch '(?s)-not\s+\$manualBootstrapTrustEstablished') {
+    throw 'FAIL: installer must pin package files and require the independently confirmed manual bootstrap result.'
 }
 if ($verifier -notmatch '(?m)^\s*BootstrapTrustEstablished\s*=\s*\$false\s*$' -or
     $verifier -notmatch '(?m)^\s*RaceSafeForExecution\s*=\s*\$false\s*$') {
