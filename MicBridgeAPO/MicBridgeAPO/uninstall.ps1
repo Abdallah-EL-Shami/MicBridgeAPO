@@ -207,7 +207,7 @@ foreach ($field in @('PrevClsidRegistrationExists','PrevApoRegistrationExists'))
         throw "backup.json has an invalid $field flag; uninstall stopped before changes."
     }
 }
-$comBackupDir = Join-Path $dataDir 'com-registration-backup'
+$comBackupDir = Join-Path $dataDir 'install-com-registration-baseline-v2'
 $expectedComFiles = @(
     [pscustomobject]@{ Field='PrevClsidRegistrationFile'; Name='previous-clsid.reg'; Exists=[bool]$preflightBackup.PrevClsidRegistrationExists; Key="SOFTWARE\Classes\CLSID\$clsid" },
     [pscustomobject]@{ Field='PrevApoRegistrationFile'; Name='previous-audioengine-apo.reg'; Exists=[bool]$preflightBackup.PrevApoRegistrationExists; Key="SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid" }
