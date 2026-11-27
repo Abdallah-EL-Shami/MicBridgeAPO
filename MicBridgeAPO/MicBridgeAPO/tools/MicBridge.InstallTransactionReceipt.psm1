@@ -201,6 +201,7 @@ function Test-MBInstallTransactionReceipt {
             ReleaseManifestTransactionId=$releaseManifestTransaction.ToString()
             ProductVersion=[string]$payload.ProductVersion
             ReleaseManifestSha256=[string]$payload.ReleaseManifestSha256
+            BaselineEvidenceSha256=[string]$payload.BaselineEvidenceSha256
             SignerThumbprint=[string]$payload.SignerThumbprint
             InstallRoot=$root
             InstalledFiles=@($verified.ToArray())
