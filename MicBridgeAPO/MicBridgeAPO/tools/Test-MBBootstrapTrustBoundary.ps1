@@ -10,8 +10,11 @@ $buildWorkflowPath = Join-Path $repositoryRoot '.github\workflows\build.yml'
 $releaseWorkflowPath = Join-Path $repositoryRoot '.github\workflows\signed-release.yml'
 $readinessPath = Join-Path $projectRoot 'SECURITY-READINESS-AND-RELEASE-GATES.md'
 $launcherDesignPath = Join-Path $repositoryRoot 'docs\BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md'
+$cmakePath = Join-Path $projectRoot 'CMakeLists.txt'
+$launcherSourcePath = Join-Path $projectRoot 'src\MicBridgeBootstrap.cpp'
+$launcherTestPath = Join-Path $projectRoot 'tests\bootstrap_fail_closed.cpp'
 
-foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath)) {
+foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath,$cmakePath,$launcherSourcePath,$launcherTestPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "FAIL: required bootstrap contract input is missing: $required" }
 }
 
@@ -29,6 +32,9 @@ $buildWorkflow = [IO.File]::ReadAllText($buildWorkflowPath)
 $releaseWorkflow = [IO.File]::ReadAllText($releaseWorkflowPath)
 $readiness = [IO.File]::ReadAllText($readinessPath)
 $launcherDesign = [IO.File]::ReadAllText($launcherDesignPath)
+$cmake = [IO.File]::ReadAllText($cmakePath)
+$launcherSource = [IO.File]::ReadAllText($launcherSourcePath)
+$launcherTest = [IO.File]::ReadAllText($launcherTestPath)
 
 if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPolicy\s+AllSigned\s+-File\s+"%~dp0install\.ps1"\s*$') {
     throw 'FAIL: install.bat must launch install.ps1 with AllSigned and a script path anchored to the package directory.'
@@ -75,6 +81,14 @@ foreach ($workflow in @(@{Name='build.yml';Text=$buildWorkflow},@{Name='signed-r
 if ($releaseWorkflow -notmatch '(?s)\$scriptFiles\s*=.*?Set-AuthenticodeSignature.*?Get-AuthenticodeSignature.*?\$manifestBytes\s*=') {
     throw 'FAIL: release workflow must Authenticode-sign and verify every staged PowerShell script before creating the signed manifest.'
 }
+if ($cmake -notmatch '(?s)add_executable\(MicBridgeBootstrap\s+src/MicBridgeBootstrap\.cpp\)' -or
+    $cmake -notmatch '(?s)add_test\(NAME micbridge_bootstrap_fail_closed\s+COMMAND micbridge_bootstrap_fail_closed \$<TARGET_FILE:MicBridgeBootstrap>\)' -or
+    $launcherSource -notmatch '(?s)return 78;' -or
+    $launcherSource -match '(?i)CreateProcess|ShellExecute|WinVerifyTrust|CryptMsgOpenToDecode' -or
+    $launcherTest -notmatch '(?s)CreateProcessW' -or
+    $launcherTest -notmatch '(?s)exitCode != 78') {
+    throw 'FAIL: native bootstrap scaffold must compile as a CMake target and CTest must prove it exits fail-closed without launching a payload.'
+}
 if ($launcherDesign -notmatch '(?im)Status: \*\*design approved for implementation planning; not implemented; production installation remains blocked\.\*\*' -or
     $launcherDesign -notmatch '(?im)Required verification sequence' -or
     $launcherDesign -notmatch '(?im)Required negative and adversarial tests') {
@@ -85,5 +99,5 @@ if ($readiness -notmatch '(?im)Bootstrap trust boundary \(not yet closed\)' -or
     throw 'FAIL: security readiness document must explicitly retain the unresolved bootstrap trust limitation.'
 }
 
-Write-Host 'PASS: Current bootstrap limitation is explicitly detected and not misrepresented as independently trusted. Static ordering, release-signing contracts, and the independent launcher design/status were also checked.'
+Write-Host 'PASS: Current bootstrap limitation is explicitly detected and not misrepresented as independently trusted. Static ordering, release-signing contracts, native fail-closed scaffold wiring, and the launcher design/status were also checked.'
 Write-Host 'LIMIT: this test documents a known unresolved bootstrap flaw. It does not establish trust, validate Windows trust-store state, or authorize production installation.'
