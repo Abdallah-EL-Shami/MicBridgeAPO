@@ -6,7 +6,7 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed CI run on the current recovery branch is run **1615** (`46050360347`) on commit `8c42c8d7038fdd80424bddfb5aa99791c3a98ac7`. Run 1615 confirms the bootstrap-boundary test correction; it does not close the bootstrap trust gap or constitute a production release. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
+The latest confirmed CI baseline before the native bootstrap scaffold is run **1627** (`46051527928`) on commit `9e98c0e0eae942a2551101ed7b11755fec3f6a71`. The scaffold changes are newer and require fresh CI confirmation. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
 
 ## Bootstrap trust boundary (not yet closed)
 
@@ -75,4 +75,4 @@ Until every applicable item is complete, cleanup execution remains disabled.
 
 ## Independent bootstrap launcher implementation plan
 
-A detailed native-launcher security design is recorded in [`docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md`](../../docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md). It specifies an independently Authenticode-trusted native launcher, CMS and payload verification before any package PowerShell executes, handle-bound file pinning, a process-bound verification handoff, and negative/race tests. This is a design only: no launcher binary or code has been implemented, the current verifier still returns `BootstrapTrustEstablished=false`, and production installation remains blocked. The current static CI test checks that this limitation and design remain disclosed; it is not a runtime security proof.
+A detailed native-launcher security design is recorded in [`docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md`](../../docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md). It specifies an independently Authenticode-trusted native launcher, CMS and payload verification before any package PowerShell executes, handle-bound file pinning, a process-bound verification handoff, and negative/race tests. A fail-closed native CMake target and CTest scaffold now exist. The executable always exits with code 78 and does not inspect signatures, verify the manifest, pin files, or launch PowerShell. It is not a trusted launcher. The current verifier still returns `BootstrapTrustEstablished=false`, and production installation remains blocked. The CTest only proves the placeholder refuses to proceed; it is not a runtime security proof.
