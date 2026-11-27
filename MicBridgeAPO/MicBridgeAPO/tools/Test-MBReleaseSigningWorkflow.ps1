@@ -63,7 +63,7 @@ foreach ($workflowName in @('build','release')) {
 foreach ($workflowName in @('build','release')) {
     $workflowContent = if ($workflowName -eq 'build') { $build } else { $release }
     if ($workflowContent -notmatch 'Test-MBAuthenticodeBootstrap[.]ps1') {
-        throw "$workflowName workflow must test Authenticode trust and AllSigned rejection using a temporary CI certificate."
+        throw "$workflowName workflow must test Authenticode signing, signature verification, and tamper rejection using a temporary CI certificate."
     }
 }
 if ($build -match 'MB_RELEASE_SIGNING_PFX_(BASE64|PASSWORD)') { throw 'Ordinary build workflow must never reference release signing secrets.' }
