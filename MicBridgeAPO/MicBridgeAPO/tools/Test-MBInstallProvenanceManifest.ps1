@@ -305,7 +305,7 @@ try {
         catch { $junctionRejected=$_.Exception.Message -match 'Manifest path traverses a reparse point' }
         if(-not $junctionRejected) { throw 'FAIL: correctly signed manifest traversing a junction was accepted.' }
     } finally {
-        Remove-Item -LiteralPath $junctionPath -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $junctionPath) { [IO.Directory]::Delete($junctionPath,$false) }
         Remove-Item -LiteralPath $outsideDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
@@ -318,7 +318,7 @@ try {
         try { Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $signaturePath -InstallDirectory $rootAlias -TrustedSignerThumbprints @($cert.Thumbprint) | Out-Null }
         catch { $rootAliasRejected=$_.Exception.Message -match 'Install directory must be a real directory' }
         if(-not $rootAliasRejected) { throw 'FAIL: install root reached through a junction alias was accepted.' }
-    } finally { Remove-Item -LiteralPath $rootAlias -Force -ErrorAction SilentlyContinue }
+    } finally { if (Test-Path -LiteralPath $rootAlias) { [IO.Directory]::Delete($rootAlias,$false) } }
 
     # Restore the fixture bytes after the hash-mismatch probe so later tests isolate their intended condition.
     [IO.File]::WriteAllBytes($bin,[byte[]](1,3,5,7,9))
