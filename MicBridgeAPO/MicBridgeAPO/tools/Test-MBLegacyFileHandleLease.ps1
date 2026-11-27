@@ -33,6 +33,24 @@ try {
             [IO.Directory]::Move($renamedRoot,$root)
             throw 'FAIL: install-root directory was renamed while directory pins were held.'
         }
+
+        # Pin an intermediate candidate directory too; it must not be renameable during the lease.
+        $nested = Join-Path $root 'nested-candidate'
+        New-Item -ItemType Directory -Path $nested | Out-Null
+        $nestedFile = Join-Path $nested 'nested.dll'
+        [IO.File]::WriteAllBytes($nestedFile,[byte[]](4,8,12,16))
+        $nestedHash = (Get-FileHash -LiteralPath $nestedFile -Algorithm SHA256).Hash
+        $nestedLease = Open-MBLegacyExclusiveFileLease -CandidatePath $nestedFile -InstallRoot $root -ExpectedSha256 $nestedHash
+        try {
+            $nestedRenameBlocked = $false
+            try { [IO.Directory]::Move($nested,(Join-Path $root 'nested-renamed')) } catch { $nestedRenameBlocked = $true }
+            if (-not $nestedRenameBlocked) {
+                [IO.Directory]::Move((Join-Path $root 'nested-renamed'),$nested)
+                throw 'FAIL: intermediate candidate directory was renamed while directory pins were held.'
+            }
+        } finally {
+            Close-MBLegacyExclusiveFileLease -LeaseResult $nestedLease
+        }
         $wrongHashRejected = $false
         try {
             Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
@@ -95,7 +113,7 @@ namespace MicBridgeHandleLeaseHardLink {
         if (-not $outsideRejected) { throw 'FAIL: candidate outside install root was accepted.' }
     } finally { Remove-Item -LiteralPath $outside -Force }
 
-    Write-Host 'PASS: exclusive file and pinned directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
+    Write-Host 'PASS: exclusive file and pinned root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
