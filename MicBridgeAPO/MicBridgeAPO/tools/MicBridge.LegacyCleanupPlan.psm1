@@ -42,13 +42,14 @@ function New-MBLegacyCleanupPlan {
                     }
                 }
             } catch {}
-            if ($serverFull -and $serverFull.StartsWith($installFull + '\',[StringComparison]::OrdinalIgnoreCase) -and
+            if ($Audit.OwnershipProven -eq $true -and $Audit.OwnershipEvidenceStatus -eq 'Proven' -and
+                $serverFull -and $serverFull.StartsWith($installFull + '\',[StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($serverFull) -ieq 'MicBridgeAPO.dll' -and $serverHashValid) {
                 $action = 'CandidateForReviewedRemoval'
-                $reason = 'Verified product server path and current file hash qualify for human review only; shared registration ownership remains unproven.'
+                $reason = 'Independent ownership provenance, product server path, and current file hash qualify for human review only; shared registration ownership must still be proven separately.'
             } else {
-                $blockers.Add("Registration lacks a verified product server path: $path")
-                $reason = 'Registration path or current file hash does not meet the narrow review rule.'
+                $blockers.Add("Registration ownership or server identity is not independently proven: $path")
+                $reason = 'Path and hash are inventory evidence only. Independent ownership provenance is absent; preserve the registration.'
             }
         }
         elseif ($classification -eq 'MicBridgeBinaryCandidate') {
@@ -67,15 +68,16 @@ function New-MBLegacyCleanupPlan {
                     }
                 }
             } catch {}
-            if ($binaryFull -and
+            if ($Audit.OwnershipProven -eq $true -and $Audit.OwnershipEvidenceStatus -eq 'Proven' -and
+                $binaryFull -and
                 $binaryFull.StartsWith($installFull + '\',[StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($binaryFull) -ieq 'MicBridgeAPO.dll' -and
                 $binaryHashValid) {
                 $action = 'CandidateForReviewedRemoval'
-                $reason = 'Canonical product DLL path and matching current SHA-256 qualify for human review only; this does not prove ownership or authorize removal.'
+                $reason = 'Independent ownership provenance, canonical product DLL path, and matching current SHA-256 qualify for human review only; this does not authorize removal.'
             } else {
-                $blockers.Add("Product binary lacks a canonical install path or matching current hash: $path")
-                $reason = 'Path, filename, reparse-point status, or current hash does not meet the narrow review-candidate rule.'
+                $blockers.Add("Product binary ownership, canonical install path, or current hash is not independently proven: $path")
+                $reason = 'Path, filename, and hash are inventory evidence only. Independent ownership provenance is absent; preserve the file.'
             }
         }
         elseif ($classification -eq 'MicBridgeSupportFileCandidate') {
