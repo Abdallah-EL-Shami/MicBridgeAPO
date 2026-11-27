@@ -78,7 +78,7 @@ try {
        $ok.VerificationConsistency -ne 'ExclusiveHandlePinned' -or -not $ok.RaceSafeForExecution -or
        $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotCheckedOffline' -or
        -not $ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed -or -not $ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen) {
-        throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
+        throw ('FAIL: manifest verification returned unsafe or incomplete capability flags: ' + (ConvertTo-Json -InputObject ([pscustomobject]@{Count=$ok.VerifiedFiles.Count;Consistency=$ok.VerificationConsistency;RaceSafe=$ok.RaceSafeForExecution;LeaseResult=$ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed;LeaseOpen=$ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen;Sha=$ok.VerifiedFiles[0].LeaseResult.Sha256;Expected=$hash}) -Compress))
     }
     $writeBlocked=$false
     try {
