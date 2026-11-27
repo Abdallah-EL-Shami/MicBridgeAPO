@@ -5,6 +5,27 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# Verify the signed release package before elevation, logging, locks, or system mutation.
+# This is an integrity gate for the staged package; the PowerShell host/bootstrap itself
+# remains outside this script-level trust boundary.
+$manifestPath = Join-Path $PSScriptRoot 'install-manifest.json'
+$manifestSignaturePath = Join-Path $PSScriptRoot 'install-manifest.p7s'
+$provenanceVerifier = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallProvenanceManifest.psm1'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $manifestSignaturePath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $provenanceVerifier -PathType Leaf)) {
+    throw 'A signed MicBridge release package is required. Manifest, signature, or verifier is missing; no elevation or installation was attempted.'
+}
+Import-Module -Name $provenanceVerifier -Force -ErrorAction Stop
+$trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
+$verifiedPackage = Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $manifestSignaturePath -InstallDirectory $PSScriptRoot -TrustedSignerThumbprints @($trustedReleaseThumbprint)
+if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVerified -or
+    -not $verifiedPackage.FileProvenanceVerified -or
+    $verifiedPackage.SignerThumbprint -ne $trustedReleaseThumbprint -or
+    $verifiedPackage.IsExecutionAuthorized -or $verifiedPackage.OwnershipProven) {
+    throw 'Signed package verification did not return the required integrity evidence; installation was blocked.'
+}
+
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -706,6 +727,36 @@ try {
 # ---- 9) إعادة تشغيل خدمة الصوت
 Write-InstallLog 'INFO' 'Restarting Audiosrv.'
 Restart-Service -Name Audiosrv -Force
+Write-InstallLog 'INFO' 'Audio service restart completed.'
+
+# Persist a machine-bound receipt only after all installed files and registrations
+# have reached their successful post-install state. Use a unique path per transaction.
+$receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
+if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) {
+    throw "Transaction provenance receipt module is missing: $receiptModule"
+}
+Import-Module -Name $receiptModule -Force -ErrorAction Stop
+$receiptFiles = [Collections.Generic.List[object]]::new()
+foreach ($name in @('MicBridgeAPO.dll','MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
+    $installedPath = Join-Path $installDir $name
+    if (-not (Test-Path -LiteralPath $installedPath -PathType Leaf)) {
+        throw "Cannot issue install provenance receipt; installed file is missing: $installedPath"
+    }
+    $receiptFiles.Add([pscustomobject]@{
+        RelativePath=$name
+        Sha256=(Get-FileHash -LiteralPath $installedPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    })
+}
+$receiptPath = Join-Path $dataDir ('install-transaction-' + [guid]::NewGuid().ToString('N') + '.receipt')
+$manifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+$receiptResult = New-MBInstallTransactionReceipt -ReceiptPath $receiptPath -InstallRoot $installDir -ProductVersion $verifiedPackage.ProductVersion -ReleaseManifestSha256 $manifestSha256 -SignerThumbprint $verifiedPackage.SignerThumbprint -InstalledFiles @($receiptFiles.ToArray())
+$receiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $receiptPath -VerifyInstalledFiles
+if (-not $receiptResult.Created -or -not $receiptCheck.ReceiptIntegrityVerified -or
+    -not $receiptCheck.InstalledFilesVerified -or $receiptCheck.OwnershipProven -or
+    $receiptCheck.ComOwnershipProven -or $receiptCheck.IsExecutionAuthorized) {
+    throw 'Post-install provenance receipt could not be independently verified; installation is not considered complete.'
+}
+Write-InstallLog 'INFO' "Installation provenance receipt created and verified. TransactionId='$($receiptCheck.TransactionId)'; Receipt='$receiptPath'."
 Write-InstallLog 'INFO' 'Installation completed successfully.'
 try { Remove-Item -LiteralPath $transactionDir -Recurse -Force -ErrorAction Stop } catch { Write-InstallLog 'WARN' "Could not remove completed transaction snapshot: $($_.Exception.Message)" }
 Write-Host ""
