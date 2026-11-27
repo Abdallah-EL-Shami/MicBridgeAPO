@@ -1,6 +1,16 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+try {
+    Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
+} catch {
+    # Windows PowerShell 5.1 runs on .NET Framework, where SignedCms is
+    # provided by System.Security.dll rather than the modern Pkcs assembly name.
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+    } else {
+        throw
+    }
+}
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Force
 
 $root=Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeProvenance-' + [guid]::NewGuid().ToString('N'))
