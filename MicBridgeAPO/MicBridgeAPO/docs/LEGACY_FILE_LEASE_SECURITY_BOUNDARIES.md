@@ -15,6 +15,7 @@ Status: experimental, read-only prototype. This document describes the implement
 ## What this does not prove
 
 - It does not prove that a file or COM registration historically belongs to MicBridge. A matching name, path, hash, or CLSID is not ownership evidence.
+- The read-only audit now exposes `OwnershipProven = false` and `OwnershipEvidenceStatus = NotEstablished` explicitly. Its classifications are inventory hints only; they must not be consumed as deletion authorization.
 - It does not prove that a backup captured the original Windows state. A digest proves integrity relative to the supplied manifest, not historical truth.
 - It does not provide an atomic, path-relative unlink/delete operation. Holding a lease is not equivalent to a safe deletion primitive.
 - It is not a complete defense against privileged/kernel actors, offline volume modification, filesystem/filter-driver behavior outside ordinary Win32 sharing semantics, or every remote/network filesystem implementation.
