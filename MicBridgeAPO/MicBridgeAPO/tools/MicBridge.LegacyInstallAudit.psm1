@@ -177,6 +177,13 @@ function Test-MBLegacyInstallationState {
             $findings.Add([pscustomobject]@{Kind='Directory';Name=$directory.Name;Classification='Absent';Path=$directory.Path;ServerPath=$null;Sha256=$null})
             continue
         }
+        # The root itself must be checked before traversal. Checking only child
+        # entries would follow an install/data root that is already a junction.
+        $rootItem=Get-Item -LiteralPath $directory.Path -Force -ErrorAction Stop
+        if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $findings.Add([pscustomobject]@{Kind='Directory';Name=$directory.Name;Classification='ReparsePointPreserved';Path=$directory.Path;ServerPath=$null;Sha256=$null})
+            continue
+        }
         $pending=[Collections.Generic.Stack[string]]::new()
         $pending.Push($directory.Path)
         while($pending.Count -gt 0) {
