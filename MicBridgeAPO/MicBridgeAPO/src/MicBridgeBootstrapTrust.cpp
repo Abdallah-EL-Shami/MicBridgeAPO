@@ -40,7 +40,7 @@ bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
 
     static constexpr wchar_t hex[] = L"0123456789ABCDEF";
     wchar_t actual[65]{};
-    for (size_t i = 0; i < digest.size(); ++i) {
+    for (std::size_t i = 0; i < digest.size(); ++i) {
         actual[i * 2] = hex[digest[i] >> 4];
         actual[i * 2 + 1] = hex[digest[i] & 0x0F];
     }
