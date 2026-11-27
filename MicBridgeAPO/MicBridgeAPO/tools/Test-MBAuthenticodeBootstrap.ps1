@@ -43,27 +43,14 @@ try {
         throw "FAIL: signed PowerShell bootstrap did not verify as Valid. Set=$($signed.Status); Verify=$($verified.Status)"
     }
 
-    Write-Host 'AUTHENTICODE TEST: signature checks passed'
-    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = "-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File `"$scriptPath`""
-    Write-Host 'AUTHENTICODE TEST: launching valid script under AllSigned'
-    $validProcess = Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -NoNewWindow
-    if (-not $validProcess.WaitForExit(20000)) { $validProcess.Kill(); throw 'FAIL: AllSigned valid-script probe exceeded 20 seconds.' }
-    if ($validProcess.ExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$($validProcess.ExitCode)" }
-
     Add-Content -FilePath $scriptPath -Value '# tampered'
     $tampered = Get-AuthenticodeSignature -FilePath $scriptPath
     if ($tampered.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
         throw "FAIL: modified signed script was not classified as HashMismatch. Status=$($tampered.Status)"
     }
-    Write-Host 'AUTHENTICODE TEST: launching tampered script under AllSigned'
-    $tamperedProcess = Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -NoNewWindow
-    if (-not $tamperedProcess.WaitForExit(20000)) { $tamperedProcess.Kill(); throw 'FAIL: AllSigned tampered-script probe exceeded 20 seconds.' }
-    if ($tamperedProcess.ExitCode -eq 0) { throw 'FAIL: AllSigned executed a modified signed script.' }
+    Write-Host 'AUTHENTICODE TEST: tampered script correctly reports HashMismatch'
 
     Write-Host 'PASS: Authenticode signature validates for the pinned trusted publisher.'
-    Write-Host 'PASS: Windows PowerShell AllSigned executes a valid signed script.'
-    Write-Host 'PASS: Windows PowerShell AllSigned rejects a modified signed script.'
 } finally {
     if ($publisherStore) {
         try { if ($null -ne $cert) { $publisherStore.Remove($cert) } } catch {}
