@@ -396,7 +396,8 @@ $dev = $found[0]
 
 # Refuse to reuse a backup created for a different capture endpoint.
 # This check happens before checkpoints, file copies, ACL changes, or registry writes.
-if (Test-Path -LiteralPath $backupFile) {
+$isManagedUpgrade = Test-Path -LiteralPath $backupFile
+if ($isManagedUpgrade) {
     $existingBackup = Get-Content -LiteralPath $backupFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     if ($existingBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$existingBackup.ComRegistrationSnapshotVersion -ne 1) {
         throw 'The current MicBridge baseline is incomplete; refusing upgrade without a trustworthy baseline created by this installer.'
@@ -423,6 +424,7 @@ Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
 Write-UpgradeLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
 foreach ($finding in @($legacyAudit.Findings)) { Write-UpgradeLog 'INFO' "Finding: Kind=$($finding.Kind); Name=$($finding.Name); Classification=$($finding.Classification); Path=$($finding.Path); Detail=$($finding.Detail)" }
+if ($isManagedUpgrade) {
 $receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
 if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw 'Install receipt verifier is missing; upgrade is blocked.' }
 Import-Module -Name $receiptModule -Force -ErrorAction Stop
@@ -455,6 +457,10 @@ if ($clsidFinding.Count -ne 1 -or $clsidFinding[0].Classification -ne 'MicBridge
 }
 Write-UpgradeLog 'INFO' "Current installer receipt verified. TransactionId='$($activeReceiptCheck.TransactionId)'; Version='$($activeReceiptCheck.ProductVersion)'."
 Write-UpgradeLog 'INFO' 'Upgrade gate accepted only receipt-backed installed files and MicBridge CLSID registration; legacy backups remain preserved and unused.'
+
+} else {
+    Write-InstallLog 'INFO' 'No MicBridge v2 baseline exists; proceeding as a clean install after the independent legacy clean-state gate.'
+}
 
 # ---- 2) نقطة استعادة (قد تفشل، لا بأس)
 try { Checkpoint-Computer -Description 'قبل MicBridge APO' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host 'تم إنشاء نقطة استعادة' }
