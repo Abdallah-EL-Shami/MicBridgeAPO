@@ -202,6 +202,9 @@ jobs:
           $cert = $null
           $raw = $null
           $publicCert = $null
+          $certStorePath = "Cert:\CurrentUser\My\$thumb"
+          $securePfxPassword = $null
+          $certImported = $false
           try {
             if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Signing secrets are unavailable.' }
             if ($env:GITHUB_REF_NAME -notlike 'v*' -or $env:GITHUB_REF_NAME.Length -lt 2) { throw 'Only version tags beginning with v may be signed.' }
@@ -212,10 +215,10 @@ jobs:
             # Authenticode's Windows signing provider requires a private-key
             # container that remains available through the certificate store.
             # EphemeralKeySet can produce UnknownError in Set-AuthenticodeSignature.
-            $certStorePath = "Cert:\\CurrentUser\\My\\$thumb"
             if (Test-Path -LiteralPath $certStorePath) { throw 'Pinned signing certificate already exists in the runner user store; refusing to reuse or remove an unknown key.' }
             $securePfxPassword = ConvertTo-SecureString -String $env:MB_RELEASE_SIGNING_PFX_PASSWORD -AsPlainText -Force
-            $null = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\\CurrentUser\\My' -Password $securePfxPassword
+            $null = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\CurrentUser\My' -Password $securePfxPassword
+            $certImported = $true
             $cert = Get-Item -LiteralPath $certStorePath
             if ($null -eq $cert -or -not $cert.HasPrivateKey -or $cert.Thumbprint -ne $thumb -or $cert.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $certHash) { throw 'PFX import did not yield the independently pinned release certificate and private key.' }
             $securePfxPassword.Dispose()
@@ -297,7 +300,7 @@ jobs:
           finally {
             if ($null -ne $publicCert) { $publicCert.Dispose() }
             if ($null -ne $cert) { $cert.Dispose() }
-            if (Test-Path -LiteralPath $certStorePath) { Remove-Item -LiteralPath $certStorePath -Force -ErrorAction SilentlyContinue }
+            if ($certImported -and (Test-Path -LiteralPath $certStorePath)) { Remove-Item -LiteralPath $certStorePath -Force -ErrorAction SilentlyContinue }
             if ($null -ne $securePfxPassword) { $securePfxPassword.Dispose() }
             if ($null -ne $raw) { [Array]::Clear($raw,0,$raw.Length) }
             if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
