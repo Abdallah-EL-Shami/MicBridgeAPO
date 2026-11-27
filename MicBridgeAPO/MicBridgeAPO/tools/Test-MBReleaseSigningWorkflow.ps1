@@ -22,7 +22,7 @@ $requiredReleasePatterns = [ordered]@{
     'ephemeral private key storage' = 'EphemeralKeySet'
     'detached CMS signature' = 'SignedCms'
     'post-signature verification' = 'Test-MBInstallProvenanceManifest'
-    'temporary PFX cleanup' = 'Remove-Item\s+LiteralPath\s+\$pfxPath\s+-Force'
+    'temporary PFX cleanup' = 'Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force'
     'secret environment cleanup' = 'Remove-Item\s+Env:MB_RELEASE_SIGNING_PFX_PASSWORD'
     'signed release artifact' = 'MicBridgeAPO-Signed-Release'
 }
