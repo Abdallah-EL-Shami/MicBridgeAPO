@@ -6,16 +6,16 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed CI run on the current recovery branch is run **1610** (`46048931118`) on commit `46270f4e485787e3f4d897625fb4a2eb766afceb`; runs 1607–1610 completed successfully on their respective commits. Run 1607 (`46048429140`) is the latest fully inspected end-to-end build/test/artifact result. Runs 1608–1610 confirm the subsequent documentation and release-workflow invariant changes. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
+The latest confirmed CI run on the current recovery branch is run **1615** (`46050360347`) on commit `8c42c8d7038fdd80424bddfb5aa99791c3a98ac7`. Run 1615 confirms the bootstrap-boundary test correction; it does not close the bootstrap trust gap or constitute a production release. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
 
 ## Bootstrap trust boundary (not yet closed)
 
 The current package has two separate mechanisms that must not be conflated:
 
 - The release workflow Authenticode-signs staged PowerShell scripts and verifies signature integrity plus the pinned signer thumbprint in CI. CI deliberately accepts `NotTrusted` for this integrity check and does not enroll the self-signed certificate.
-- The package manifest is CMS-signed and checked by the PowerShell verifier. The verifier itself is part of the package, so it cannot be the independent root that authenticates its own first execution.
+- The package manifest is CMS-signed and checked by the PowerShell verifier. The verifier itself is part of the package, so it cannot be the independent root that authenticates its own first execution. More specifically, `install.ps1` executes `Import-Module -Name $provenanceVerifier` before calling `Test-MBInstallProvenanceManifest`; the imported `.psm1` code therefore runs before the package authenticates that module. This is an actual bootstrap execution gap, not merely a theoretical limitation.
 
-`install.bat` only launches `install.ps1` with `-ExecutionPolicy AllSigned`. PowerShell execution policy is not a security boundary against a user who can invoke PowerShell differently or replace the bootstrap. Therefore the batch wrapper and the manifest verifier do not establish bootstrap trust.
+`install.bat` only launches `install.ps1` with `-ExecutionPolicy AllSigned`. PowerShell execution policy is not a security boundary against a user who can invoke PowerShell differently or replace the bootstrap. Therefore the batch wrapper and the manifest verifier do not establish bootstrap trust. The current pre-elevation check does not cure the earlier execution of the untrusted verifier module.
 
 Before production use, select and implement one independently trusted bootstrap model:
 1. A separately distributed, Authenticode-signed native launcher whose signer is already trusted on the target and which verifies the package manifest before launching any package script; or
@@ -23,7 +23,7 @@ Before production use, select and implement one independently trusted bootstrap 
 
 For either model, add negative tests for a modified launcher, modified verifier, altered certificate, wrong signer thumbprint, missing trust anchor, and tampered package; prove that no elevation, logging, lock creation, registry/COM change, or file mutation occurs before verification. Do not treat a certificate shipped inside the same untrusted archive as an independent trust anchor. Do not claim protection against a hostile local administrator.
 
-No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
+The CI bootstrap audit now explicitly asserts that this import-before-verification condition remains disclosed; it is a guard against overstating readiness, not a mitigation. No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
 
 ## Manifest verifier limitations
 
