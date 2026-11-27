@@ -151,7 +151,7 @@ Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validati
 
 
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
-Assert-Contains $installer 'added in memory only' 'Legacy backup migration is non-destructive'
+Assert-Contains $installer 'Clean install gate accepted preserved legacy recovery evidence only' 'Clean install ignores legacy recovery evidence without restoring it'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
@@ -163,7 +163,7 @@ Assert-Contains $installer '\$replacementBackup\s*=\s*Join-Path\s+\$directory' '
 Assert-Contains $installer '\[IO\.File\]::Replace\(\$temp,\s*\$Path,\s*\$replacementBackup,\s*\$true\)' 'Atomic JSON replacement never passes an empty backup path'
 Assert-Contains $installer 'Remove-Item -LiteralPath \$replacementBackup' 'Atomic JSON replacement cleans up its temporary backup'
 Assert-Contains $installer 'ComRegistrationSnapshotVersion = 1' 'Permanent backup records the COM snapshot schema version'
-Assert-Contains $installer 'com-registration-backup' 'Permanent COM recovery files live outside temporary transaction folders'
+Assert-Contains $installer 'install-com-registration-baseline-v2' 'Current COM recovery files are isolated from legacy backup files'
 Assert-Contains $installer 'previous-clsid.reg' 'Permanent backup names the original COM CLSID export'
 Assert-Contains $installer 'previous-audioengine-apo.reg' 'Permanent backup names the original AudioEngine APO export'
 Assert-Contains $installer 'No current-installer receipt exists' 'Installer refuses upgrades without a current-installer receipt'
