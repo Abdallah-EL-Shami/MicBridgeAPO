@@ -62,13 +62,19 @@ if ($installer -notmatch '-TransactionId \(\[guid\]::Parse\(\[string\]\$rollback
     $installer -notmatch 'ReceiptIntegrityVerified' -or $installer -notmatch 'InstalledFilesVerified') {
     throw 'FAIL: installer does not independently verify the persisted receipt and installed file hashes.'
 }
+if ($installer -notmatch 'Close-MBInstallProvenanceLeases' -or
+    $installer -notmatch 'DllSource must resolve to the exact MicBridgeAPO[.]dll') {
+    throw 'FAIL: installer must release package leases and bind DLL input to the signed package file.'
+}
 if ($build -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
+    $build -notmatch 'MicBridge[.]LegacyFileHandleLease[.]psm1' -or
     $build -notmatch 'Test-MBInstallerProvenanceGate[.]ps1') {
     throw 'FAIL: ordinary CI package staging or installer provenance integration test is missing.'
 }
 if ($release -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
+    $release -notmatch 'MicBridge[.]LegacyFileHandleLease[.]psm1' -or
     $release -notmatch 'Test-MBInstallProvenanceManifest') {
-    throw 'FAIL: signed release workflow must stage receipt support and verify the release manifest after signing.'
+    throw 'FAIL: signed release workflow must stage lease/receipt support and verify the release manifest after signing.'
 }
 
 Write-Host 'PASS: signed package verification precedes elevation and every installer mutation/preflight.'
