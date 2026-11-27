@@ -35,6 +35,29 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Publisher
 
 سيعيد المثبّت فحص توقيع كل ملفات `.ps1` و`.psm1` داخل الحزمة باستخدام هوية الناشر المثبتة في الكود، ثم يتحقق من توقيع Manifest وبصمات الملفات قبل طلب UAC أو إجراء أي تعديل على النظام.
 
+## جرد النسخة القديمة دون تعديل النظام
+
+لا تنفّذ هذا الفحص إلا من حزمة إصدار موقّعة بعد مطابقة بصمة ملف الدخول وأداة الجرد نفسيهما. لا تستخدم نسخة CI غير الموقّعة لهذا الغرض.
+
+تحقق أولًا من توقيع أداة الجرد وبصمة شهادة الناشر:
+
+```powershell
+$s = Get-AuthenticodeSignature -FilePath .\\tools\\Inspect-MBLegacyInstallation.ps1
+$s | Format-List Status,StatusMessage,SignerCertificate
+if ($null -eq $s.SignerCertificate) { throw 'No inventory-script signer certificate was found.' }
+$sha256 = $s.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256)
+$sha1 = $s.SignerCertificate.Thumbprint
+if ($sha256 -ne 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369' -or $sha1 -ne '29BAC42BFC53F2586559A9B95D1FEEB658E8891A') { throw 'Inventory-script publisher pin mismatch.' }
+if ($s.Status -notin @([Management.Automation.SignatureStatus]::Valid,[Management.Automation.SignatureStatus]::NotTrusted)) { throw "Inventory-script signature is not intact: $($s.Status)" }
+
+$s = Get-AuthenticodeSignature -FilePath .\\install.ps1
+if ($null -eq $s.SignerCertificate -or $s.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369' -or $s.SignerCertificate.Thumbprint -ne '29BAC42BFC53F2586559A9B95D1FEEB658E8891A' -or $s.Status -notin @([Management.Automation.SignatureStatus]::Valid,[Management.Automation.SignatureStatus]::NotTrusted)) { throw 'Installer signature or publisher pin mismatch.' }
+
+& .\\tools\\Inspect-MBLegacyInstallation.ps1 -PublisherSignatureVerified | Tee-Object -FilePath .\\legacy-inventory.json
+```
+
+أرسل ملف `legacy-inventory.json` للمراجعة قبل أي إزالة. الأداة لا تحذف ملفات أو مفاتيح Registry، ولا تستعيد `backup.json` أو أي نسخة احتياطية. إذا ظهر `ReviewRequired` أو أي عنصر `Ambiguous` أو `ForeignOrSharedServer` أو `ReparsePointPreserved`، لا تحذف ذلك العنصر. التقرير جرد فقط ولا يمنح تصريح تنظيف.
+
 ## حدود هذا المسار
 
 - لا تثبّت هذه الخطوة الشهادة في Root أو Trusted Publishers تلقائيًا، ولا تغيّر إعدادات Windows.
