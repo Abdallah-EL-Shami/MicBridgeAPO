@@ -2,6 +2,12 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $installer = Get-Content -LiteralPath (Join-Path $root 'install.ps1') -Raw
 $uninstaller = Get-Content -LiteralPath (Join-Path $root 'uninstall.ps1') -Raw
+$rollbackModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackActions.psm1') -Raw
+$fullExecutor = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.FullInstallRollbackExecutor.psm1') -Raw
+$rollbackValidationModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallRollbackValidation.psm1') -Raw
+$legacyAuditModule = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.LegacyInstallAudit.psm1') -Raw
+$ui = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
+$readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
 
 function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw "FAIL: $Message" }
@@ -24,6 +30,7 @@ Assert-Contains $uninstaller 'PSObject\.Properties\.Name\s+-contains\s+''PrevFxA
 Assert-Contains $uninstaller 'Name\s+\$fxAssociationValue\s+-Value\s+\$b\.PrevFxAssociation' 'Uninstaller restores a prior association value'
 Assert-Contains $uninstaller 'Remove-ItemProperty\s+-LiteralPath\s+\$fxPath\s+-Name\s+\$fxAssociationValue' 'Uninstaller removes only its association value when no prior value existed'
 Assert-Contains $uninstaller 'GetValueNames\(\)\.Count\s+-eq\s+0' 'Uninstaller checks that a created FxProperties key is empty before deleting it'
+Assert-Contains $uninstaller 'return \(\[bool\]\$Backup\.CreatedFx -and \[string\]::IsNullOrWhiteSpace\(\[string\]\$Backup\.FxKeySddl\)\)' 'Uninstaller accepts an absent FxProperties key only when the original snapshot proves MicBridge created it'
 Assert-NotContains $uninstaller 'Remove-Item\s+-LiteralPath\s+\$fxPath\s+-Recurse' 'Uninstaller never recursively deletes FxProperties and unrelated driver values'
 
 Assert-Contains $installer 'DllSource\s+`"\$DllSource`"' 'Elevated installer relaunch preserves the selected DLL source path'
@@ -37,7 +44,36 @@ Assert-Contains $installer "'MicBridgeUI.bat'" 'Installer backs up and restores 
 Assert-Contains $installer 'function Write-InstallLog' 'Installer defines diagnostic logging'
 Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failure exceptions'
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
-Assert-Contains $installer 'Previous DLL restored' 'Installer attempts DLL restoration after failure'
+Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
+Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
+Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
+Assert-Contains $rollbackModule 'Test-MBPathWithinDirectory.{0,200}BackupPath' 'Rollback rejects DLL backups outside its dedicated directory'
+Assert-Contains $rollbackModule 'Test-MBNoReparsePath.{0,200}BackupPath' 'Rollback rejects DLL backups traversing reparse points'
+Assert-Contains $rollbackModule 'Restored DLL hash does not match the durable pre-transaction snapshot' 'Rollback verifies the restored DLL bytes against the durable snapshot'
+Assert-Contains $installer '\$backupHash\s*=\s*\(Get-FileHash\s+-LiteralPath\s+\$backupPath' 'Installer records SHA-256 for each existing UI and uninstaller file snapshot'
+Assert-Contains $installer 'ShortcutBackupSha256\s*=\s*\$shortcutBackupSha256' 'Installer records the original desktop shortcut hash'
+Assert-Contains $installer 'Preserved an existing desktop shortcut; MicBridge did not overwrite it.' 'Installer preserves pre-existing desktop shortcuts'
+Assert-Contains $installer '\[IO\.File\]::Move\(\$shortcutTempPath, \$shortcutPath\)' 'Installer publishes its shortcut without overwriting a concurrently-created file'
+Assert-Contains $installer 'desktop-shortcut\.sha256' 'Installer records a hash ownership marker for its created shortcut'
+Assert-Contains $uninstaller 'user-modified shortcut' 'Uninstaller preserves a desktop shortcut modified after installation'
+Assert-Contains $uninstaller '\[string\]::Equals\(\$currentHash,\$ownedHash' 'Uninstaller removes a desktop shortcut only when its content hash matches the ownership record'
+Assert-Contains $uninstaller 'ownership marker is not a regular file' 'Uninstaller rejects directory or reparse-point shortcut ownership markers'
+Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$shortcutOwnershipFile -Force -ErrorAction Stop' 'Uninstaller removes the verified shortcut ownership marker'
+Assert-Contains $uninstaller '-not \(Test-Path -LiteralPath \$shortcutOwnershipFile\)' 'Uninstall verification requires the ownership marker to be absent'
+Assert-Contains $uninstaller 'Desktop shortcut is not a regular file; preserving it' 'Uninstaller preserves shortcut reparse points and directories'
+Assert-Contains $installer 'DllOriginalSha256\s*=\s*if \(Test-Path' 'Installer snapshots the original installed DLL hash before any replacement'
+Assert-Contains $installer "\$rollbackStepIds = @\('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState'\)" 'Installer persists the fixed three-step rollback journal order'
+Assert-Contains $installer 'Invoke-MBInstallFullRollback' 'Installer startup recovery and failure handling use the full durable rollback executor'
+Assert-Contains $installer 'pendingRollbackJournals.Count -eq 1' 'Installer replays only one unambiguous pending transaction'
+Assert-Contains $installer 'Multiple interrupted MicBridge rollback transactions were found' 'Installer refuses automatic replay when transaction order is ambiguous'
+Assert-Contains $installer 'Interrupted MicBridge rollback did not complete' 'Installer blocks a new install if rollback replay does not finish'
+Assert-NotContains $installer 'Recovery replay is not yet automated' 'Installer no longer leaves validated pending transactions permanently blocked'
+Assert-Contains $fullExecutor 'Restore-MBEndpointRegistrySnapshot' 'Full executor restores the endpoint FX snapshot'
+Assert-Contains $fullExecutor 'Restore-MBRegistryAclSddl' 'Full executor restores capture endpoint ACLs'
+Assert-Contains $fullExecutor 'Restore-MBComRegistrySnapshot' 'Full executor restores both COM registrations'
+Assert-Contains $fullExecutor 'Restore-MBDllSnapshot' 'Full executor restores the previous DLL by hash'
+Assert-Contains $fullExecutor 'Restore-MBInstallSupportFiles' 'Full executor restores the four fixed support files'
+Assert-Contains $fullExecutor 'Restore-MBInstallMetadataSnapshot' 'Full executor restores configuration, shortcut and ProgramData ACL metadata'
 Assert-Contains $installer 'ولا توجد بيانات كافية لإثبات قيمتها الأصلية' 'Installer refuses to guess legacy backup association values'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
@@ -61,14 +97,20 @@ Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Re
 
 $uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
 $uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
+$installLauncher = Get-Content -LiteralPath (Join-Path $root 'install.bat') -Raw
+$uninstallLauncher = Get-Content -LiteralPath (Join-Path $root 'uninstall.bat') -Raw
 Assert-Contains $uiSource '\$env:ProgramData' 'UI uses the shared ProgramData environment path'
 Assert-Contains $uiSource "'control.ini'" 'UI writes the runtime control file'
 Assert-Contains $uiSource "'status.txt'" 'UI reads the runtime status file'
 Assert-Contains $uiSource 'function Set-Enabled' 'UI exposes a control-file writer'
 Assert-Contains $uiSource 'Add_Click' 'UI toggle button has a click handler'
 Assert-Contains $uiSource 'ShowDialog' 'UI creates and displays a WinForms window'
-Assert-Contains $uiLauncher 'ExecutionPolicy Bypass' 'UI launcher permits the packaged PowerShell script'
+Assert-Contains $uiLauncher 'ExecutionPolicy AllSigned' 'UI launcher requires an Authenticode-signed PowerShell script'
 Assert-Contains $uiLauncher 'MicBridgeUI.ps1' 'UI launcher targets the adjacent UI script'
+Assert-Contains $installLauncher 'ExecutionPolicy AllSigned' 'Install launcher requires an Authenticode-signed installer'
+Assert-Contains $uninstallLauncher 'ExecutionPolicy AllSigned' 'Uninstall launcher requires an Authenticode-signed uninstaller'
+Assert-Contains $installer '-ExecutionPolicy AllSigned' 'Elevated installer re-entry enforces Authenticode signatures'
+Assert-Contains $uninstaller '-ExecutionPolicy AllSigned' 'Elevated uninstaller re-entry enforces Authenticode signatures'
 
 $apoSource = Get-Content -LiteralPath (Join-Path $root 'src/MicBridgeAPO.cpp') -Raw
 Assert-Contains $apoSource 'm_blender\.Process\(outb, frames, ch, m_recvRing, true, tmp\)' 'APOProcess uses the tested crossfade blender'
@@ -95,8 +137,13 @@ Assert-Contains $uninstaller 'matchesBaseline' 'Uninstaller restores original co
 Assert-Contains $uninstaller 'backup.json is missing' 'Uninstaller fails closed when the recovery backup is missing'
 Assert-Contains $uninstaller 'preflightIds' 'Uninstaller validates all capture endpoint value types before registry changes'
 Assert-Contains $uninstaller 'cleanupIds' 'Uninstaller scans all capture endpoints for stale MicBridge references'
-Assert-Contains $uninstaller 'PrevDisableProtectedAudioDG' 'Uninstaller restores the Windows audio security setting only from a recorded snapshot'
-Assert-Contains $uninstaller 'leaving the current Windows audio security setting unchanged' 'Uninstaller does not guess a missing legacy audio security snapshot'
+Assert-Contains $installer 'Windows AudioDG protection setting left unchanged' 'Installer leaves Windows AudioDG protection unchanged'
+Assert-NotContains $installer 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Installer never changes DisableProtectedAudioDG'
+Assert-NotContains $installer 'PrevDisableProtectedAudioDG' 'New backups never record the legacy AudioDG value'
+Assert-NotContains $uninstaller 'Set-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never writes a legacy AudioDG value'
+Assert-NotContains $uninstaller 'Remove-ItemProperty[^\r\n]*DisableProtectedAudioDG' 'Uninstaller never deletes the Windows AudioDG setting'
+Assert-Contains $uninstaller 'legacy backup data is not a trustworthy snapshot' 'Uninstaller explicitly ignores the untrusted legacy AudioDG backup'
+
 Assert-Contains (Get-Content -LiteralPath (Join-Path $root 'tools/Inspect-ApoEndpoint.ps1') -Raw) 'PKEY_CompositeFX_EndpointEffectClsid' 'Endpoint inspector reports composite EFX registration'
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 Assert-Contains $cmake 'micbridge_udp_broadcast_share_smoke' 'Windows CI runs the UDP broadcast fan-out test'
@@ -109,6 +156,12 @@ Assert-Contains $installer 'Snapshot the currently installed state for transacti
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
 Assert-Contains $installer '\[IO\.File\]::Replace' 'Atomic JSON helper replaces an existing snapshot atomically'
+Assert-Contains $installer '\$publishBackup\s*=\s*Join-Path\s+\$installDir' 'DLL publication keeps a same-directory copy of the previous image'
+Assert-Contains $installer '\[IO\.File\]::Replace\(\$stagedDll,\$installedDll,\$publishBackup,\$false\)' 'DLL publication never uses a null replacement backup'
+Assert-Contains $installer 'Remove-Item -LiteralPath \$publishBackup' 'DLL publication removes its temporary previous-image copy only after hash verification'
+Assert-Contains $installer '\$replacementBackup\s*=\s*Join-Path\s+\$directory' 'Atomic JSON replacement uses a same-directory backup file'
+Assert-Contains $installer '\[IO\.File\]::Replace\(\$temp,\s*\$Path,\s*\$replacementBackup,\s*\$true\)' 'Atomic JSON replacement never passes an empty backup path'
+Assert-Contains $installer 'Remove-Item -LiteralPath \$replacementBackup' 'Atomic JSON replacement cleans up its temporary backup'
 Assert-Contains $installer 'ComRegistrationSnapshotVersion = 1' 'Permanent backup records the COM snapshot schema version'
 Assert-Contains $installer 'com-registration-backup' 'Permanent COM recovery files live outside temporary transaction folders'
 Assert-Contains $installer 'previous-clsid.reg' 'Permanent backup names the original COM CLSID export'
@@ -134,14 +187,30 @@ Assert-Contains $uninstaller 'if \(\$preflightBackup\.PrevApoRegistrationExists\
 Assert-Contains $uninstaller 'PrevClsidRegistrationExists' 'Uninstaller restores the pre-install COM CLSID when it existed'
 Assert-Contains $uninstaller 'PrevApoRegistrationExists' 'Uninstaller restores the pre-install AudioEngine APO registration when it existed'
 Assert-Contains $uninstaller 'reg.exe import' 'Uninstaller imports persistent pre-install COM registrations'
+Assert-Contains $uninstaller 'uninstall-cleanup-recovery.json' 'Uninstaller keeps file/service cleanup in a separate durable journal'
+Assert-Contains $uninstaller "@\('RemoveDesktopShortcut','RestartAudioService','RemoveInstallDirectory'\)" 'Uninstaller declares independent shortcut, service, and directory cleanup steps'
+Assert-Contains $uninstaller "StepId 'RemoveDesktopShortcut'" 'Uninstaller journals desktop shortcut removal'
+Assert-Contains $uninstaller "StepId 'RestartAudioService'" 'Uninstaller journals audio service restart'
+Assert-Contains $uninstaller "StepId 'RemoveInstallDirectory'" 'Uninstaller journals install directory removal'
+Assert-Contains $uninstaller 'serviceRestartMarker' 'Uninstaller persists evidence that the audio service restart completed'
+Assert-Contains $uninstaller 'Get-Service -Name Audiosrv' 'Uninstaller verifies the audio service is running after restart'
+Assert-Contains $uninstaller 'preserveInstallDirectory' 'Uninstaller preserves files when original COM registrations may reference the installed DLL'
 Assert-Contains $uninstaller 'Do not run a broad cleanup over every endpoint' 'Uninstaller avoids deleting pre-existing CLSID references on unrelated endpoints'
 Assert-Contains $uninstaller 'remainingReferences' 'Uninstaller blocks binary removal if dangling endpoint references cannot be made safe'
 Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\$transactionState\s+-Path\s+\$transactionStateFile' 'Transaction snapshot uses atomic JSON persistence'
 Assert-Contains $installer 'Write-JsonAtomic\s+-Value\s+\(\[pscustomobject\]@\{' 'Composite EFX snapshot uses atomic JSON persistence'
 
 Assert-Contains $installer 'reg.exe export' 'Installer snapshots existing COM registrations before changing them'
-Assert-Contains $installer 'reg.exe import' 'Installer restores prior COM registrations after a failed attempt'
+Assert-Contains $fullExecutor 'Restore-MBComRegistrySnapshot -Target CLSID' 'Full rollback executor restores the prior CLSID registration after a failed attempt'
 Assert-Contains $installer 'Restore-RegistryValueSnapshot' 'Installer restores endpoint and audio registry values on failure'
+Assert-Contains $installer 'MicBridge.InstallRollbackValidation.psm1' 'Installer loads the rollback snapshot validator before recovery mutations'
+Assert-Contains $installer 'Test-MBInstallRollbackTransaction' 'Installer validates the durable transaction journal and snapshot before replay'
+Assert-Contains $fullExecutor 'no recovery actions attempted' 'Full executor fails closed before any recovery mutation when preflight fails'
+Assert-Contains $installer 'ClsidRegBackup' 'Transaction snapshot records the previous CLSID export path'
+Assert-Contains $installer 'ClsidRegSha256' 'Transaction snapshot records the previous CLSID export hash'
+Assert-Contains $installer 'ApoRegBackup' 'Transaction snapshot records the previous AudioEngine export path'
+Assert-Contains $installer 'ApoRegSha256' 'Transaction snapshot records the previous AudioEngine export hash'
+Assert-Contains $fullExecutor 'Test-MBComRegistrySnapshotRestored' 'Full rollback verifies restored COM registry contents against the saved export hashes'
 Assert-Contains $installer 'DataDirSddl' 'Installer snapshots and restores ProgramData ACLs'
 Assert-Contains $installer 'InstallFiles' 'Installer snapshots overwritten support files'
 Assert-Contains $uninstaller 'Legacy backup proves FxProperties did not exist' 'Uninstaller safely restores legacy association state'
@@ -168,7 +237,7 @@ try {
     Remove-Item -LiteralPath $registryProbePath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1')) {
+foreach ($scriptName in @('install.ps1','uninstall.ps1','MicBridgeUI.ps1','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1','tools/Test-ApoInstallerRegistration.ps1','tools/MicBridge.InstallRollbackValidation.psm1','tools/Test-MBInstallRollbackValidation.ps1','tools/MicBridge.RegistryAclRollback.psm1','tools/Test-MBRegistryAclRollback.ps1','tools/MicBridge.LegacyInstallAudit.psm1','tools/Test-MBLegacyInstallationAudit.ps1','tools/MicBridge.ComRegistrationRollback.psm1','tools/MicBridge.ComRegistrationExecutor.psm1','tools/Test-MBComRegistrationRollback.ps1','tools/MicBridge.RollbackExecutor.psm1','tools/Test-MBRollbackExecutor.ps1','tools/MicBridge.InstallFileRollback.psm1','tools/MicBridge.InstallFileExecutor.psm1','tools/Test-MBInstallFileRollback.ps1','tools/MicBridge.InstallMetadataRollback.psm1','tools/MicBridge.MetadataExecutor.psm1','tools/Test-MBInstallMetadataRollback.ps1','tools/MicBridge.FullInstallRollbackExecutor.psm1')) {
     $scriptPath = Join-Path $root $scriptName
     $tokens = $null; $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -187,9 +256,81 @@ Assert-Contains $uninstaller 'Read-only global preflight: every capture endpoint
 Assert-Contains $uninstaller 'OpenSubKey\("\$capSub\\\$endpointId\\FxProperties"' 'Uninstaller uses normalized single-separator registry paths'
 if ([regex]::Matches($uninstaller, [regex]::Escape('Read-only global preflight: every capture endpoint value must have its documented registry type')).Count -ne 1) { throw 'FAIL: Uninstaller must contain exactly one global preflight block' }
 Write-Host 'PASS: Uninstaller contains exactly one global preflight block'
-$completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجل ما زالت في $dataDir، احذفه يدويًا إن أردت."'
+$completionLine = 'Write-Host "تمت الإزالة. الإعدادات والسجلات محفوظة في $dataDir. سجل الإزالة: $uninstallLog"'
 $completionIndex = $uninstaller.LastIndexOf($completionLine)
 if ($completionIndex -lt 0 -or $uninstaller.Substring($completionIndex + $completionLine.Length).Trim().Length -ne 0) { throw 'FAIL: Uninstaller has executable content after its completion message' }
 Write-Host 'PASS: No executable content follows the uninstall completion message'
 
 Write-Host 'All installer registration static checks passed.'
+
+Assert-Contains $installer 'Test-MBInstallRollbackTransaction -JournalPath \$candidateJournal -StatePath \$candidateSnapshotPath' 'Installer rejects interrupted journals paired with an invalid or mismatched transaction snapshot through strict preflight'
+Assert-Contains $rollbackValidationModule '\$stateTransactionId -ne \$journalTransactionId' 'Snapshot validator rejects a journal from a different transaction'
+$rollbackCatchStart = $installer.IndexOf('    $failure = $_')
+$rollbackFinallyStart = $installer.IndexOf('} finally {', $rollbackCatchStart)
+if ($rollbackCatchStart -lt 0 -or $rollbackFinallyStart -le $rollbackCatchStart) { throw 'FAIL: Could not isolate installer rollback catch block for service-control safety check' }
+$rollbackCatch = $installer.Substring($rollbackCatchStart, $rollbackFinallyStart - $rollbackCatchStart)
+if ($rollbackCatch -match '(?im)Restart-Service\s+-Name\s+Audiosrv') { throw 'FAIL: Install rollback must not restart or otherwise control Audiosrv' }
+Write-Host 'PASS: Install rollback does not restart or control Audiosrv'
+
+Assert-Contains $installer 'MicBridge.LegacyInstallAudit.psm1' 'Installer loads the read-only legacy installation audit'
+Assert-Contains $installer 'Test-MBLegacyInstallationState' 'Installer audits legacy backup, COM registration, and file provenance before upgrade'
+Assert-Contains $installer "Outcome -ne 'NoLegacyResidueDetected'" 'Installer blocks both ambiguous and inventory-only legacy state until its original Windows baseline can be established'
+Assert-Contains $legacyAuditModule 'Hashes establish integrity only against' 'Legacy audit checks backup byte integrity'
+Assert-Contains $legacyAuditModule 'they cannot prove that the captured values were historically correct' 'Legacy audit distinguishes file integrity from proof of an original Windows baseline'
+Assert-Contains $installer 'BaselineAssessment=\$\(\$legacyAudit\.BaselineAssessment\)' 'Installer records the legacy baseline assessment in its diagnostics'
+$auditPosition = $installer.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
+$checkpointPosition = $installer.IndexOf('Checkpoint-Computer',[StringComparison]::Ordinal)
+if ($auditPosition -lt 0 -or $checkpointPosition -lt 0 -or $auditPosition -gt $checkpointPosition) {
+    throw 'FAIL: legacy audit must run before the restore point and all installation mutations'
+}
+$repoRoot = $root
+while (-not (Test-Path -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -PathType Leaf)) {
+    $parent = Split-Path -Parent $repoRoot
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $repoRoot) { throw 'FAIL: could not locate repository .github/workflows/build.yml' }
+    $repoRoot = $parent
+}
+$workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github/workflows/build.yml') -Raw
+Assert-Contains $workflow 'MicBridge.LegacyInstallAudit.psm1' 'Build package stages the legacy audit module beside the installer'
+
+Assert-Contains $uninstaller 'MicBridge.LegacyInstallAudit.psm1' 'Uninstaller loads the read-only legacy installation audit'
+Assert-Contains $uninstaller 'Test-MBLegacyInstallationState' 'Uninstaller validates permanent backup provenance before restoring Windows state'
+Assert-Contains $uninstaller 'Legacy installation audit requires manual review' 'Uninstaller preserves ambiguous legacy state without deleting files or registrations'
+$uninstallAuditPosition = $uninstaller.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
+$uninstallJournalPosition = $uninstaller.IndexOf('New-MBRecoveryJournal',[StringComparison]::Ordinal)
+if ($uninstallAuditPosition -lt 0 -or $uninstallJournalPosition -lt 0 -or $uninstallAuditPosition -gt $uninstallJournalPosition) {
+    throw 'FAIL: uninstall legacy audit must run before recovery journal creation and all mutations'
+}
+
+Assert-Contains $installer 'InstalledSha256' 'Installer records the exact package support-file hashes for safe rollback ownership checks'
+Assert-Contains $workflow 'MicBridge.InstallFileRollback.psm1' 'Build package stages the support-file rollback action module'
+Assert-Contains $workflow 'MicBridge.InstallFileExecutor.psm1' 'Build package stages the durable support-file recovery executor'
+
+Assert-Contains $installer 'IniOriginalSha256' 'Installer records original config-file hashes before changing ProgramData'
+Assert-Contains $installer 'ShortcutNewSha256' 'Installer persists the shortcut ownership hash before publishing the shortcut'
+Assert-Contains $workflow 'MicBridge.InstallMetadataRollback.psm1' 'Build package stages metadata rollback actions'
+Assert-Contains $workflow 'MicBridge.MetadataExecutor.psm1' 'Build package stages durable metadata recovery executor'
+Assert-Contains $workflow 'MicBridge.FullInstallRollbackExecutor.psm1' 'Build package stages the full transaction recovery executor'
+Assert-Contains $workflow 'MicBridge.ComRegistrationRollback.psm1' 'Build package stages the COM rollback dependency required by the full executor'
+
+Assert-Contains $fullExecutor 'RestoreEndpointFxValues' 'Full rollback executor preserves the fixed main transaction step order'
+Assert-Contains $fullExecutor 'RestorePreviousInstallState' 'Full rollback executor reconstructs the grouped step from durable state'
+Assert-Contains $fullExecutor 'Invoke-MBRecoveryStep' 'Full rollback executor uses durable journal step replay and verification'
+Assert-Contains $fullExecutor 'Test-MBInstallRollbackTransaction' 'Full executor binds its snapshot to the durable main journal'
+
+Assert-Contains $installer 'Write-Host .*سجل التثبيت:.*installLog' 'Installer announces the dedicated install log path'
+Assert-Contains $installer 'Write-Host .*سجل الاستعادة:.*recoveryLog' 'Installer announces the dedicated recovery log path'
+Assert-Contains $uninstaller 'Write-Host .*سجل الإزالة:.*uninstallLog' 'Uninstaller announces the dedicated uninstall log path'
+Assert-Contains $uninstaller 'Write-UninstallLog .ERROR.' 'Uninstaller records failures in its own log'
+Assert-Contains $uninstaller 'Removed verified MicBridge-owned desktop shortcut' 'Uninstaller records verified shortcut deletion'
+Assert-Contains $uninstaller 'Preserved install directory' 'Uninstaller records why install files were retained'
+Assert-Contains $ui 'الإرسال:' 'UI shows simplified send status'
+Assert-Contains $ui 'الاستقبال:' 'UI shows simplified receive status'
+Assert-Contains $ui 'جودة الاتصال:' 'UI shows a concise connection-quality indicator'
+Assert-Contains $ui 'AudioDG التقريبي' 'UI reports estimated AudioDG CPU usage when available'
+Assert-NotContains $ui 'الحزم منذ التشغيل' 'UI does not display cumulative packet totals'
+Assert-Contains $readme 'Uninstall.log' 'README documents the separate uninstall log'
+Assert-Contains $readme 'Recovery.log' 'README documents the separate recovery log'
+
+Assert-Contains $installer 'Write-Host .*سجل فحص الترقية:.*upgradeLog' 'Installer announces the separate upgrade-audit log path'
+Assert-Contains $installer 'Write-UpgradeLog .INFO.' 'Installer writes legacy audit results to the dedicated upgrade log'
+Assert-Contains $readme 'Upgrade.log' 'README documents the dedicated upgrade audit log'

@@ -31,7 +31,7 @@ Write-Host '=== Windows / Audio Engine ==='
 $os = Get-CimInstance Win32_OperatingSystem
 $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 Write-Host ("OS: {0} | Version: {1} | Build: {2}.{3}" -f $os.Caption, $os.Version, $cv.CurrentBuildNumber, $cv.UBR)
-Write-Host ("DisableProtectedAudioDG: {0}" -f (Read-LmValue 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Audio' 'DisableProtectedAudioDG'))
+Write-Host ("DisableProtectedAudioDG: {0}" -f (Read-LmValue 'SOFTWARE\Microsoft\Windows\CurrentVersion\Audio' 'DisableProtectedAudioDG'))
 
 if ([string]::IsNullOrWhiteSpace($EndpointId)) {
     $matches = @()

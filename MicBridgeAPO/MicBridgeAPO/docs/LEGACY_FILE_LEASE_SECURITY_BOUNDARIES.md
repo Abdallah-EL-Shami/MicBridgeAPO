@@ -1,0 +1,67 @@
+# Legacy File Handle Lease — Security Boundaries
+
+Status: experimental, read-only prototype. This document describes the implementation at the current recovery-branch revision; it is not an approval to execute cleanup.
+
+## What the prototype currently enforces
+
+- Opens each directory component in the installation-root chain and candidate-parent chain with directory semantics and `FILE_FLAG_OPEN_REPARSE_POINT`.
+- Rejects directory components that are reparse points or do not resolve to the expected canonical path (the volume root is handled separately because Windows may return a volume-GUID path).
+- Holds directory handles without write/delete sharing for the lifetime of the lease. Ordinary Win32 rename, removal, and replacement attempts against those pinned entries should therefore fail while the lease is open.
+- Opens the candidate file with `FILE_FLAG_OPEN_REPARSE_POINT` and share mode zero. Existing incompatible handles cause the open to fail; new ordinary opens that request sharing-incompatible access are denied while the lease is held.
+- Rejects directories, reparse-point candidates, files whose final handle path is outside the final installation-root path, and files with more than one hard link.
+- Computes SHA-256 through the same opened file handle used to obtain file identity. It checks identity, link count, length, last-write timestamp, and stream length again after hashing.
+- Exposes read-only status and explicitly reports that execution is not authorized. It contains no delete, rename, registry mutation, or install operation.
+
+## Audit reparse-point coverage
+
+- The legacy installation audit rejects an install or data root that is itself a reparse point and reports it as `ReparsePointPreserved`.
+- The audit reports nested reparse-point directories and does not intentionally descend through them; Windows CI tests cover root and nested directory junctions for both install and data trees.
+- These tests cover directory junction behavior only. They do not establish equivalent behavior for symbolic links, volume mount points, UNC shares, DFS, cloud-backed placeholders, or third-party filesystem/filter drivers.
+- The file-handle lease has separate component-level reparse-point checks, but neither the audit tests nor the lease tests currently establish a universal race-free guarantee for every filesystem or namespace.
+
+## Ownership provenance: current release blocker
+
+The current audit intentionally returns `OwnershipProven = false` and `OwnershipEvidenceStatus = NotEstablished`. No existing audit input is allowed to promote those fields to `true` merely because a path, filename, CLSID, registry server path, or SHA-256 matches.
+
+The CMS approval module is a separate reviewer-approval mechanism. Its signature binds a review decision to a journal digest, candidate path/hash, reviewer SID, machine, expiry, and trusted signer thumbprint. It does **not** establish who originally installed a file or created a COM registration, and it must never be treated as the missing ownership provenance.
+
+A future provenance source would need, at minimum:
+- A versioned installation manifest created during a successful MicBridge installation, not reconstructed during cleanup.
+- A cryptographic signature from a product-release signing identity whose trust anchor is provisioned independently of the manifest and journal.
+- Exact canonical relative paths, file hashes, product/version identity, installation transaction ID, and the relevant COM registration values created by that transaction.
+- Verification against the currently installed file and registration state, with explicit handling for upgrades, interrupted rollback, manifest loss, certificate rotation/revocation, and shared COM registrations.
+- A policy that still preserves any shared or ambiguous registration, even if a product binary manifest is valid.
+
+No such end-to-end manifest/trust-anchor lifecycle is currently implemented or validated. Therefore `OwnershipProven` remains false, cleanup review cannot be promoted, and no executor may be connected to the installer. Existing installations without trustworthy historical provenance require manual review or preservation, not inferred ownership.
+
+## Signed installation manifest verifier (experimental)
+
+- A read-only verifier now checks a detached CMS signature against an explicit signer-thumbprint allowlist supplied by the caller, signer validity dates, Code Signing EKU, digital-signature key usage, exact signed manifest bytes, schema/product identity, a non-empty installation transaction GUID, unique safe relative paths, and current SHA-256 values.
+- It rejects reparse points encountered along listed file paths and does not perform file, registry, installer, or cleanup mutations.
+- Its output deliberately keeps `OwnershipProven = false`, `ComOwnershipProven = false`, and `IsExecutionAuthorized = false`. It verifies only that listed file bytes match a signed manifest; it does not prove that the manifest was created by a successful installation unless a trustworthy release signing and transaction lifecycle is established independently.
+- The verifier currently does not implement certificate-chain building, online/offline revocation checking, timestamp validation, key-rotation policy, or a protected OS-managed trust-anchor store. The explicit thumbprint list is only as trustworthy as the mechanism that provisions and protects it.
+- The manifest's `ComRegistrations` field is not interpreted as proof of COM ownership. No COM registration is authorized for deletion by this verifier.
+- The prototype is not integrated into the installer and is not a cleanup executor. It must remain experimental until the trust-anchor lifecycle, installer manifest creation, upgrade/rollback semantics, revocation, and independent security review are complete.
+
+## What this does not prove
+
+- It does not prove that a file or COM registration historically belongs to MicBridge. A matching name, path, hash, or CLSID is not ownership evidence.
+- The read-only audit now exposes `OwnershipProven = false` and `OwnershipEvidenceStatus = NotEstablished` explicitly. Its classifications are inventory hints only; they must not be consumed as deletion authorization.
+- It does not prove that a backup captured the original Windows state. A digest proves integrity relative to the supplied manifest, not historical truth.
+- It does not provide an atomic, path-relative unlink/delete operation. Holding a lease is not equivalent to a safe deletion primitive.
+- It is not a complete defense against privileged/kernel actors, offline volume modification, filesystem/filter-driver behavior outside ordinary Win32 sharing semantics, or every remote/network filesystem implementation.
+- It does not establish that every filesystem supports the same handle-sharing and directory pinning guarantees. Unsupported or incompatible behavior must fail closed.
+- The pre/post metadata checks detect several forms of mutation during hashing, but they are not a universal proof against all filesystem races or adversarial storage behavior.
+
+## Required gates before any executor can be considered
+
+1. Independent security review of path resolution and directory-handle ancestry, including mount points, volume roots, UNC paths, case/normalization behavior, and filesystem-specific semantics.
+2. Deterministic Windows tests for concurrent ancestor/child rename, replacement, junction insertion, pre-existing incompatible handles, hard links, and cleanup of all handles on every failure path.
+3. A deletion design based on a proven path-relative/handle-relative primitive, or a documented decision that deletion cannot be made safe enough and must remain manual.
+4. Trusted ownership evidence independent of the audit journal (for example, a separately trusted installer manifest or transaction provenance); shared COM keys remain preserved unless ownership is independently established.
+5. Human review and explicit approval bound to the exact item identity, content digest, transaction, and current preflight state.
+6. Installer/package integration only after the above gates pass and the complete test suite succeeds.
+
+## Current integration rule
+
+The installer and build package must continue to exclude the cleanup planner, journal, approval-signature, preflight, and file-handle lease prototypes. The installer may run the read-only legacy audit and must stop on any legacy, ambiguous, unreadable, foreign/shared, or otherwise unresolved state. No automatic cleanup is authorized by this prototype.
