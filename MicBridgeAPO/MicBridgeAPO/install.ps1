@@ -165,6 +165,8 @@ try {
     Write-InstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
     if (-not $legacyAudit.IsReadOnly -or $legacyAudit.CleanupAllowed -ne $false -or
         $legacyAudit.OriginalWindowsBaselineProven -ne $false -or
+        $legacyAudit.OwnershipProven -ne $false -or
+        $legacyAudit.OwnershipEvidenceStatus -ne 'NotEstablished' -or
         $legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
         $details = @($legacyAudit.Findings | Where-Object { $_.Classification -notin @('Absent') } |
             ForEach-Object { "$($_.Name): $($_.Classification) [$($_.Path)]" }) -join '; '
