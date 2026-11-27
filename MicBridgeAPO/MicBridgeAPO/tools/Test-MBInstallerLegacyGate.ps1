@@ -25,7 +25,7 @@ $gate = $source.Substring($gateStart,$gateEnd-$gateStart)
 if (-not $gate.Contains("Import-Module -Name `$legacyAuditModule -Force -ErrorAction Stop")) { throw 'FAIL: installer does not import the read-only legacy audit module.' }
 if (-not $gate.Contains("Test-MBLegacyInstallationState -InstallDirectory `$installDir -DataDirectory `$dataDir -RegistryRoot 'HKLM:\'")) { throw 'FAIL: installer does not audit the intended HKLM root.' }
 if (-not $gate.Contains("'MicBridgeCandidate'" ) -or -not $gate.Contains("'MicBridgeBinaryCandidate'" ) -or -not $gate.Contains("'ForeignOrSharedServer'")) { throw 'FAIL: clean-install gate does not block live MicBridge or foreign COM registrations.' }
-if (-not $gate.Contains('Old recovery files were not restored or changed.') -or -not $gate.Contains("'MicBridgeRecoveryEvidence'")) { throw 'FAIL: clean-install gate must preserve and ignore old recovery evidence rather than restore it.' }
+if (-not $gate.Contains('Old recovery files were not restored or changed.') -or $gate.Contains("'MicBridgeRecoveryEvidence'")) { throw 'FAIL: clean-install gate must preserve and ignore old recovery evidence rather than treating it as a blocking live artifact.' }
 if (-not $gate.Contains("`$legacyAudit.OwnershipProven -ne `$false") -or -not $gate.Contains("`$legacyAudit.OwnershipEvidenceStatus -ne 'NotEstablished'")) { throw 'FAIL: installer does not require the audit to report ownership as unproven.' }
 if (-not $gate.Contains('No installation was attempted.')) { throw 'FAIL: blocked install does not explain that no installation was attempted.' }
 if ($gate -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-ItemProperty|reg\.exe\s+(delete|add))\b') {
