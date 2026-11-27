@@ -64,6 +64,9 @@ jobs:
       - name: Test installer legacy audit gates (static, no system mutation)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerLegacyGate.ps1
+      - name: Test uninstaller independent ownership gate (static, no system mutation)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBUninstallerOwnershipGate.ps1
       - name: Test isolated COM registration rollback (HKCU only)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBComRegistrationRollback.ps1
