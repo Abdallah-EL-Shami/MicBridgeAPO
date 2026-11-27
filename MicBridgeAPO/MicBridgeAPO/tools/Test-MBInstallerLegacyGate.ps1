@@ -41,7 +41,7 @@ if ($gate -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-It
     throw 'FAIL: clean-install audit gate must remain read-only.'
 }
 if (-not $gate.Contains('$legacyAudit.OwnershipProven -ne $false') -or
-    -not $gate.Contains("$legacyAudit.OwnershipEvidenceStatus -ne 'NotEstablished'")) {
+    -not $gate.Contains('$legacyAudit.OwnershipEvidenceStatus -ne ''NotEstablished''')) {
     throw 'FAIL: audit gate must not claim ownership or original Windows baseline proof.'
 }
 
