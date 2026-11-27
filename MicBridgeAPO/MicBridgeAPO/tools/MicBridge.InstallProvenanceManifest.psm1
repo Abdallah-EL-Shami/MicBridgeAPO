@@ -48,7 +48,7 @@ function Test-MBInstallProvenanceManifest {
     if($null -eq $eku -or -not (([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$eku).EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' })) {
         throw 'Manifest signer certificate must contain the Code Signing EKU.'
     }
-    if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$cms.ContentInfo.Content,[byte[]]$manifestBytes)) {
+    if(-not ([Convert]::ToBase64String([byte[]]$cms.ContentInfo.Content) -ceq [Convert]::ToBase64String([byte[]]$manifestBytes))) {
         throw 'Manifest bytes differ from the signed CMS content.'
     }
     $manifest=[Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json -ErrorAction Stop
