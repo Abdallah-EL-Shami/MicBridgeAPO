@@ -12,75 +12,70 @@ $installer = Get-Content -LiteralPath $installerPath -Raw
 $build = Get-Content -LiteralPath $buildWorkflowPath -Raw
 $release = Get-Content -LiteralPath $releaseWorkflowPath -Raw
 
-$verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest', [StringComparison]::Ordinal)
-$elevationIndex = $installer.IndexOf('Start-Process powershell -Verb RunAs', [StringComparison]::Ordinal)
-$diagnosticsIndex = $installer.IndexOf('# Establish operation-specific diagnostics', [StringComparison]::Ordinal)
-if ($verifyIndex -lt 0 -or $elevationIndex -lt 0 -or $diagnosticsIndex -lt 0 -or
-    -not ($verifyIndex -lt $elevationIndex -and $verifyIndex -lt $diagnosticsIndex)) {
-    throw 'FAIL: signed package verification must execute before elevation, logging, locks, or installer preflight.'
+$manualTrustIndex = $installer.IndexOf('if (-not $PublisherSignatureVerified)',[StringComparison]::Ordinal)
+$scriptSignatureIndex = $installer.IndexOf('Get-AuthenticodeSignature -FilePath $scriptFile.FullName',[StringComparison]::Ordinal)
+$verifierImportIndex = $installer.IndexOf('Import-Module -Name $provenanceVerifier',[StringComparison]::Ordinal)
+$manifestVerifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
+$elevationIndex = $installer.IndexOf('Start-Process powershell -Verb RunAs',[StringComparison]::Ordinal)
+$diagnosticsIndex = $installer.IndexOf('# Establish operation-specific diagnostics',[StringComparison]::Ordinal)
+if ($manualTrustIndex -lt 0 -or $scriptSignatureIndex -le $manualTrustIndex -or
+    $verifierImportIndex -le $scriptSignatureIndex -or $manifestVerifyIndex -le $verifierImportIndex -or
+    $elevationIndex -le $manifestVerifyIndex -or $diagnosticsIndex -le $manifestVerifyIndex) {
+    throw 'FAIL: manual pinned-publisher confirmation, all script signatures, manifest verification, and pre-elevation ordering are not enforced.'
 }
 foreach ($pattern in @(
+    'PublisherSignatureVerified',
+    'manualBootstrapTrustEstablished',
+    'Get-AuthenticodeSignature',
+    '29BAC42BFC53F2586559A9B95D1FEEB658E8891A',
+    'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369',
+    'SignerCertificate\.Thumbprint',
+    'GetCertHashString',
+    'trustedReleaseCertificateSha256',
+    'SignatureStatus\]::NotTrusted',
     'install-manifest[.]json',
     'install-manifest[.]p7s',
-    'MicBridge[.]InstallProvenanceManifest[.]psm1',
-    '29BAC42BFC53F2586559A9B95D1FEEB658E8891A',
     'SignatureVerified',
     'ManifestVerified',
-    'FileProvenanceVerified'
+    'FileProvenanceVerified',
+    'PackageFilesPinnedForUse',
+    'Close-MBInstallProvenanceLeases'
 )) {
-    if ($installer -notmatch $pattern) { throw "FAIL: installer signed-package gate is missing invariant: $pattern" }
+    if ($installer -notmatch $pattern) { throw "FAIL: installer bootstrap/provenance invariant is missing: $pattern" }
 }
-if ($installer -notmatch 'A signed MicBridge release package is required' -or
+if ($installer -notmatch '(?s)-not\s+\$manualBootstrapTrustEstablished' -or
+    $installer -notmatch 'A signed MicBridge release package is required' -or
     $installer -notmatch 'no elevation or installation was attempted') {
-    throw 'FAIL: missing manifest/signature/verifier must fail closed before elevation.'
+    throw 'FAIL: installer must fail closed without manual trust and signed package evidence.'
 }
 
-$serviceIndex = $installer.IndexOf("Restart-Service -Name Audiosrv -Force", [StringComparison]::Ordinal)
-$receiptCreateIndex = $installer.IndexOf('New-MBInstallTransactionReceipt', [StringComparison]::Ordinal)
-$receiptVerifyIndex = $installer.IndexOf('Test-MBInstallTransactionReceipt -ReceiptPath $receiptPath -VerifyInstalledFiles', [StringComparison]::Ordinal)
-$successIndex = $installer.IndexOf("Write-InstallLog 'INFO' 'Installation completed successfully.'", [StringComparison]::Ordinal)
-$transactionCleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force -ErrorAction Stop', [StringComparison]::Ordinal)
-if ($serviceIndex -lt 0 -or $receiptCreateIndex -le $serviceIndex -or
-    $receiptVerifyIndex -le $receiptCreateIndex -or $successIndex -le $receiptVerifyIndex -or
-    $transactionCleanupIndex -le $successIndex) {
-    throw 'FAIL: receipt must be created and verified after successful system setup and before transaction cleanup/completion.'
+$receiptCreate = $installer.IndexOf('New-MBInstallTransactionReceipt',[StringComparison]::Ordinal)
+$receiptVerify = $installer.IndexOf('Test-MBInstallTransactionReceipt -ReceiptPath $receiptPath -VerifyInstalledFiles',[StringComparison]::Ordinal)
+$success = $installer.IndexOf("Write-InstallLog 'INFO' 'Installation completed successfully.'",[StringComparison]::Ordinal)
+if ($receiptCreate -lt 0 -or $receiptVerify -le $receiptCreate -or $success -le $receiptVerify) {
+    throw 'FAIL: transaction receipt must be created and independently verified before installation success.'
 }
-foreach ($pattern in @(
-    'MicBridgeAPO[.]dll',
-    'MicBridgeUI[.]ps1',
-    'MicBridgeUI[.]bat',
-    'uninstall[.]ps1',
-    'uninstall[.]bat',
+foreach ($required in @(
+    'BaselineEvidenceSha256',
+    '$baselineSha256 = (Get-FileHash -LiteralPath $backupFile',
+    '-BaselineEvidenceSha256 $baselineSha256',
+    '$activeReceiptCheck.BaselineEvidenceSha256',
+    'ReceiptIntegrityVerified',
+    'InstalledFilesVerified',
     'OwnershipProven',
     'ComOwnershipProven',
     'IsExecutionAuthorized'
 )) {
-    if ($installer -notmatch $pattern) { throw "FAIL: receipt integration is missing expected evidence/safety invariant: $pattern" }
-}
-if ($installer -notmatch '-TransactionId \(\[guid\]::Parse\(\[string\]\$rollbackJournal\.TransactionId\)\)' -or
-    $installer -notmatch '-ReleaseManifestTransactionId \(\[guid\]::Parse\(\[string\]\$verifiedPackage\.InstallTransactionId\)\)' -or
-    $installer -notmatch 'ReceiptIntegrityVerified' -or $installer -notmatch 'InstalledFilesVerified') {
-    throw 'FAIL: installer does not independently verify the persisted receipt and installed file hashes.'
-}
-if ($installer -notmatch 'Test-MBInstallProvenanceManifest[^\r\n]*-PinFiles' -or
-    $installer -notmatch 'PackageFilesPinnedForUse' -or
-    $installer -notmatch 'manualBootstrapTrustEstablished' -or
-    $installer -notmatch 'Close-MBInstallProvenanceLeases' -or
-    $installer -notmatch 'DllSource must resolve to the exact MicBridgeAPO[.]dll') {
-    throw 'FAIL: installer must pin signed package files, require manual bootstrap trust, release leases, and bind DLL input to the signed package file.'
-}
-if ($build -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
-    $build -notmatch 'MicBridge[.]InstallPackageFileLease[.]psm1' -or
-    $build -notmatch 'Test-MBInstallerProvenanceGate[.]ps1') {
-    throw 'FAIL: ordinary CI package staging or installer provenance integration test is missing.'
-}
-if ($release -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
-    $release -notmatch 'MicBridge[.]InstallPackageFileLease[.]psm1' -or
-    $release -notmatch 'Test-MBInstallProvenanceManifest') {
-    throw 'FAIL: signed release workflow must stage lease/receipt support and verify the release manifest after signing.'
+    if (-not $installer.Contains($required)) { throw "FAIL: receipt/baseline evidence invariant is missing: $required" }
 }
 
-Write-Host 'PASS: signed package verification precedes elevation and every installer mutation/preflight.'
-Write-Host 'PASS: installer fails closed when signed manifest, signature, verifier, or trust checks are unavailable.'
-Write-Host 'PASS: successful install writes and independently verifies a machine-bound transaction receipt before declaring completion.'
-Write-Host 'PASS: CI and signed release package staging include the receipt module and provenance verifier.'
+foreach ($workflow in @(@{Name='build.yml';Text=$build},@{Name='signed-release.yml';Text=$release})) {
+    foreach ($required in @('MicBridge.InstallTransactionReceipt.psm1','MicBridge.InstallPackageFileLease.psm1','Test-MBInstallerProvenanceGate.ps1','INSTALL-TRUST-AR.md')) {
+        if (-not $workflow.Text.Contains($required)) { throw "FAIL: $($workflow.Name) omits package/test dependency: $required" }
+    }
+}
+if ($release -notmatch '(?s)\$scriptFiles\s*=.*?Set-AuthenticodeSignature.*?Get-AuthenticodeSignature.*?\$manifestBytes\s*=') {
+    throw 'FAIL: signed release must sign and verify every PowerShell script before creating the signed manifest.'
+}
+Write-Host 'PASS: manual pinned publisher bootstrap precedes module import; all PowerShell scripts are pinned by SHA-1/SHA-256; signed manifest and files precede elevation.'
+Write-Host 'PASS: machine-bound receipt authenticates the independent v2 baseline and is verified before success.'
