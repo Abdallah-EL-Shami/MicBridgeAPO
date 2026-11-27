@@ -25,8 +25,10 @@ try {
     $publisherStore = [Security.Cryptography.X509Certificates.X509Store]::new([Security.Cryptography.X509Certificates.StoreName]::TrustedPublisher,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
     $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     $publisherStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    Write-Host 'AUTHENTICODE TEST: adding temporary trust anchors'
     $rootStore.Add($cert)
     $publisherStore.Add($cert)
+    Write-Host 'AUTHENTICODE TEST: temporary trust anchors installed'
 
     $scriptPath = Join-Path $root 'SignedProbe.ps1'
     [IO.File]::WriteAllText($scriptPath,"Write-Output 'AUTHENTICODE_PROBE_OK'"+[Environment]::NewLine,[Text.UTF8Encoding]::new($true))
@@ -41,6 +43,7 @@ try {
         throw "FAIL: signed PowerShell bootstrap did not verify as Valid. Set=$($signed.Status); Verify=$($verified.Status)"
     }
 
+    Write-Host 'AUTHENTICODE TEST: signature checks passed'
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $arguments = "-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File `"$scriptPath`""
     Write-Host 'AUTHENTICODE TEST: launching valid script under AllSigned'
