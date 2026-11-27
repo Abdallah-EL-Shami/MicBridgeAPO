@@ -17,7 +17,8 @@ function Test-MBInstallProvenanceManifest {
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
         [string[]]$RevokedSignerThumbprints=@(),
-        [switch]$RequireCertificateChain
+        [switch]$RequireCertificateChain,
+        [switch]$RequireCertificateRevocation
     )
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
     $manifestFull=Test-MBRegularNonReparseFile -Path $ManifestPath -Label 'Manifest'
@@ -75,11 +76,21 @@ function Test-MBInstallProvenanceManifest {
     if($null -eq $eku -or -not (([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$eku).EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' })) {
         throw 'Manifest signer certificate must contain the Code Signing EKU.'
     }
+    if($RequireCertificateRevocation -and -not $RequireCertificateChain) {
+        throw 'Certificate revocation checking requires strict certificate-chain validation.'
+    }
     $chainValidated=$false
+    $revocationChecked=$false
     if($RequireCertificateChain) {
         $chain=[Security.Cryptography.X509Certificates.X509Chain]::new()
         try {
-            $chain.ChainPolicy.RevocationMode=[Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            $chain.ChainPolicy.RevocationMode=$(if($RequireCertificateRevocation){
+                [Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+            }else{
+                [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            })
+            $chain.ChainPolicy.RevocationFlag=[Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
+            $chain.ChainPolicy.UrlRetrievalTimeout=[TimeSpan]::FromSeconds(15)
             $chain.ChainPolicy.VerificationFlags=[Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
             [void]$chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
             $chainValidated=$chain.Build($signer)
@@ -87,6 +98,7 @@ function Test-MBInstallProvenanceManifest {
                 $status=(@($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) -join ', ')
                 throw "Manifest signer certificate chain is not trusted for Code Signing: $status"
             }
+            if($RequireCertificateRevocation) { $revocationChecked=$true }
         } finally { $chain.Dispose() }
     }
     if(-not ([Convert]::ToBase64String([byte[]]$cms.ContentInfo.Content) -ceq [Convert]::ToBase64String([byte[]]$manifestBytes))) {
@@ -140,9 +152,10 @@ function Test-MBInstallProvenanceManifest {
         VerificationConsistency='PathBasedNonAtomic'
         RaceSafeForExecution=$false
         CertificateChainValidated=$chainValidated
-        RevocationChecked=$false
+        RevocationChecked=$revocationChecked
         CallerRevocationDenylistChecked=($revoked.Count -gt 0)
-        SignerRevocationStatus=$(if($revoked.Count -gt 0){'NotListedInCallerDenylist'}else{'NotChecked'})
+        CertificateRevocationMode=$(if($revocationChecked){'OnlineExcludeRoot'}else{'NotChecked'})
+        SignerRevocationStatus=$(if($revoked.Count -gt 0){'NotListedInCallerDenylist'}elseif($revocationChecked){'CertificateChainRevocationChecked'}else{'NotChecked'})
         IsReleaseTrustEstablished=$false
         OwnershipProven=$false
         ComOwnershipProven=$false
