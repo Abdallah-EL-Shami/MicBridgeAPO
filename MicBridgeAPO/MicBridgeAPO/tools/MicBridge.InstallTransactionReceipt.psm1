@@ -49,6 +49,7 @@ function New-MBInstallTransactionReceipt {
         [Parameter(Mandatory)][string]$ReleaseManifestSha256,
         [Parameter(Mandatory)][string]$SignerThumbprint,
         [Parameter(Mandatory)][object[]]$InstalledFiles,
+        [Parameter(Mandatory)][guid]$ReleaseManifestTransactionId,
         [guid]$TransactionId = [guid]::Empty,
         [string]$BaselineEvidenceSha256
     )
@@ -101,11 +102,13 @@ function New-MBInstallTransactionReceipt {
     if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Receipt parent directory cannot be a reparse point.' }
     if (Test-Path -LiteralPath $receiptFull) { throw 'An install transaction receipt already exists; refusing to overwrite history.' }
 
+    if ($ReleaseManifestTransactionId -eq [guid]::Empty) { throw 'Signed release manifest transaction ID is required.' }
     if ($TransactionId -eq [guid]::Empty) { $TransactionId = [guid]::NewGuid() }
     $payload = [ordered]@{
         SchemaVersion=1
         ProductId='MicBridgeAPO'
         TransactionId=$TransactionId.ToString()
+        ReleaseManifestTransactionId=$ReleaseManifestTransactionId.ToString()
         ProductVersion=$ProductVersion
         ReleaseManifestSha256=$ReleaseManifestSha256.ToUpperInvariant()
         SignerThumbprint=$SignerThumbprint.ToUpperInvariant()
@@ -135,6 +138,7 @@ function New-MBInstallTransactionReceipt {
     [pscustomobject]@{
         Created=$true
         TransactionId=$payload.TransactionId
+        ReleaseManifestTransactionId=$payload.ReleaseManifestTransactionId
         ReceiptPath=$receiptFull
         ReceiptProtection='DPAPI-LocalMachine'
         InstalledFileCount=$records.Count
@@ -157,8 +161,10 @@ function Test-MBInstallTransactionReceipt {
         $plain = [Security.Cryptography.ProtectedData]::Unprotect($bytes,$entropy,[Security.Cryptography.DataProtectionScope]::LocalMachine)
         $payload = [Text.Encoding]::UTF8.GetString($plain) | ConvertFrom-Json -ErrorAction Stop
         $transaction = [guid]::Empty
+        $releaseManifestTransaction = [guid]::Empty
         if ($payload.SchemaVersion -ne 1 -or $payload.ProductId -ne 'MicBridgeAPO' -or
             -not [guid]::TryParse([string]$payload.TransactionId,[ref]$transaction) -or $transaction -eq [guid]::Empty -or
+            -not [guid]::TryParse([string]$payload.ReleaseManifestTransactionId,[ref]$releaseManifestTransaction) -or $releaseManifestTransaction -eq [guid]::Empty -or
             [string]$payload.ReleaseManifestSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
             [string]$payload.SignerThumbprint -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Install transaction receipt schema or identity is invalid.' }
         $rootItem = Get-Item -LiteralPath ([string]$payload.InstallRoot) -Force -ErrorAction Stop
@@ -192,6 +198,7 @@ function Test-MBInstallTransactionReceipt {
             MachineBound=$true
             InstalledFilesVerified=[bool]$VerifyInstalledFiles
             TransactionId=$transaction.ToString()
+            ReleaseManifestTransactionId=$releaseManifestTransaction.ToString()
             ProductVersion=[string]$payload.ProductVersion
             ReleaseManifestSha256=[string]$payload.ReleaseManifestSha256
             SignerThumbprint=[string]$payload.SignerThumbprint
