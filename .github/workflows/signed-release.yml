@@ -1,0 +1,184 @@
+name: signed-release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: release-signing
+    timeout-minutes: 45
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify clean source checkout
+        shell: pwsh
+        run: |
+          git clean -ffdx
+          if ($LASTEXITCODE -ne 0) { throw 'Could not clean the checkout before building.' }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the checked-out commit.' }
+          if ($actual -ne $env:GITHUB_SHA) {
+            throw "Checked-out commit $actual does not match workflow commit $env:GITHUB_SHA."
+          }
+          $dirty = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify checkout status.' }
+          if ($dirty) { throw "Source checkout is not clean after cleanup: $dirty" }
+          Write-Host "CLEAN SOURCE CHECKOUT: $actual"
+      - name: Configure
+        run: cmake -S MicBridgeAPO/MicBridgeAPO -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Run Windows APO COM smoke test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Check installer registration and rollback safety
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-ApoInstallerRegistration.ps1
+      - name: Test durable recovery journal interruption and resume
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRecoveryJournal.ps1
+      - name: Test install rollback snapshot validation
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackValidation.ps1
+      - name: Test read-only legacy installation audit (HKCU fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyInstallationAudit.ps1
+      - name: Test read-only legacy cleanup planner (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupPlan.ps1
+      - name: Test durable legacy cleanup review journal (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupJournal.ps1
+      - name: Test read-only legacy cleanup preflight revalidation (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupPreflight.ps1
+      - name: Test signed legacy cleanup approval evidence (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyApprovalSignature.ps1
+      - name: Test signed install provenance manifest (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest.ps1
+      - name: Test exclusive legacy file handle lease (temp-only fixture)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyFileHandleLease.ps1
+      - name: Test installer legacy audit gates (static, no system mutation)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerLegacyGate.ps1
+      - name: Test isolated COM registration rollback (HKCU only)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBComRegistrationRollback.ps1
+      - name: Test isolated DLL rollback action
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallRollbackActions.ps1
+      - name: Test isolated durable DLL rollback executor
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRollbackExecutor.ps1
+      - name: Test isolated support-file rollback actions
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallFileRollback.ps1
+      - name: Test isolated metadata, shortcut and ProgramData ACL rollback
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallMetadataRollback.ps1
+      - name: Test isolated endpoint registry rollback and crash recovery
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBEndpointRegistryRollback.ps1
+      - name: Test isolated endpoint ACL rollback and crash recovery (HKCU only)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBRegistryAclRollback.ps1
+      - name: Stage complete install package
+        shell: pwsh
+        run: |
+          $source = 'MicBridgeAPO/MicBridgeAPO'
+          $package = 'MicBridgeAPO-Package'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item 'build/Release/MicBridgeAPO.dll' $package
+          $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1')
+          foreach ($file in $files) {
+            $path = Join-Path $source $file
+            if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }
+            Copy-Item -LiteralPath $path -Destination $package
+          }
+          # The installer imports this module from $PSScriptRoot\tools.
+          # Keep the same relative layout in the staged package.
+          $toolsPackage = Join-Path $package 'tools'
+          New-Item -ItemType Directory -Force -Path $toolsPackage | Out-Null
+          $recoveryModule = Join-Path $source 'tools/MicBridge.RecoveryJournal.psm1'
+          if (-not (Test-Path -LiteralPath $recoveryModule -PathType Leaf)) { throw "Required recovery module missing: $recoveryModule" }
+          Copy-Item -LiteralPath $recoveryModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.RecoveryJournal.psm1') -PathType Leaf)) { throw 'Recovery module was not staged in the required tools directory.' }
+          $provenanceModule = Join-Path $source 'tools/MicBridge.InstallProvenanceManifest.psm1'
+          if (-not (Test-Path -LiteralPath $provenanceModule -PathType Leaf)) { throw "Required provenance verifier missing: $provenanceModule" }
+          Copy-Item -LiteralPath $provenanceModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallProvenanceManifest.psm1') -PathType Leaf)) { throw 'Provenance verifier was not staged in the required tools directory.' }
+          $rollbackValidator = Join-Path $source 'tools/MicBridge.InstallRollbackValidation.psm1'
+          if (-not (Test-Path -LiteralPath $rollbackValidator -PathType Leaf)) { throw "Required rollback validator missing: $rollbackValidator" }
+          Copy-Item -LiteralPath $rollbackValidator -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallRollbackValidation.psm1') -PathType Leaf)) { throw 'Rollback validator was not staged in the required tools directory.' }
+          $endpointRollbackModule = Join-Path $source 'tools/MicBridge.EndpointRegistryRollback.psm1'
+          if (-not (Test-Path -LiteralPath $endpointRollbackModule -PathType Leaf)) { throw "Required endpoint rollback module missing: $endpointRollbackModule" }
+          Copy-Item -LiteralPath $endpointRollbackModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.EndpointRegistryRollback.psm1') -PathType Leaf)) { throw 'Endpoint rollback module was not staged in the required tools directory.' }
+          $comRollbackModule = Join-Path $source 'tools/MicBridge.ComRegistrationRollback.psm1'
+          if (-not (Test-Path -LiteralPath $comRollbackModule -PathType Leaf)) { throw "Required COM rollback module missing: $comRollbackModule" }
+          Copy-Item -LiteralPath $comRollbackModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.ComRegistrationRollback.psm1') -PathType Leaf)) { throw 'COM rollback module was not staged in the required tools directory.' }
+          $legacyAuditModule = Join-Path $source 'tools/MicBridge.LegacyInstallAudit.psm1'
+          if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) { throw "Required legacy audit module missing: $legacyAuditModule" }
+          Copy-Item -LiteralPath $legacyAuditModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.LegacyInstallAudit.psm1') -PathType Leaf)) { throw 'Legacy audit module was not staged in the required tools directory.' }
+          $aclRollbackModule = Join-Path $source 'tools/MicBridge.RegistryAclRollback.psm1'
+          if (-not (Test-Path -LiteralPath $aclRollbackModule -PathType Leaf)) { throw "Required ACL rollback module missing: $aclRollbackModule" }
+          Copy-Item -LiteralPath $aclRollbackModule -Destination $toolsPackage
+          $dllRollbackModule = Join-Path $source 'tools/MicBridge.InstallRollbackActions.psm1'
+          if (-not (Test-Path -LiteralPath $dllRollbackModule -PathType Leaf)) { throw "Required DLL rollback module missing: $dllRollbackModule" }
+          Copy-Item -LiteralPath $dllRollbackModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallRollbackActions.psm1') -PathType Leaf)) { throw 'DLL rollback action module was not staged in the required tools directory.' }
+          $fileRollbackModule = Join-Path $source 'tools/MicBridge.InstallFileRollback.psm1'
+          $fileExecutorModule = Join-Path $source 'tools/MicBridge.InstallFileExecutor.psm1'
+          foreach ($requiredModule in @($fileRollbackModule,$fileExecutorModule)) {
+            if (-not (Test-Path -LiteralPath $requiredModule -PathType Leaf)) { throw "Required support-file recovery module missing: $requiredModule" }
+            Copy-Item -LiteralPath $requiredModule -Destination $toolsPackage
+          }
+          $metadataRollbackModule = Join-Path $source 'tools/MicBridge.InstallMetadataRollback.psm1'
+          $metadataExecutorModule = Join-Path $source 'tools/MicBridge.MetadataExecutor.psm1'
+          foreach ($requiredModule in @($metadataRollbackModule,$metadataExecutorModule)) {
+            if (-not (Test-Path -LiteralPath $requiredModule -PathType Leaf)) { throw "Required metadata recovery module missing: $requiredModule" }
+            Copy-Item -LiteralPath $requiredModule -Destination $toolsPackage
+          }
+          $fullRollbackExecutor = Join-Path $source 'tools/MicBridge.FullInstallRollbackExecutor.psm1'
+          if (-not (Test-Path -LiteralPath $fullRollbackExecutor -PathType Leaf)) { throw "Required full rollback executor missing: $fullRollbackExecutor" }
+          Copy-Item -LiteralPath $fullRollbackExecutor -Destination $toolsPackage
+          Get-ChildItem $package -Recurse | Select-Object FullName,Length | Format-Table -AutoSize
+      - name: Sign and independently verify the staged release manifest
+        shell: pwsh
+        env:
+          MB_RELEASE_SIGNING_PFX_BASE64: ${{ secrets.MB_RELEASE_SIGNING_PFX_BASE64 }}
+          MB_RELEASE_SIGNING_PFX_PASSWORD: ${{ secrets.MB_RELEASE_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+          $expectedThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
+          $expectedCertificateSha256 = 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369'
+          $package = Join-Path $PWD 'MicBridgeAPO-Package'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'micbridge-release-signing.pfx'
+          $certificate = $null
+          $privateBytes = $null
+          try {
+            if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Protected release-signing secrets are unavailable.' }
+            if (-not (Test-Path -LiteralPath $package -PathType Container)) { throw 'Staged package directory is missing.' }
+            if ($env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?
+        with:
+          name: MicBridgeAPO-Signed-Release-${{ github.ref_name }}
+          path: MicBridgeAPO-Package/**
+          if-no-files-found: error
+          retention-days: 90
