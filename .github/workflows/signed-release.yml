@@ -221,8 +221,8 @@ jobs:
             $publicCertPath = Join-Path $package 'MicBridgeAPO-Release.cer'
             [IO.File]::WriteAllBytes($publicCertPath,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
             $publicCert = [Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($publicCertPath))
-            $rootStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::Root,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-            $publisherStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::TrustedPublisher,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            $rootStore = [Security.Cryptography.X509Certificates.X509Store]::new([Security.Cryptography.X509Certificates.StoreName]::Root,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            $publisherStore = [Security.Cryptography.X509Certificates.X509Store]::new([Security.Cryptography.X509Certificates.StoreName]::TrustedPublisher,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
             $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
             $publisherStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
             $rootStore.Add($publicCert)
