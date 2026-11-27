@@ -74,7 +74,7 @@ jobs:
       - name: Test protected release signing workflow invariants (static)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBReleaseSigningWorkflow.ps1
-      - name: Test Authenticode bootstrap and AllSigned enforcement (temporary certificate)
+      - name: Test Authenticode signing and tamper detection (temporary certificate)
         shell: pwsh
         timeout-minutes: 2
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBAuthenticodeBootstrap.ps1
