@@ -39,7 +39,7 @@ if ($expectedPackageDll.Count -ne 1 -or
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
+    $a = "-NoProfile -ExecutionPolicy AllSigned -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
     try { Start-Process powershell -Verb RunAs -ArgumentList $a }
     finally { Close-MBInstallProvenanceLeases -Verification $verifiedPackage }
     exit
