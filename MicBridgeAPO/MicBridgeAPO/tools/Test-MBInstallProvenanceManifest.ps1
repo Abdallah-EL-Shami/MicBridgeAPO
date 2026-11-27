@@ -74,10 +74,18 @@ try {
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
        $ok.CertificateChainValidated -or $ok.CertificateDownloadsDisabled -or $ok.RevocationChecked -or $ok.CertificateRevocationMode -ne 'NotCheckedOffline' -or $ok.IsReleaseTrustEstablished -or
-       $ok.VerificationConsistency -ne 'PathBasedNonAtomic' -or $ok.RaceSafeForExecution -or
-       $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotCheckedOffline') {
+       $ok.VerificationConsistency -ne 'ExclusiveHandlePinned' -or -not $ok.RaceSafeForExecution -or
+       $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotCheckedOffline' -or
+       -not $ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed -or -not $ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen) {
         throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
     }
+    $writeBlocked=$false
+    try {
+        $probe=[IO.File]::Open($bin,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+        $probe.Dispose()
+    } catch [IO.IOException] { $writeBlocked=$true }
+    if(-not $writeBlocked) { throw 'FAIL: verified package payload remained writable while its provenance lease was held.' }
+    Close-MBInstallProvenanceLeases -Verification $ok
 
     # A signed manifest must bind the complete package file set, not only
     # the subset it happens to list. Unlisted payloads are rejected.
