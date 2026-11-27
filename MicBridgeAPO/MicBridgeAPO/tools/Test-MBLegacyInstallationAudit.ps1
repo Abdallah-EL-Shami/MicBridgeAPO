@@ -77,6 +77,9 @@ try {
     if ($result.OwnershipProven -ne $false -or $result.OwnershipEvidenceStatus -ne 'NotEstablished') {
         throw 'FAIL: audit overstated historical MicBridge ownership without independent provenance.'
     }
+    if ($result.CleanupAllowed -ne $false -or $result.Outcome -notin @('NoLegacyResidueDetected','InventoryOnly','ReviewRequired')) {
+        throw 'FAIL: audit returned an invalid cleanup authorization or outcome.'
+    }
     if ($result.Outcome -eq 'NoLegacyResidueDetected') { throw 'FAIL: product-owned test candidates were not inventoried' }
 
     # Tampering or endpoint mismatch invalidates the baseline candidate without changing the live state.
