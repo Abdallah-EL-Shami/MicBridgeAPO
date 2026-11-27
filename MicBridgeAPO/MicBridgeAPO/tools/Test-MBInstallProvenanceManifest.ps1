@@ -132,6 +132,44 @@ try {
     $restoreUsageCms.ComputeSignature($restoreUsageSigner)
     [IO.File]::WriteAllBytes($signaturePath,$restoreUsageCms.Encode())
 
+    # A correctly pinned and purpose-constrained signer is still rejected after expiry.
+    $expiredRsa=[Security.Cryptography.RSA]::Create(2048)
+    $expiredCert=$null
+    try {
+        $expiredRequest=[Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            [Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridge Expired CI Signer'),
+            $expiredRsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $expiredRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false,$false,0,$true))
+        $expiredRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+            [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,$true))
+        $expiredOids=[Security.Cryptography.OidCollection]::new()
+        [void]$expiredOids.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+        $expiredRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($expiredOids,$true))
+        $expiredCert=$expiredRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddHours(-2),[DateTimeOffset]::UtcNow.AddHours(-1))
+        $expiredCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
+        $expiredSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+            [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$expiredCert)
+        $expiredSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+        $expiredCms.ComputeSignature($expiredSigner)
+        [IO.File]::WriteAllBytes($signaturePath,$expiredCms.Encode())
+        $expiredRejected=$false
+        try {
+            $expiredArgs=$args.Clone()
+            $expiredArgs.TrustedSignerThumbprints=@($expiredCert.Thumbprint)
+            Test-MBInstallProvenanceManifest @expiredArgs | Out-Null
+        } catch { $expiredRejected=$_.Exception.Message -match 'outside its validity period' }
+        if(-not $expiredRejected) { throw 'FAIL: expired manifest signing certificate was accepted.' }
+    } finally {
+        if($expiredCert) { $expiredCert.Dispose() }
+        $expiredRsa.Dispose()
+    }
+    $restoreExpiredCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
+    $restoreExpiredSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $restoreExpiredSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $restoreExpiredCms.ComputeSignature($restoreExpiredSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$restoreExpiredCms.Encode())
+
     $wrongTrust=$false
     try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
