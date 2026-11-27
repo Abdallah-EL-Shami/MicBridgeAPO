@@ -152,6 +152,24 @@ namespace MicBridgeHandleLeaseHardLink {
     if (-not $junctionRejected) { throw 'FAIL: candidate reached through an in-root junction was not rejected.' }
     Remove-Item -LiteralPath $junctionDir -Force
 
+    # The install root itself must not be accepted through a junction alias.
+    $rootAlias = Join-Path $sandboxParent 'install-root-alias'
+    $rootAliasCreated = $false
+    try {
+        New-Item -ItemType Junction -Path $rootAlias -Target $root -ErrorAction Stop | Out-Null
+        $rootAliasCreated = $true
+        $rootAliasRejected = $false
+        try {
+            Open-MBLegacyExclusiveFileLease -CandidatePath (Join-Path $rootAlias 'MicBridgeAPO.dll') -InstallRoot $rootAlias -ExpectedSha256 $hash | Out-Null
+        } catch { $rootAliasRejected = $_.Exception.ToString() -match 'reparse point' }
+        if (-not $rootAliasRejected) { throw 'FAIL: install root reached through a junction alias was accepted.' }
+    } catch {
+        if ($rootAliasCreated) { throw }
+        throw ('FAIL: could not create install-root junction fixture: ' + $_.Exception.Message)
+    } finally {
+        if ($rootAliasCreated) { Remove-Item -LiteralPath $rootAlias -Force }
+    }
+
     $outside = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeOutside-' + [guid]::NewGuid().ToString('N') + '.dll')
     [IO.File]::WriteAllBytes($outside,[byte[]](8,6,4,2))
     try {
