@@ -141,7 +141,7 @@ try {
 # replay handler is available, never start a new transaction over uncertain state.
 if (Test-Path -LiteralPath $dataDir -PathType Container) {
     $pendingRollbackJournals = @()
-    foreach ($transactionFolder in @(Get-ChildItem -LiteralPath $dataDir -Directory -Filter 'transactions-*' -ErrorAction Stop)) {
+    foreach ($transactionFolder in @(Get-ChildItem -LiteralPath $dataDir -Directory -Filter 'transactions-v2-*' -ErrorAction Stop)) {
         $candidateJournal = Join-Path $transactionFolder.FullName 'rollback-recovery.json'
         if (-not (Test-Path -LiteralPath $candidateJournal -PathType Leaf)) { continue }
         $candidateStepIds = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
@@ -544,7 +544,7 @@ if ((Test-Path -LiteralPath $installedDllCandidate) -and -not (Test-Path -Litera
 # Snapshot the currently installed state for transaction rollback. This is separate
 # from backup.json, which remains the immutable pre-first-install recovery record.
 $transactionId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-$transactionDir = Join-Path $dataDir ("transactions-" + $transactionId)
+$transactionDir = Join-Path $dataDir ("transactions-v2-" + $transactionId)
 New-Item -ItemType Directory -Force -Path $transactionDir | Out-Null
 $transactionStateFile = Join-Path $transactionDir 'state.json'
 $clsidRegBackup = Join-Path $transactionDir 'clsid.reg'

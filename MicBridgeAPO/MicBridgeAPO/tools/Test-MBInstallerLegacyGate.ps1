@@ -40,6 +40,7 @@ if ($auditCall1 -lt 0 -or $auditCall2 -le $auditCall1 -or $upgradeCheckpoint -le
 }
 if (-not $source.Contains('$backupFile = Join-Path $dataDir ''install-baseline-v2.json''') -or -not $source.Contains('$compositeBackupFile = Join-Path $dataDir ''install-composite-baseline-v2.json''')) { throw 'FAIL: new installer must use fresh v2 baseline paths and leave legacy backup.json untouched.' }
 if (-not $source.Contains('Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles') -or -not $source.Contains('No current-installer receipt exists')) { throw 'FAIL: managed upgrade must require a valid current-installer receipt.' }
+if ($source -notmatch "-Filter 'transactions-v2-\*'" -or $source -notmatch 'transactions-v2-') { throw 'FAIL: new installer must recover only its own v2 transaction journals and leave legacy transactions-* folders untouched.' }
 if (-not $workflowSource.Contains("Copy-Item -LiteralPath `$legacyAuditModule -Destination `$toolsPackage")) {
     throw 'FAIL: package staging does not include the required legacy audit module.'
 }
