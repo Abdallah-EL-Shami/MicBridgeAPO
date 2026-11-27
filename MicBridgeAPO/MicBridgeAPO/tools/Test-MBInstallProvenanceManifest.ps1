@@ -181,6 +181,21 @@ try {
     $wrongTrust=$false
     try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
+    $revokedSignerRejected=$false
+    try {
+        $revokedArgs=$args.Clone()
+        $revokedArgs.RevokedSignerThumbprints=@($cert.Thumbprint)
+        Test-MBInstallProvenanceManifest @revokedArgs | Out-Null
+    } catch { $revokedSignerRejected=$_.Exception.Message -match 'explicitly revoked' }
+    if(-not $revokedSignerRejected) { throw 'FAIL: explicitly revoked manifest signer was accepted.' }
+
+    $malformedRevocationRejected=$false
+    try {
+        $badRevocationArgs=$args.Clone()
+        $badRevocationArgs.RevokedSignerThumbprints=@('INVALID')
+        Test-MBInstallProvenanceManifest @badRevocationArgs | Out-Null
+    } catch { $malformedRevocationRejected=$_.Exception.Message -match 'Revoked signer thumbprints must be exactly 40 hexadecimal characters' }
+    if(-not $malformedRevocationRejected) { throw 'FAIL: malformed signer revocation denylist entry was accepted.' }
 
     # Altering the detached manifest bytes without re-signing must be rejected.
     $signedManifestBytes=[IO.File]::ReadAllBytes($manifestPath)
