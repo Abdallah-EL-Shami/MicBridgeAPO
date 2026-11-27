@@ -49,16 +49,18 @@ if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPol
 
 $signatureLoopIndex = $installer.IndexOf('foreach ($scriptFile in $packageScripts)',[StringComparison]::Ordinal)
 $signatureCallIndex = $installer.IndexOf('Get-AuthenticodeSignature -FilePath $scriptFile.FullName',[StringComparison]::Ordinal)
+$manualTrustIndex = $installer.IndexOf('if (-not $PublisherSignatureVerified)',[StringComparison]::Ordinal)
+$scriptSignatureIndex = $installer.IndexOf('Get-AuthenticodeSignature -FilePath $scriptFile.FullName',[StringComparison]::Ordinal)
 $verifierImportIndex = $installer.IndexOf('Import-Module -Name $provenanceVerifier',[StringComparison]::Ordinal)
-$verifyCallIndex = $installer.IndexOf('$verifiedPackage = Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
-if ($signatureLoopIndex -lt 0 -or $signatureCallIndex -lt 0 -or $verifierImportIndex -lt 0 -or $verifyCallIndex -lt 0 -or
-    -not ($signatureLoopIndex -lt $signatureCallIndex -and $signatureCallIndex -lt $verifierImportIndex -and $verifierImportIndex -lt $verifyCallIndex)) {
-    throw 'FAIL: every packaged PowerShell script/module must pass Authenticode signer-pin verification before the manifest verifier module is imported.'
+if ($manualTrustIndex -lt 0 -or $scriptSignatureIndex -lt 0 -or $verifierImportIndex -lt 0 -or
+    -not ($manualTrustIndex -lt $scriptSignatureIndex -and $scriptSignatureIndex -lt $verifierImportIndex)) {
+    throw 'FAIL: manual out-of-band publisher confirmation and all package script signatures must be checked before importing the manifest verifier.'
 }
-if ($installer -notmatch '(?s)PublisherSignatureVerified' -or
-    $installer -notmatch '(?s)manualBootstrapTrustEstablished\s*=\s*\$true' -or
-    $installer -notmatch '(?s)if\s*\(-not\s*\$PublisherSignatureVerified\).*?throw') {
-    throw 'FAIL: installer must require an explicit out-of-band publisher-signature confirmation before package verification or mutation.'
+if ($installer -notmatch '(?s)-not\s+\$manualBootstrapTrustEstablished' -or
+    $installer -notmatch '(?s)PublisherSignatureVerified' -or
+    $installer -notmatch '(?s)SignatureStatus]::NotTrusted' -or
+    $installer -notmatch '(?s)SignerCertificate\.Thumbprint -ne \$trustedReleaseThumbprint') {
+    throw 'FAIL: installer must require explicit manual bootstrap confirmation and pin every script/module signature to the release signer.'
 }
 $verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
 $elevationIndex = $installer.IndexOf('Start-Process powershell -Verb RunAs',[StringComparison]::Ordinal)
