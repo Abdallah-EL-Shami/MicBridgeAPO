@@ -438,6 +438,7 @@ $activeReceiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $activeRecei
 if (-not $activeReceiptCheck.ReceiptIntegrityVerified -or -not $activeReceiptCheck.MachineBound -or
     -not $activeReceiptCheck.InstalledFilesVerified -or
     $activeReceiptCheck.SignerThumbprint -ne $trustedReleaseThumbprint -or
+    -not [string]::Equals([string]$activeReceiptCheck.BaselineEvidenceSha256,(Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash,[StringComparison]::OrdinalIgnoreCase) -or
     -not [string]::Equals([IO.Path]::GetFullPath($activeReceiptCheck.InstallRoot),[IO.Path]::GetFullPath($installDir),[StringComparison]::OrdinalIgnoreCase)) {
     throw 'The active install receipt is invalid, belongs to another install root, or was not created by the pinned release signer. Upgrade blocked.'
 }
