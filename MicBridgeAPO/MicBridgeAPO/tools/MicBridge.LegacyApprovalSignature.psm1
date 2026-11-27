@@ -103,7 +103,8 @@ function Test-MBLegacyApprovalSignature {
         [Parameter(Mandatory)][string]$JournalPath,
         [Parameter(Mandatory)][string]$SignaturePath,
         [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
-        [Parameter(Mandatory)][string]$ItemId
+        [Parameter(Mandatory)][string]$ItemId,
+        [switch]$RetainLease
     )
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
     $sigFile = Get-Item -LiteralPath $SignaturePath -Force -ErrorAction Stop
@@ -147,17 +148,24 @@ function Test-MBLegacyApprovalSignature {
     $leaseResult = Open-MBLegacyExclusiveFileLease -CandidatePath $entry[0].Path -InstallRoot $journal.InstallDirectory -ExpectedSha256 ([string]$payload.CandidateSha256) -ExpectedFileIdentity ([string]$payload.CandidateFileIdentity)
     try {
         if (-not $leaseResult.FinalHandleValidationPassed) { throw 'Final file-handle validation failed.' }
-    } finally { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult }
-    [pscustomobject]@{
-        IsValid=$true
-        SignatureVerified=$true
-        SignerThumbprint=$signerCert.Thumbprint
-        ItemId=$ItemId
-        CandidateSha256=[string]$payload.CandidateSha256
-        ExpiresUtc=$expires.ToString('o')
-        IsExecutionAuthorized=$false
-        FinalHandleValidationRequired=$true
-        Note='Signature verified; this function is non-destructive and does not authorize or perform deletion.'
+        $result = [pscustomobject]@{
+            IsValid=$true
+            SignatureVerified=$true
+            SignerThumbprint=$signerCert.Thumbprint
+            ItemId=$ItemId
+            CandidateSha256=[string]$payload.CandidateSha256
+            CandidateFileIdentity=[string]$payload.CandidateFileIdentity
+            ExpiresUtc=$expires.ToString('o')
+            IsExecutionAuthorized=$false
+            FinalHandleValidationRequired=$true
+            LeaseRetained=[bool]$RetainLease
+            LeaseResult=$(if($RetainLease){$leaseResult}else{$null})
+            Note='Signature verified; no deletion or execution authorization is granted. If requested, the exclusive lease remains open for a separately reviewed caller.'
+        }
+        if($RetainLease) { $leaseResult=$null }
+        return $result
+    } finally {
+        if($null -ne $leaseResult) { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult }
     }
 }
 
