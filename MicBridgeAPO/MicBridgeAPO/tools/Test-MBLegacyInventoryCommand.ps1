@@ -11,6 +11,11 @@ $tokens=$null; $errors=$null
 if(@($errors).Count -gt 0) { throw ("FAIL: inventory script parser errors: "+(@($errors|ForEach-Object Message)-join '; ')) }
 $source=[IO.File]::ReadAllText($scriptPath)
 $module=[IO.File]::ReadAllText($modulePath)
+$buildWorkflow=[IO.File]::ReadAllText((Join-Path $repoRoot '..\..\..\.github\workflows\build.yml'))
+$releaseWorkflow=[IO.File]::ReadAllText((Join-Path $repoRoot '..\..\..\.github\workflows\signed-release.yml'))
+foreach($workflow in @($buildWorkflow,$releaseWorkflow)) {
+    if(-not $workflow.Contains("Inspect-MBLegacyInstallation.ps1")) { throw 'FAIL: inventory command is not staged in both unsigned CI and signed release packages.' }
+}
 $trust=$source.IndexOf('if (-not $PublisherSignatureVerified)',[StringComparison]::Ordinal)
 $signature=$source.IndexOf('Get-AuthenticodeSignature -FilePath $modulePath',[StringComparison]::Ordinal)
 $import=$source.IndexOf('Import-Module -Name $modulePath',[StringComparison]::Ordinal)
