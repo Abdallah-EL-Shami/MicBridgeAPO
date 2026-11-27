@@ -58,6 +58,9 @@ jobs:
       - name: Test machine-bound install transaction provenance receipt (temp-only)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallTransactionReceipt.ps1
+      - name: Test installer signed-package gate and post-install receipt ordering (static)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerProvenanceGate.ps1
       - name: Test protected release signing workflow invariants (static)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBReleaseSigningWorkflow.ps1
@@ -112,10 +115,17 @@ jobs:
           if (-not (Test-Path -LiteralPath $recoveryModule -PathType Leaf)) { throw "Required recovery module missing: $recoveryModule" }
           Copy-Item -LiteralPath $recoveryModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.RecoveryJournal.psm1') -PathType Leaf)) { throw 'Recovery module was not staged in the required tools directory.' }
+          $receiptModule = Join-Path $source 'tools/MicBridge.InstallTransactionReceipt.psm1'
+          if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw "Required transaction receipt module missing: $receiptModule" }
+          Copy-Item -LiteralPath $receiptModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallTransactionReceipt.psm1') -PathType Leaf)) { throw 'Transaction receipt module was not staged in the required tools directory.' }
           $provenanceModule = Join-Path $source 'tools/MicBridge.InstallProvenanceManifest.psm1'
           if (-not (Test-Path -LiteralPath $provenanceModule -PathType Leaf)) { throw "Required provenance verifier missing: $provenanceModule" }
           Copy-Item -LiteralPath $provenanceModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallProvenanceManifest.psm1') -PathType Leaf)) { throw 'Provenance verifier was not staged in the required tools directory.' }
+          $installerProvenanceTest = Join-Path $source 'tools/Test-MBInstallerProvenanceGate.ps1'
+          if (-not (Test-Path -LiteralPath $installerProvenanceTest -PathType Leaf)) { throw "Required installer provenance gate test missing: $installerProvenanceTest" }
+          Copy-Item -LiteralPath $installerProvenanceTest -Destination $toolsPackage
           $rollbackValidator = Join-Path $source 'tools/MicBridge.InstallRollbackValidation.psm1'
           if (-not (Test-Path -LiteralPath $rollbackValidator -PathType Leaf)) { throw "Required rollback validator missing: $rollbackValidator" }
           Copy-Item -LiteralPath $rollbackValidator -Destination $toolsPackage
