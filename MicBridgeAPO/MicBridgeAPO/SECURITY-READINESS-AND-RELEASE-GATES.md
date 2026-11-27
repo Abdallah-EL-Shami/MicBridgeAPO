@@ -71,3 +71,8 @@ All development tests must remain isolated: temporary directories for files, HKC
 - [ ] Main branch and PR merge actions explicitly approved by the repository owner.
 
 Until every applicable item is complete, cleanup execution remains disabled.
+
+
+## Independent bootstrap launcher implementation plan
+
+A detailed native-launcher security design is recorded in [`docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md`](../../docs/BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md). It specifies an independently Authenticode-trusted native launcher, CMS and payload verification before any package PowerShell executes, handle-bound file pinning, a process-bound verification handoff, and negative/race tests. This is a design only: no launcher binary or code has been implemented, the current verifier still returns `BootstrapTrustEstablished=false`, and production installation remains blocked. The current static CI test checks that this limitation and design remain disclosed; it is not a runtime security proof.
