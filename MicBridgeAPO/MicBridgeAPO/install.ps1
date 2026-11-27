@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 # Before importing ANY package module, verify the Authenticode integrity and pinned
 # signer of every PowerShell script/module in the staged package.
 $trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
+$trustedReleaseCertificateSha256 = 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369'
 if (-not $PublisherSignatureVerified) {
     throw 'Bootstrap trust has not been manually confirmed. First inspect install.ps1 with Get-AuthenticodeSignature and compare the signer thumbprint; then rerun with -PublisherSignatureVerified. No elevation or installation was attempted.'
 }
@@ -27,7 +28,8 @@ foreach ($scriptFile in $packageScripts) {
         [Management.Automation.SignatureStatus]::Valid,
         [Management.Automation.SignatureStatus]::NotTrusted
     ) -or $null -eq $scriptSignature.SignerCertificate -or
-        $scriptSignature.SignerCertificate.Thumbprint -ne $trustedReleaseThumbprint) {
+        $scriptSignature.SignerCertificate.Thumbprint -ne $trustedReleaseThumbprint -or
+        $scriptSignature.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $trustedReleaseCertificateSha256) {
         throw "PowerShell package signature or pinned publisher verification failed: $($scriptFile.FullName); status=$($scriptSignature.Status)."
     }
 }
