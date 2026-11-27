@@ -57,6 +57,42 @@ try {
     try { $badTrust=$args.Clone();$badTrust.TrustedSignerThumbprints=@('NOT-A-THUMBPRINT');Test-MBInstallProvenanceManifest @badTrust | Out-Null } catch { $malformedTrustRejected=$_.Exception.Message -match 'exactly 40 hexadecimal characters' }
     if(-not $malformedTrustRejected) { throw 'FAIL: malformed trust anchor was not rejected explicitly.' }
 
+    # A thumbprint-pinned certificate without the Code Signing EKU is not an acceptable signer.
+    $noEkuRsa=[Security.Cryptography.RSA]::Create(2048)
+    $noEkuCert=$null
+    try {
+        $noEkuRequest=[Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            [Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridge CI Signer Without Code Signing EKU'),
+            $noEkuRsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $noEkuRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false,$false,0,$true))
+        $noEkuRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+            [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,$true))
+        $noEkuCert=$noEkuRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-2),[DateTimeOffset]::UtcNow.AddHours(1))
+        $noEkuCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($signedManifestBytes),$false)
+        $noEkuSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+            [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$noEkuCert)
+        $noEkuSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+        $noEkuCms.ComputeSignature($noEkuSigner)
+        [IO.File]::WriteAllBytes($signaturePath,$noEkuCms.Encode())
+        $noEkuRejected=$false
+        try {
+            $noEkuArgs=$args.Clone()
+            $noEkuArgs.TrustedSignerThumbprints=@($noEkuCert.Thumbprint)
+            Test-MBInstallProvenanceManifest @noEkuArgs | Out-Null
+        } catch { $noEkuRejected=$_.Exception.Message -match 'Code Signing EKU' }
+        if(-not $noEkuRejected) { throw 'FAIL: signer certificate without Code Signing EKU was accepted.' }
+    } finally {
+        if($noEkuCert) { $noEkuCert.Dispose() }
+        $noEkuRsa.Dispose()
+    }
+    # Restore the original valid signature for subsequent negative cases.
+    $restoreCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($signedManifestBytes),$false)
+    $restoreSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $restoreSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $restoreCms.ComputeSignature($restoreSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$restoreCms.Encode())
+
     $wrongTrust=$false
     try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
