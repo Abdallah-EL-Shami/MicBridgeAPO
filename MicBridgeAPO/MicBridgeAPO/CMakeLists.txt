@@ -47,6 +47,7 @@ if(WIN32)
         target_include_directories(micbridge_bootstrap_signature_test PRIVATE src)
         target_compile_options(micbridge_bootstrap_signature_test PRIVATE /W4 /permissive- /EHsc)
         target_compile_definitions(micbridge_bootstrap_signature_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_compile_definitions(micbridge_bootstrap_signature_test PRIVATE MICBRIDGE_BOOTSTRAP_TESTING)
         target_link_libraries(micbridge_bootstrap_signature_test PRIVATE wintrust crypt32 bcrypt)
         add_test(NAME micbridge_bootstrap_rejects_unsigned
             COMMAND micbridge_bootstrap_signature_test $<TARGET_FILE:micbridge_bootstrap_fail_closed>)
