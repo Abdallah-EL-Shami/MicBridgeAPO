@@ -1,13 +1,37 @@
 ﻿# تثبيت MicBridge APO على المايك المحدد بالاسم.
 param(
     [string]$DeviceName = 'AT2040USB',
-    [string]$DllSource  = (Join-Path $PSScriptRoot 'MicBridgeAPO.dll')
+    [string]$DllSource  = (Join-Path $PSScriptRoot 'MicBridgeAPO.dll'),
+    [switch]$PublisherSignatureVerified
 )
 $ErrorActionPreference = 'Stop'
 
-# Verify the signed release package before elevation, logging, locks, or system mutation.
-# This is an integrity gate for the staged package; the PowerShell host/bootstrap itself
-# remains outside this script-level trust boundary.
+# Manual bootstrap trust: the operator must first inspect this entrypoint's
+# Authenticode signer and compare its thumbprint with the independently published pin.
+# The explicit switch records that out-of-band human check; it is not a substitute for it.
+# Before importing ANY package module, verify the Authenticode integrity and pinned
+# signer of every PowerShell script/module in the staged package.
+$trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
+if (-not $PublisherSignatureVerified) {
+    throw 'Bootstrap trust has not been manually confirmed. First inspect install.ps1 with Get-AuthenticodeSignature and compare the signer thumbprint; then rerun with -PublisherSignatureVerified. No elevation or installation was attempted.'
+}
+$packageScripts = @(Get-ChildItem -LiteralPath $PSScriptRoot -File -Recurse -Force -ErrorAction Stop |
+    Where-Object { $_.Extension -in @('.ps1','.psm1') })
+if ($packageScripts.Count -lt 1) { throw 'No signed PowerShell package files were found.' }
+foreach ($scriptFile in $packageScripts) {
+    if (($scriptFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "PowerShell package file is a reparse point: $($scriptFile.FullName)"
+    }
+    $scriptSignature = Get-AuthenticodeSignature -FilePath $scriptFile.FullName
+    if ($scriptSignature.Status -notin @(
+        [Management.Automation.SignatureStatus]::Valid,
+        [Management.Automation.SignatureStatus]::NotTrusted
+    ) -or $null -eq $scriptSignature.SignerCertificate -or
+        $scriptSignature.SignerCertificate.Thumbprint -ne $trustedReleaseThumbprint) {
+        throw "PowerShell package signature or pinned publisher verification failed: $($scriptFile.FullName); status=$($scriptSignature.Status)."
+    }
+}
+$manualBootstrapTrustEstablished = $true
 $manifestPath = Join-Path $PSScriptRoot 'install-manifest.json'
 $manifestSignaturePath = Join-Path $PSScriptRoot 'install-manifest.p7s'
 $provenanceVerifier = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallProvenanceManifest.psm1'
@@ -17,13 +41,12 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
     throw 'A signed MicBridge release package is required. Manifest, signature, or verifier is missing; no elevation or installation was attempted.'
 }
 Import-Module -Name $provenanceVerifier -Force -ErrorAction Stop
-$trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
 $verifiedPackage = Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $manifestSignaturePath -InstallDirectory $PSScriptRoot -TrustedSignerThumbprints @($trustedReleaseThumbprint) -PinFiles
 if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVerified -or
     -not $verifiedPackage.FileProvenanceVerified -or
     $verifiedPackage.SignerThumbprint -ne $trustedReleaseThumbprint -or
     $verifiedPackage.IsExecutionAuthorized -or $verifiedPackage.OwnershipProven -or
-    -not $verifiedPackage.PackageFilesPinnedForUse -or $verifiedPackage.RaceSafeForExecution -or -not $verifiedPackage.BootstrapTrustEstablished) {
+    -not $verifiedPackage.PackageFilesPinnedForUse -or $verifiedPackage.RaceSafeForExecution -or -not $manualBootstrapTrustEstablished) {
     try { Close-MBInstallProvenanceLeases -Verification $verifiedPackage } catch {}
     throw 'Signed package verification did not return the required integrity evidence; installation was blocked.'
 }
@@ -39,7 +62,7 @@ if ($expectedPackageDll.Count -ne 1 -or
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $a = "-NoProfile -ExecutionPolicy AllSigned -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
+    $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`" -PublisherSignatureVerified"
     try { Start-Process powershell -Verb RunAs -ArgumentList $a }
     finally { Close-MBInstallProvenanceLeases -Verification $verifiedPackage }
     exit
