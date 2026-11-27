@@ -94,6 +94,44 @@ try {
     $restoreCms.ComputeSignature($restoreSigner)
     [IO.File]::WriteAllBytes($signaturePath,$restoreCms.Encode())
 
+    # A thumbprint-pinned signer must also carry the DigitalSignature key-usage bit.
+    $badUsageRsa=[Security.Cryptography.RSA]::Create(2048)
+    $badUsageCert=$null
+    try {
+        $badUsageRequest=[Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            [Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridge CI Signer With Encryption-Only Key Usage'),
+            $badUsageRsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $badUsageRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false,$false,0,$true))
+        $badUsageRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+            [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment,$true))
+        $badUsageOids=[Security.Cryptography.OidCollection]::new()
+        [void]$badUsageOids.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+        $badUsageRequest.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($badUsageOids,$true))
+        $badUsageCert=$badUsageRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-2),[DateTimeOffset]::UtcNow.AddHours(1))
+        $badUsageCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
+        $badUsageSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+            [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$badUsageCert)
+        $badUsageSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+        $badUsageCms.ComputeSignature($badUsageSigner)
+        [IO.File]::WriteAllBytes($signaturePath,$badUsageCms.Encode())
+        $badUsageRejected=$false
+        try {
+            $badUsageArgs=$args.Clone()
+            $badUsageArgs.TrustedSignerThumbprints=@($badUsageCert.Thumbprint)
+            Test-MBInstallProvenanceManifest @badUsageArgs | Out-Null
+        } catch { $badUsageRejected=$_.Exception.Message -match 'permit digital signatures' }
+        if(-not $badUsageRejected) { throw 'FAIL: signer certificate without DigitalSignature key usage was accepted.' }
+    } finally {
+        if($badUsageCert) { $badUsageCert.Dispose() }
+        $badUsageRsa.Dispose()
+    }
+    $restoreUsageCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($baselineManifestBytes),$false)
+    $restoreUsageSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $restoreUsageSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $restoreUsageCms.ComputeSignature($restoreUsageSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$restoreUsageCms.Encode())
+
     $wrongTrust=$false
     try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
