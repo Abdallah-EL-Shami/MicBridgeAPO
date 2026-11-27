@@ -6,7 +6,7 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed CI baseline for the native Authenticode verifier component is run **1651** (`46054092292`) on commit `3e43e81a09424989908253770a91322a07536612`. This run completed the Windows build, CTest suite, bootstrap trust-boundary static contract, provenance/receipt tests, rollback tests, and package staging. The verifier negative test covers empty paths, nonexistent files, and an unsigned executable. It still does not prove acceptance of a correctly signed file from the pinned certificate or rejection of a validly signed file from a different certificate. It validates the current component and fail-closed scaffold, not a production launcher or trust handoff. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
+The latest confirmed CI baseline for the native Authenticode verifier component is run **1652** (`46054390712`) on commit `9aef7b1961e1939b5f47fdbee71f51d4c0303325`. This run completed the Windows build, CTest suite, bootstrap trust-boundary static contract, provenance/receipt tests, rollback tests, and package staging. The verifier negative test covers empty paths, nonexistent files, and an unsigned executable. It still does not prove acceptance of a correctly signed file from the pinned certificate or rejection of a validly signed file from a different certificate. It validates the current component and fail-closed scaffold, not a production launcher or trust handoff. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
 
 ## Bootstrap trust boundary (not yet closed)
 
@@ -26,6 +26,9 @@ For either model, add negative tests for a modified launcher, modified verifier,
 The CI bootstrap audit now explicitly asserts that this import-before-verification condition remains disclosed; it is a guard against overstating readiness, not a mitigation. The installer gate has been tightened to require `BootstrapTrustEstablished=true`; the current verifier deliberately returns false, so the installer now stops before elevation, log creation, locks, preflight, or system mutation. This is a fail-closed production block, not a fix for the earlier verifier-module execution: an untrusted `.psm1` must still not be run at all until a separately trusted bootstrap validates it.
 
 No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
+
+
+The native verifier currently requests `WTD_REVOKE_NONE` and cache-only URL retrieval. This does not establish fresh revocation status. Offline operation and first-run revocation policy remain a release decision; the design document records the strict-online and offline-capable alternatives and their respective risks. Do not describe the current verifier as performing revocation checks.
 
 ## Manifest verifier limitations
 
