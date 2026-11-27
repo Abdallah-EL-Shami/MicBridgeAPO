@@ -139,6 +139,30 @@ function Test-MBInstallProvenanceManifest {
         if(-not $actual.Equals($expected,[StringComparison]::OrdinalIgnoreCase)) { throw "Manifest file hash mismatch: $relative" }
         $verified.Add([pscustomobject]@{RelativePath=$relative;Path=$candidate;Sha256=$actual})
     }
+    # Require an exact package file set. A valid signature over known files must
+    # not silently bless a directory containing additional unlisted payloads.
+    $actualFiles=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($entry in @(Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction Stop)) {
+        if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Install tree contains a reparse point: $($entry.FullName)"
+        }
+        if($entry.PSIsContainer) { continue }
+        $full=[IO.Path]::GetFullPath($entry.FullName)
+        if([string]::Equals($full,$manifestFull,[StringComparison]::OrdinalIgnoreCase) -or
+           [string]::Equals($full,$signatureFull,[StringComparison]::OrdinalIgnoreCase)) { continue }
+        $relativeActual=[IO.Path]::GetRelativePath($root,$full).Replace('\','/')
+        if(-not $actualFiles.Add($relativeActual)) { throw "Install tree contains a duplicate normalized file path: $relativeActual" }
+    }
+    if($actualFiles.Count -ne $seen.Count) {
+        throw "Install tree file set differs from the signed manifest: signed=$($seen.Count), actual=$($actualFiles.Count)."
+    }
+    foreach($actualPath in $actualFiles) {
+        $candidate=[IO.Path]::GetFullPath((Join-Path $root $actualPath))
+        if(-not $seen.Contains($candidate)) {
+            throw "Install tree contains an unlisted file not covered by the signed manifest: $actualPath"
+        }
+    }
+
     [pscustomobject]@{
         IsReadOnly=$true
         SignatureVerified=$true
