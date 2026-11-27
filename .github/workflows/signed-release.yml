@@ -209,8 +209,17 @@ jobs:
             [IO.File]::WriteAllBytes($pfxPath, $raw)
             [Array]::Clear($raw,0,$raw.Length)
             $raw = $null
-            $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxPath,$env:MB_RELEASE_SIGNING_PFX_PASSWORD,[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-            if (-not $cert.HasPrivateKey -or $cert.Thumbprint -ne $thumb -or $cert.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $certHash) { throw 'PFX does not contain the independently pinned release certificate and private key.' }
+            # Authenticode's Windows signing provider requires a private-key
+            # container that remains available through the certificate store.
+            # EphemeralKeySet can produce UnknownError in Set-AuthenticodeSignature.
+            $certStorePath = "Cert:\\CurrentUser\\My\\$thumb"
+            if (Test-Path -LiteralPath $certStorePath) { throw 'Pinned signing certificate already exists in the runner user store; refusing to reuse or remove an unknown key.' }
+            $securePfxPassword = ConvertTo-SecureString -String $env:MB_RELEASE_SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $null = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\\CurrentUser\\My' -Password $securePfxPassword
+            $cert = Get-Item -LiteralPath $certStorePath
+            if ($null -eq $cert -or -not $cert.HasPrivateKey -or $cert.Thumbprint -ne $thumb -or $cert.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $certHash) { throw 'PFX import did not yield the independently pinned release certificate and private key.' }
+            $securePfxPassword.Dispose()
+            $securePfxPassword = $null
             $now = [DateTime]::UtcNow
             if ($cert.NotBefore.ToUniversalTime() -gt $now -or $cert.NotAfter.ToUniversalTime() -le $now) { throw 'Signing certificate is outside its validity period.' }
             $ku = $cert.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.15' } | Select-Object -First 1
@@ -232,16 +241,27 @@ jobs:
               Where-Object { $_.Extension -in @('.ps1','.psm1') } | Sort-Object FullName)
             if ($scriptFiles.Count -eq 0) { throw 'No PowerShell scripts were found for Authenticode signing.' }
             foreach ($scriptFile in $scriptFiles) {
-              $signedScript = Set-AuthenticodeSignature -FilePath $scriptFile.FullName -Certificate $cert -HashAlgorithm SHA256
+              try {
+                $signedScript = Set-AuthenticodeSignature -FilePath $scriptFile.FullName -Certificate $cert -HashAlgorithm SHA256 -ErrorAction Stop
+              } catch {
+                Write-Host ("AUTHENTICODE SIGNING EXCEPTION: file={0}; type={1}; message={2}" -f $scriptFile.Name,$_.Exception.GetType().FullName,$_.Exception.Message)
+                throw
+              }
               $checkedScript = Get-AuthenticodeSignature -FilePath $scriptFile.FullName
+              $setStatus = [string]$signedScript.Status
+              $setMessage = [string]$signedScript.StatusMessage
+              $verifyStatus = [string]$checkedScript.Status
+              $verifyMessage = [string]$checkedScript.StatusMessage
+              $signerThumb = if ($null -ne $checkedScript.SignerCertificate) { [string]$checkedScript.SignerCertificate.Thumbprint } else { '<none>' }
+              Write-Host ("AUTHENTICODE DIAGNOSTIC: file={0}; setStatus={1}; setMessage={2}; verifyStatus={3}; verifyMessage={4}; signerThumbprint={5}" -f $scriptFile.Name,$setStatus,$setMessage,$verifyStatus,$verifyMessage,$signerThumb)
               $acceptedVerificationStatuses = @(
                 [Management.Automation.SignatureStatus]::Valid,
                 [Management.Automation.SignatureStatus]::NotTrusted
               )
               if ($signedScript.Status -notin $acceptedVerificationStatuses -or
                   $checkedScript.Status -notin $acceptedVerificationStatuses -or
-                  $checkedScript.SignerCertificate.Thumbprint -ne $thumb) {
-                throw "Authenticode signature integrity or pinned signer verification failed for package script: $($scriptFile.FullName); status=$($checkedScript.Status)"
+                  $signerThumb -ne $thumb) {
+                throw "Authenticode signature integrity or pinned signer verification failed for package script: $($scriptFile.FullName); setStatus=$setStatus; setMessage=$setMessage; verifyStatus=$verifyStatus; verifyMessage=$verifyMessage; signer=$signerThumb"
               }
               if ($checkedScript.Status -eq [Management.Automation.SignatureStatus]::NotTrusted) {
                 Write-Host "AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI: $($scriptFile.Name)"
@@ -277,6 +297,8 @@ jobs:
           finally {
             if ($null -ne $publicCert) { $publicCert.Dispose() }
             if ($null -ne $cert) { $cert.Dispose() }
+            if (Test-Path -LiteralPath $certStorePath) { Remove-Item -LiteralPath $certStorePath -Force -ErrorAction SilentlyContinue }
+            if ($null -ne $securePfxPassword) { $securePfxPassword.Dispose() }
             if ($null -ne $raw) { [Array]::Clear($raw,0,$raw.Length) }
             if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
             Remove-Item Env:MB_RELEASE_SIGNING_PFX_BASE64 -ErrorAction SilentlyContinue
