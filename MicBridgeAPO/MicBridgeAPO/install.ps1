@@ -218,7 +218,7 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 }
 try {
     Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
-    $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\'
+    $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -IgnoreLegacyRecoveryBackups
     Write-EarlyInstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
     # Recovery evidence from the retired installer is preserved and ignored:
     # it is neither restored nor used as the new install baseline. Only live
@@ -421,7 +421,7 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
     throw "Legacy installation audit module is missing; refusing to upgrade an existing installation: $legacyAuditModule"
 }
 Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
-$legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
+$legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id) -IgnoreLegacyRecoveryBackups
 Write-UpgradeLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
 foreach ($finding in @($legacyAudit.Findings)) { Write-UpgradeLog 'INFO' "Finding: Kind=$($finding.Kind); Name=$($finding.Name); Classification=$($finding.Classification); Path=$($finding.Path); Detail=$($finding.Detail)" }
 if ($isManagedUpgrade) {
@@ -477,7 +477,7 @@ if (-not (Test-Path $backupFile)) {
     if (-not $devSddl) { throw 'تعذر قراءة صلاحيات مفتاح المايك، ألغيت التثبيت قبل أي تغيير.' }
     # Persist the pre-MicBridge COM registrations outside the temporary transaction directory.
     # These files survive successful installation and are consumed by the uninstaller.
-    $comBackupDir = Join-Path $dataDir 'com-registration-backup'
+    $comBackupDir = Join-Path $dataDir 'install-com-registration-baseline-v2'
     New-Item -ItemType Directory -Force -Path $comBackupDir | Out-Null
     $comClsidPath = "HKLM\SOFTWARE\Classes\CLSID\$clsid"
     $comApoPath = "HKLM\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$clsid"
