@@ -29,7 +29,7 @@ if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVe
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $a = "-NoProfile -ExecutionPolicy AllSigned -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
+    $a = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -DeviceName `"$DeviceName`" -DllSource `"$DllSource`""
     Start-Process powershell -Verb RunAs -ArgumentList $a
     exit
 }
@@ -705,7 +705,7 @@ try {
         $ws = New-Object -ComObject WScript.Shell
         $lnk = $ws.CreateShortcut($shortcutTempPath)
         $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-        $lnk.Arguments = "-NoProfile -ExecutionPolicy AllSigned -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
+        $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
         $lnk.Save()
         $transactionState.ShortcutNewSha256 = (Get-FileHash -LiteralPath $shortcutTempPath -Algorithm SHA256 -ErrorAction Stop).Hash
         Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
