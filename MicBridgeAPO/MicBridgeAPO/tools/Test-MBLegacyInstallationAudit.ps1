@@ -102,6 +102,33 @@ try {
         throw 'FAIL: MicBridge DLL candidate was not inventoried'
     }
 
+    # A reparse point at the audit root must be reported and must not be traversed.
+    $junctionTarget = Join-Path $root 'install-junction-target'
+    $junctionRoot = Join-Path $root 'install-junction'
+    New-Item -ItemType Directory -Path $junctionTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $junctionTarget 'foreign.dll'),'outside target')
+    New-Item -ItemType Junction -Path $junctionRoot -Target $junctionTarget -ErrorAction Stop | Out-Null
+    try {
+        $rootJunctionAudit = Test-MBLegacyInstallationState -InstallDirectory $junctionRoot -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+        if (-not ($rootJunctionAudit.Findings | Where-Object { $_.Name -eq 'InstallDirectory' -and $_.Classification -eq 'ReparsePointPreserved' })) {
+            throw 'FAIL: install root junction was not explicitly preserved for review.'
+        }
+        if ($rootJunctionAudit.Outcome -ne 'ReviewRequired') { throw 'FAIL: install root junction did not block clean-state classification.' }
+    } finally { Remove-Item -LiteralPath $junctionRoot -Force -ErrorAction Stop }
+
+    $dataJunctionTarget = Join-Path $root 'data-junction-target'
+    $dataJunctionRoot = Join-Path $root 'data-junction'
+    New-Item -ItemType Directory -Path $dataJunctionTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dataJunctionTarget 'foreign.dat'),'outside data')
+    New-Item -ItemType Junction -Path $dataJunctionRoot -Target $dataJunctionTarget -ErrorAction Stop | Out-Null
+    try {
+        $dataRootJunctionAudit = Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $dataJunctionRoot -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+        if (-not ($dataRootJunctionAudit.Findings | Where-Object { $_.Name -eq 'DataDirectory' -and $_.Classification -eq 'ReparsePointPreserved' })) {
+            throw 'FAIL: data root junction was not explicitly preserved for review.'
+        }
+        if ($dataRootJunctionAudit.Outcome -ne 'ReviewRequired') { throw 'FAIL: data root junction did not block clean-state classification.' }
+    } finally { Remove-Item -LiteralPath $dataJunctionRoot -Force -ErrorAction Stop }
+
     $afterDll = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
     $afterLog = (Get-FileHash -LiteralPath (Join-Path $data 'Install.log') -Algorithm SHA256).Hash
     $afterClsid = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$registrySub\SOFTWARE\Classes\CLSID\$clsid")
