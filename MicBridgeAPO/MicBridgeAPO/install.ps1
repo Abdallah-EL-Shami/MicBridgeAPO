@@ -241,10 +241,10 @@ try {
         $details = @($blockingLegacy | ForEach-Object { "$($_.Name): $($_.Classification) [$($_.Path)]" }) -join '; '
         throw "Clean install blocked by live/ambiguous legacy state. Old recovery files were not restored or changed. No installation was attempted. Review findings: $details"
     }
-    Write-InstallLog 'INFO' 'Clean-install gate accepted preserved legacy recovery evidence only; it will not be restored or reused.'
+    Write-EarlyInstallLog 'INFO' 'Clean-install gate accepted preserved legacy recovery evidence only; it will not be restored or reused.'
 } catch {
     Close-MBInstallProvenanceLeases -Verification $verifiedPackage
-    Write-InstallLog 'ERROR' "Read-only legacy audit gate blocked installation. $($_.Exception.ToString())"
+    Write-EarlyInstallLog 'ERROR' "Read-only legacy audit gate blocked installation. $($_.Exception.ToString())"
     throw
 }
 
