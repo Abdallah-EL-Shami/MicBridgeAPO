@@ -356,7 +356,9 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId $parsedDeviceId
 Write-UninstallLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
-if ($legacyAudit.Outcome -eq 'ReviewRequired') {
+if ($legacyAudit.Outcome -eq 'ReviewRequired' -or
+    $legacyAudit.OwnershipProven -ne $true -or
+    $legacyAudit.OwnershipEvidenceStatus -ne 'Proven') {
     $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
     $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
     throw "Legacy installation audit requires manual review. No Registry, COM, ACL, or file changes were made. Preserve the installation and ProgramData data. $reviewSummary"
