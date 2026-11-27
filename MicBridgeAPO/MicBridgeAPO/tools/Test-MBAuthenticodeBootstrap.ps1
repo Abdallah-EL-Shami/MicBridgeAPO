@@ -30,8 +30,8 @@ try {
 
     $scriptPath = Join-Path $root 'SignedProbe.ps1'
     [IO.File]::WriteAllText($scriptPath,"Write-Output 'AUTHENTICODE_PROBE_OK'"+[Environment]::NewLine,[Text.UTF8Encoding]::new($true))
-    $signed = Set-AuthenticodeSignature -LiteralPath $scriptPath -Certificate $cert -HashAlgorithm SHA256
-    $verified = Get-AuthenticodeSignature -LiteralPath $scriptPath
+    $signed = Set-AuthenticodeSignature -FilePath $scriptPath -Certificate $cert -HashAlgorithm SHA256
+    $verified = Get-AuthenticodeSignature -FilePath $scriptPath
     if ($signed.Status -ne [Management.Automation.SignatureStatus]::Valid -or
         $verified.Status -ne [Management.Automation.SignatureStatus]::Valid -or
         $verified.SignerCertificate.Thumbprint -ne $cert.Thumbprint) {
@@ -43,8 +43,8 @@ try {
     $validExitCode = $LASTEXITCODE
     if ($validExitCode -ne 0) { throw "FAIL: AllSigned rejected the trusted signed script. ExitCode=$validExitCode" }
 
-    Add-Content -LiteralPath $scriptPath -Value '# tampered'
-    $tampered = Get-AuthenticodeSignature -LiteralPath $scriptPath
+    Add-Content -FilePath $scriptPath -Value '# tampered'
+    $tampered = Get-AuthenticodeSignature -FilePath $scriptPath
     if ($tampered.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
         throw "FAIL: modified signed script was not classified as HashMismatch. Status=$($tampered.Status)"
     }
