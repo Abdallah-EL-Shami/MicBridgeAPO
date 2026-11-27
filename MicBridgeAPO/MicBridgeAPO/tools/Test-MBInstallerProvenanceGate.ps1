@@ -39,7 +39,7 @@ $serviceIndex = $installer.IndexOf("Restart-Service -Name Audiosrv -Force", [Str
 $receiptCreateIndex = $installer.IndexOf('New-MBInstallTransactionReceipt', [StringComparison]::Ordinal)
 $receiptVerifyIndex = $installer.IndexOf('Test-MBInstallTransactionReceipt -ReceiptPath $receiptPath -VerifyInstalledFiles', [StringComparison]::Ordinal)
 $successIndex = $installer.IndexOf("Write-InstallLog 'INFO' 'Installation completed successfully.'", [StringComparison]::Ordinal)
-$transactionCleanupIndex = $installer.IndexOf("Remove-Item -LiteralPath $transactionDir -Recurse -Force -ErrorAction Stop", [StringComparison]::Ordinal)
+$transactionCleanupIndex = $installer.IndexOf('Remove-Item -LiteralPath $transactionDir -Recurse -Force -ErrorAction Stop', [StringComparison]::Ordinal)
 if ($serviceIndex -lt 0 -or $receiptCreateIndex -le $serviceIndex -or
     $receiptVerifyIndex -le $receiptCreateIndex -or $successIndex -le $receiptVerifyIndex -or
     $transactionCleanupIndex -le $successIndex) {
