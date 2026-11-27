@@ -22,6 +22,10 @@ $requiredReleasePatterns = [ordered]@{
     'ephemeral private key storage' = 'EphemeralKeySet'
     'detached CMS signature' = 'SignedCms'
     'post-signature verification' = 'Test-MBInstallProvenanceManifest'
+    'Authenticode script signing' = 'Set-AuthenticodeSignature'
+    'Authenticode signature verification' = 'Get-AuthenticodeSignature'
+    'public certificate artifact' = 'MicBridgeAPO-Release[.]cer'
+    'AllSigned launcher enforcement' = 'AllSigned'
     'temporary PFX cleanup' = 'Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force'
     'secret environment cleanup' = 'Remove-Item\s+Env:MB_RELEASE_SIGNING_PFX_PASSWORD'
     'signed release artifact' = 'MicBridgeAPO-Signed-Release'
@@ -32,6 +36,8 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
+if ($release -notmatch 'TrustedPublisher' -or $release -notmatch 'StoreName]::Root') { throw 'Release workflow must validate Authenticode signatures using temporary runner trust and remove that trust afterward.' }
+if ($release -notmatch 'MicBridge\.InstallPackageFileLease\.psm1') { throw 'Signed release package must stage the mutation-resistant install package lease module.' }
 foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
     if ($release -notmatch [regex]::Escape($testName.Replace('[.]','.'))) {
         throw "Signed release workflow must run the provenance integration test: $testName"
