@@ -361,7 +361,7 @@ if ($legacyAudit.Outcome -eq 'ReviewRequired' -or
     $legacyAudit.OwnershipEvidenceStatus -ne 'Proven') {
     $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup') })
     $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
-    throw "Legacy installation audit requires manual review. No Registry, COM, ACL, or file changes were made. Preserve the installation and ProgramData data. $reviewSummary"
+    throw "Legacy installation audit requires manual review or independent ownership proof is absent (OwnershipProven=$($legacyAudit.OwnershipProven); OwnershipEvidenceStatus=$($legacyAudit.OwnershipEvidenceStatus)). No Registry, COM, ACL, or file changes were made. Preserve the installation and ProgramData data. $reviewSummary"
 }
 
 # Create the uninstall recovery plan after all read-only preflight checks and before the first mutation.
