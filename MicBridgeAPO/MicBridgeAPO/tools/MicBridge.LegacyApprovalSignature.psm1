@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupJournal.psm1') -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupPreflight.psm1') -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1') -ErrorAction Stop
 
 function Get-MBLegacyApprovalJournalDigest {
     param([Parameter(Mandatory)][string]$Path)
@@ -60,6 +61,9 @@ function New-MBLegacyApprovalSignature {
     $journalEntry = @($journal.Entries | Where-Object { $_.Id -eq $ItemId -and $_.Status -eq 'ReviewApproved' })
     if ($journalEntry.Count -ne 1) { throw 'A matching human review approval is required before signing.' }
     $identity = Get-MBLegacyApprovalIdentity
+    $leaseResult = Open-MBLegacyExclusiveFileLease -CandidatePath $entry.Path -InstallRoot $journal.InstallDirectory -ExpectedSha256 $entry.Sha256
+    try { $approvedFileIdentity = [string]$leaseResult.FileIdentity }
+    finally { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult }
     $now = [DateTime]::UtcNow
     $payload = [ordered]@{
         SchemaVersion=1
@@ -68,6 +72,7 @@ function New-MBLegacyApprovalSignature {
         JournalSha256=(Get-MBLegacyApprovalJournalDigest -Path $JournalPath)
         CandidatePath=[IO.Path]::GetFullPath([string]$entry.Path)
         CandidateSha256=[string]$entry.Sha256
+        CandidateFileIdentity=$approvedFileIdentity
         Reviewer=$Reviewer.Trim()
         ReviewerSid=$identity.Sid
         Machine=$identity.Machine
@@ -135,9 +140,14 @@ function Test-MBLegacyApprovalSignature {
     $entry = @($preflight.VerifiedEntries | Where-Object { $_.ItemId -eq $ItemId })
     if ($entry.Count -ne 1 -or
         -not ([string]$entry[0].Sha256).Equals([string]$payload.CandidateSha256,[StringComparison]::OrdinalIgnoreCase) -or
-        -not ([string]$entry[0].Path).Equals([string]$payload.CandidatePath,[StringComparison]::OrdinalIgnoreCase)) {
+        -not ([string]$entry[0].Path).Equals([string]$payload.CandidatePath,[StringComparison]::OrdinalIgnoreCase) -or
+        [string]::IsNullOrWhiteSpace([string]$payload.CandidateFileIdentity)) {
         throw 'Current candidate identity or hash differs from signed approval.'
     }
+    $leaseResult = Open-MBLegacyExclusiveFileLease -CandidatePath $entry[0].Path -InstallRoot $journal.InstallDirectory -ExpectedSha256 ([string]$payload.CandidateSha256) -ExpectedFileIdentity ([string]$payload.CandidateFileIdentity)
+    try {
+        if (-not $leaseResult.FinalHandleValidationPassed) { throw 'Final file-handle validation failed.' }
+    } finally { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult }
     [pscustomobject]@{
         IsValid=$true
         SignatureVerified=$true
