@@ -49,7 +49,8 @@ try {
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
        $ok.CertificateChainValidated -or $ok.RevocationChecked -or $ok.IsReleaseTrustEstablished -or
-       $ok.VerificationConsistency -ne 'PathBasedNonAtomic' -or $ok.RaceSafeForExecution) {
+       $ok.VerificationConsistency -ne 'PathBasedNonAtomic' -or $ok.RaceSafeForExecution -or
+       $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotChecked') {
         throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
     }
 
