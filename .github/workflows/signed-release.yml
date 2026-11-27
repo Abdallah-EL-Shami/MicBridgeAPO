@@ -119,13 +119,19 @@ jobs:
           Copy-Item 'build/Release/MicBridgeAPO.dll' $package
           $uiVersion = '0.1.1-dev'
           if ($env:GITHUB_REF.StartsWith('refs/tags/v')) { $uiVersion = $env:GITHUB_REF.Substring('refs/tags/v'.Length) }
-          [IO.File]::WriteAllText((Join-Path $package 'version.txt'),$uiVersion,[Text.UTF8Encoding]::new($false))
           $files = @('install.bat','install.ps1','uninstall.bat','uninstall.ps1','MicBridgeUI.ps1','MicBridgeUI.bat','MicBridge.ini','README.md','INSTALL-TRUST-AR.md','tools/Test-ApoRuntime.ps1','tools/Inspect-ApoEndpoint.ps1')
           foreach ($file in $files) {
             $path = Join-Path $source $file
             if (-not (Test-Path -LiteralPath $path)) { throw "Required package file missing: $path" }
             Copy-Item -LiteralPath $path -Destination $package
           }
+          if ($uiVersion -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw "Invalid package version: $uiVersion" }
+          $uiScriptPath = Join-Path $package 'MicBridgeUI.ps1'
+          $uiScript = Get-Content -LiteralPath $uiScriptPath -Raw
+          $versionAssignment = [regex]::Matches($uiScript, "(?m)^\$appVersion\s*=\s*'[^']*'\s*$")
+          if ($versionAssignment.Count -ne 1) { throw 'Expected exactly one UI version assignment before package signing.' }
+          $uiScript = [regex]::Replace($uiScript, "(?m)^\$appVersion\s*=\s*'[^']*'\s*$", ('$appVersion = ' + "'" + $uiVersion + "'"))
+          [IO.File]::WriteAllText($uiScriptPath,$uiScript,[Text.UTF8Encoding]::new($false))
           # The installer imports this module from $PSScriptRoot\tools.
           # Keep the same relative layout in the staged package.
           $toolsPackage = Join-Path $package 'tools'
