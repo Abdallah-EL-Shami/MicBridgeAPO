@@ -24,7 +24,7 @@ bool CertificateEncodingMatchesSha256(const BYTE* encoded, DWORD encodedSize,
                                          const wchar_t* expectedSha256)
 {
     if (encoded == nullptr || encodedSize == 0 || expectedSha256 == nullptr ||
-        expectedSha256[0] == L'\\0') {
+        expectedSha256[0] == L'\0') {
         return false;
     }
 
