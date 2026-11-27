@@ -44,7 +44,7 @@ if ($release -notmatch 'AUTHENTICODE SIGNATURE RESULT ACCEPTED ONLY AS PINNED SI
     $release -notmatch 'SignerCertificate[.]Thumbprint\s*-eq\s*\$thumb') {
     throw 'Release signing workflow must distinguish cryptographic signer pinning from certificate trust and constrain UnknownError to the pinned signer.'
 }
-if ($release -match 'X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\$publicCert\)') {
+if ($release -match 'X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
     throw 'Release signing workflow must not add the certificate to a Windows trust store.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
