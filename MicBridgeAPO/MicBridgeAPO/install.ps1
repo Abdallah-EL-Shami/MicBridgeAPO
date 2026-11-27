@@ -820,7 +820,8 @@ foreach ($name in @('MicBridgeAPO.dll','MicBridgeUI.ps1','MicBridgeUI.bat','unin
 }
 $receiptPath = Join-Path $dataDir ('install-transaction-' + [guid]::NewGuid().ToString('N') + '.receipt')
 $manifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
-$receiptResult = New-MBInstallTransactionReceipt -ReceiptPath $receiptPath -InstallRoot $installDir -ProductVersion $verifiedPackage.ProductVersion -ReleaseManifestSha256 $manifestSha256 -SignerThumbprint $verifiedPackage.SignerThumbprint -TransactionId ([guid]::Parse([string]$rollbackJournal.TransactionId)) -ReleaseManifestTransactionId ([guid]::Parse([string]$verifiedPackage.InstallTransactionId)) -InstalledFiles @($receiptFiles.ToArray())
+$baselineSha256 = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
+$receiptResult = New-MBInstallTransactionReceipt -ReceiptPath $receiptPath -InstallRoot $installDir -ProductVersion $verifiedPackage.ProductVersion -ReleaseManifestSha256 $manifestSha256 -BaselineEvidenceSha256 $baselineSha256 -SignerThumbprint $verifiedPackage.SignerThumbprint -TransactionId ([guid]::Parse([string]$rollbackJournal.TransactionId)) -ReleaseManifestTransactionId ([guid]::Parse([string]$verifiedPackage.InstallTransactionId)) -InstalledFiles @($receiptFiles.ToArray())
 $receiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $receiptPath -VerifyInstalledFiles
 if (-not $receiptResult.Created -or -not $receiptCheck.ReceiptIntegrityVerified -or
     -not $receiptCheck.InstalledFilesVerified -or $receiptCheck.OwnershipProven -or
