@@ -105,7 +105,7 @@ function New-MBInstallTransactionReceipt {
     if ($ReleaseManifestTransactionId -eq [guid]::Empty) { throw 'Signed release manifest transaction ID is required.' }
     if ($TransactionId -eq [guid]::Empty) { $TransactionId = [guid]::NewGuid() }
     $payload = [ordered]@{
-        SchemaVersion=1
+        SchemaVersion=2
         ProductId='MicBridgeAPO'
         TransactionId=$TransactionId.ToString()
         ReleaseManifestTransactionId=$ReleaseManifestTransactionId.ToString()
@@ -162,7 +162,7 @@ function Test-MBInstallTransactionReceipt {
         $payload = [Text.Encoding]::UTF8.GetString($plain) | ConvertFrom-Json -ErrorAction Stop
         $transaction = [guid]::Empty
         $releaseManifestTransaction = [guid]::Empty
-        if ($payload.SchemaVersion -ne 1 -or $payload.ProductId -ne 'MicBridgeAPO' -or
+        if ($payload.SchemaVersion -ne 2 -or $payload.ProductId -ne 'MicBridgeAPO' -or
             -not [guid]::TryParse([string]$payload.TransactionId,[ref]$transaction) -or $transaction -eq [guid]::Empty -or
             -not [guid]::TryParse([string]$payload.ReleaseManifestTransactionId,[ref]$releaseManifestTransaction) -or $releaseManifestTransaction -eq [guid]::Empty -or
             [string]$payload.ReleaseManifestSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
