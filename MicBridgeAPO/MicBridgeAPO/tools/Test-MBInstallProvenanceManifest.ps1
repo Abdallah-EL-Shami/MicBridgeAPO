@@ -98,6 +98,26 @@ try {
     $writeAfterRelease=[IO.File]::Open($bin,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
     $writeAfterRelease.Dispose()
 
+    # A nested directory must remain non-renamable while a descendant payload lease is held.
+    $nestedDir=Join-Path $root 'nested-payload'
+    New-Item -ItemType Directory -Path $nestedDir -ErrorAction Stop | Out-Null
+    $nestedFile=Join-Path $nestedDir 'nested.bin'
+    [IO.File]::WriteAllBytes($nestedFile,[byte[]](9,8,7,6))
+    $nestedHash=(Get-FileHash -LiteralPath $nestedFile -Algorithm SHA256).Hash
+    $nestedLease=Open-MBInstallPackageFileLease -CandidatePath $nestedFile -InstallRoot $root -ExpectedSha256 $nestedHash
+    $directoryRenameBlocked=$false
+    try { [IO.Directory]::Move($nestedDir,(Join-Path $root 'nested-payload-moved')) }
+    catch [IO.IOException] { $directoryRenameBlocked=$true }
+    catch [UnauthorizedAccessException] { $directoryRenameBlocked=$true }
+    if(-not $directoryRenameBlocked -or -not (Test-Path -LiteralPath $nestedFile -PathType Leaf)) {
+        Close-MBInstallPackageFileLease -LeaseResult $nestedLease
+        throw 'FAIL: a parent package directory could be renamed while a descendant payload lease was held.'
+    }
+    Close-MBInstallPackageFileLease -LeaseResult $nestedLease
+    $movedNestedDir=Join-Path $root 'nested-payload-moved'
+    [IO.Directory]::Move($nestedDir,$movedNestedDir)
+    Remove-Item -LiteralPath $movedNestedDir -Recurse -Force
+
     # A signed manifest must bind the complete package file set, not only
     # the subset it happens to list. Unlisted payloads are rejected.
     $unlistedPath=Join-Path $root 'unlisted-payload.bin'
@@ -386,6 +406,29 @@ try {
     try { Test-MBInstallProvenanceManifest @args | Out-Null }
     catch { $comClaimRejected=$_.Exception.Message -match 'COM registration claims are unsupported' }
     if(-not $comClaimRejected) { throw 'FAIL: schema v1 accepted COM metadata that has no authenticated ownership semantics.' }
+
+    # Exercise the empty-directory rule against a real signed fixture, not source text alone.
+    $validManifest=[ordered]@{
+        SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
+        InstallTransactionId=[guid]::NewGuid().ToString()
+        Files=@(@{RelativePath='MicBridgeAPO.dll';Sha256=$hash})
+        ComRegistrations=@()
+    }
+    $validBytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject ([pscustomobject]$validManifest) -Compress -Depth 8))
+    [IO.File]::WriteAllBytes($manifestPath,$validBytes)
+    $validCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($validBytes),$false)
+    $validSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $validSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $validCms.ComputeSignature($validSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$validCms.Encode())
+    $emptyDir=Join-Path $root 'empty-package-directory'
+    New-Item -ItemType Directory -Path $emptyDir -ErrorAction Stop | Out-Null
+    $emptyDirectoryRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }
+    catch { $emptyDirectoryRejected=$_.Exception.Message -match 'empty directory that cannot be covered by a payload lease' }
+    finally { Remove-Item -LiteralPath $emptyDir -Force -ErrorAction SilentlyContinue }
+    if(-not $emptyDirectoryRejected) { throw 'FAIL: signed package containing an empty directory was accepted.' }
 
     # Guard the race between the initial package enumeration and acquisition of all file leases.
     $verifierSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Raw
