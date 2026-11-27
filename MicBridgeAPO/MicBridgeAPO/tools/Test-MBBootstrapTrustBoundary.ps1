@@ -87,11 +87,20 @@ foreach ($workflow in @(@{Name='build.yml';Text=$buildWorkflow},@{Name='signed-r
 if ($releaseWorkflow -notmatch '(?s)\$scriptFiles\s*=.*?Set-AuthenticodeSignature.*?Get-AuthenticodeSignature.*?\$manifestBytes\s*=') {
     throw 'FAIL: release workflow must Authenticode-sign and verify every staged PowerShell script before creating the signed manifest.'
 }
-if ($cmake -notmatch '(?s)add_executable\(MicBridgeBootstrap\s+src/MicBridgeBootstrap\.cpp\s+src/MicBridgeBootstrapTrust\.cpp\s*\)' -or
-    $cmake -notmatch '(?s)add_executable\(micbridge_bootstrap_signature_test\s+tests/bootstrap_signature_rejects_unsigned\.cpp\s+src/MicBridgeBootstrapTrust\.cpp\s*\)' -or
-    $cmake -notmatch '(?s)add_test\(NAME micbridge_bootstrap_rejects_unsigned\s+COMMAND micbridge_bootstrap_signature_test \$<TARGET_FILE:micbridge_bootstrap_fail_closed>\)' -or
-    $cmake -notmatch '(?s)add_test\(NAME micbridge_bootstrap_fail_closed\s+COMMAND micbridge_bootstrap_fail_closed \$<TARGET_FILE:MicBridgeBootstrap>\)' -or
-    $launcherSource -notmatch '(?s)return 78;' -or
+$nativeBuildContract = @(
+    'add_executable(MicBridgeBootstrap'
+    'src/MicBridgeBootstrap.cpp'
+    'src/MicBridgeBootstrapTrust.cpp'
+    'add_executable(micbridge_bootstrap_signature_test'
+    'tests/bootstrap_signature_rejects_unsigned.cpp'
+    'add_test(NAME micbridge_bootstrap_rejects_unsigned'
+    'add_test(NAME micbridge_bootstrap_fail_closed'
+    'wintrust crypt32 bcrypt'
+)
+foreach ($needle in $nativeBuildContract) {
+    if (-not $cmake.Contains($needle)) { throw "FAIL: CMake bootstrap wiring is missing: $needle" }
+}
+if ($launcherSource -notmatch '(?s)return 78;' -or
     $launcherSource -match '(?i)CreateProcess|ShellExecute|WinVerifyTrust|CryptMsgOpenToDecode' -or
     $trustSource -notmatch '(?s)WinVerifyTrust' -or
     $trustSource -notmatch '(?s)WTHelperGetProvSignerFromChain' -or
