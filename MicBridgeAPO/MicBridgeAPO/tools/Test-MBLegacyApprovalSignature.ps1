@@ -71,6 +71,27 @@ try {
         Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
         throw 'FAIL: candidate rename succeeded while the exclusive lease was retained.'
     }
+
+    $writeBlocked = $false
+    $writeStream = $null
+    try {
+        $writeStream = [IO.File]::Open($dll,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    } catch { $writeBlocked = $true }
+    finally { if ($null -ne $writeStream) { $writeStream.Dispose() } }
+    if (-not $writeBlocked) {
+        Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
+        throw 'FAIL: candidate write access succeeded while the exclusive lease was retained.'
+    }
+
+    $renamedRoot = $root + '-renamed'
+    $directoryRenameBlocked = $false
+    try { [IO.Directory]::Move($root,$renamedRoot) } catch { $directoryRenameBlocked = $true }
+    if (-not $directoryRenameBlocked) {
+        Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
+        [IO.Directory]::Move($renamedRoot,$root)
+        throw 'FAIL: installation-root rename succeeded while directory pins were retained.'
+    }
+
     Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
 
     $wrongTrustRejected = $false
