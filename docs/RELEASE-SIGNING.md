@@ -32,19 +32,21 @@ Do not install the certificate automatically from the installer or from the same
 
 The script deliberately reports `TrustInstalled=false` and `ReleaseSigningEnabled=false`. It does not modify any certificate store.
 
-## CI signing is not enabled yet
+## Protected tag-only release signing workflow
 
-The current verifier requires an explicitly trusted signer thumbprint and can build a certificate chain using locally available Windows certificates with certificate downloads disabled. It does not check online revocation. A thumbprint passed as a command-line argument is not, by itself, an independent trust anchor.
+The workflow `.github/workflows/signed-release.yml` is separate from the ordinary `build-dll` CI workflow.
 
-Before enabling release signing, the project still needs all of the following:
+- It is triggered by version tags beginning with `v` (for example, `v1.2.3`) or by manual dispatch while a version tag is selected. Its job-level condition refuses to run from a branch or pull-request ref.
+- It requests only `contents: read` and uses the protected `release-signing` environment. Configure that environment to allow only reviewed release tags and require approval where available.
+- It rebuilds and runs the existing Windows validation suite, stages the install package, and imports the PFX with an ephemeral key-storage flag.
+- Before signing, it checks the PFX certificate's SHA-1 thumbprint and SHA-256 certificate fingerprint against the independently verified public CER, its validity period, DigitalSignature key usage, and Code Signing EKU.
+- It creates a canonical UTF-8 JSON manifest listing each staged package file and SHA-256 hash, signs the manifest as detached CMS, then runs the project's provenance verifier against the staged package using the pinned signer thumbprint.
+- The artifact contains the package, `install-manifest.json`, and detached signature `install-manifest.p7s`. This is a signed-manifest/hash provenance mechanism; it is not an Authenticode signature embedded in the DLL.
+- The job removes the temporary PFX file and clears the secret environment variables in a `finally` block. GitHub-hosted runners are ephemeral; the private key is not uploaded as an artifact or committed.
 
-- Agree on the independently provisioned trust anchor and how its fingerprint is pinned by the verifier and installer.
-- Add a protected GitHub Actions environment and store the PFX (base64-encoded) and its password as separately named secrets, for example `MB_RELEASE_SIGNING_PFX_BASE64` and `MB_RELEASE_SIGNING_PFX_PASSWORD`. Do not put either value in repository files, workflow logs, artifacts, or chat.
-- Implement a release-only signing job with least-privilege permissions, protected environment approval, no signing on pull requests, and cleanup of temporary key material.
-- Sign the canonical manifest and all required release binaries, then verify the produced signatures and file hashes in a separate CI step.
-- Integrate fail-closed verification into both install and uninstall before any mutation; keep provenance verification distinct from ownership proof and deletion authorization.
-- Add tests for wrong signer, altered manifest, altered payload, expired certificate, missing trust, and offline behavior.
+The workflow is newly added and has not yet been exercised with a real version tag. Do not create a release tag merely to test it before reviewing the workflow and its CI validation. A successful ordinary `build-dll` run validates source tests but does not execute the protected signing job.
 
+The current installer and uninstaller are **not yet gated** by this manifest verifier. Do not treat a signed artifact as an approved installation until independent trust provisioning and fail-closed integration into install/uninstall have been completed and tested. Manifest provenance also does not prove ownership of shared COM registrations or authorize cleanup/deletion.
 
 ## Prepare the protected GitHub Actions signing environment
 
@@ -80,4 +82,4 @@ GitHub limits each secret to 48 KB. See the official [GitHub secrets reference](
 
 ## Current status
 
-Certificate-generation tooling is staged for review. The maintainer has generated a self-signed release certificate and supplied its public CER for inspection; its public fingerprint was verified against the reported certificate details. The private PFX remains outside the repository and has not been provisioned to GitHub Actions. No certificate has been trusted on a target device, no release is signed, and install/uninstall are not yet gated by this verifier. Do not install artifacts from this validation branch.
+Certificate-generation tooling is staged for review. The maintainer has generated a self-signed release certificate and supplied its public CER for inspection; its public fingerprint was verified against the reported certificate details. The private PFX remains outside the repository and has been configured by the maintainer as protected GitHub environment secrets. The tag-only signing workflow is present but has not yet run against a version tag. No certificate has been trusted on a target device, and install/uninstall are not yet gated by this verifier. Do not install artifacts from this validation branch.
