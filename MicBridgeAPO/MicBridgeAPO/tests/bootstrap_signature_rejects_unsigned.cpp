@@ -21,7 +21,7 @@ bool TestCertificatePinComparison()
     if (!CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM, 0, nullptr,
                                fixture.data(), static_cast<DWORD>(fixture.size()),
                                digest.data(), &digestSize) || digestSize != digest.size()) {
-        std::wcerr << L"FAIL: could not hash deterministic pin-test fixture.\\n";
+        std::wcerr << L"FAIL: could not hash deterministic pin-test fixture.\n";
         return false;
     }
 
@@ -34,13 +34,13 @@ bool TestCertificatePinComparison()
 
     if (!micbridge::bootstrap::TestCertificateEncodingMatchesSha256Pin(
             fixture.data(), static_cast<DWORD>(fixture.size()), expected)) {
-        std::wcerr << L"FAIL: matching SHA-256 pin was rejected.\\n";
+        std::wcerr << L"FAIL: matching SHA-256 pin was rejected.\n";
         return false;
     }
     if (micbridge::bootstrap::TestCertificateEncodingMatchesSha256Pin(
             fixture.data(), static_cast<DWORD>(fixture.size()),
             L"0000000000000000000000000000000000000000000000000000000000000000")) {
-        std::wcerr << L"FAIL: mismatching SHA-256 pin was accepted.\\n";
+        std::wcerr << L"FAIL: mismatching SHA-256 pin was accepted.\n";
         return false;
     }
     if (micbridge::bootstrap::TestCertificateEncodingMatchesSha256Pin(
@@ -49,7 +49,7 @@ bool TestCertificatePinComparison()
             fixture.data(), 0, expected) ||
         micbridge::bootstrap::TestCertificateEncodingMatchesSha256Pin(
             fixture.data(), static_cast<DWORD>(fixture.size()), L"")) {
-        std::wcerr << L"FAIL: malformed pin-comparison input was accepted.\\n";
+        std::wcerr << L"FAIL: malformed pin-comparison input was accepted.\n";
         return false;
     }
     return true;
