@@ -58,8 +58,8 @@ $clsid      = '{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}'
 $fxValue    = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7'
 $fxCompositeValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15'
 $fxAssociationValue = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},0'
-$backupFile = Join-Path $dataDir 'backup.json'
-$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
+$backupFile = Join-Path $dataDir 'install-baseline-v2.json'
+$compositeBackupFile = Join-Path $dataDir 'install-composite-baseline-v2.json'
 $capSub     = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
 $capRoot    = "HKLM:\$capSub"
 
