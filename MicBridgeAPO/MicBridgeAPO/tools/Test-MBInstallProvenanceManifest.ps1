@@ -66,6 +66,16 @@ try {
         throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
     }
 
+    # A signed manifest must bind the complete package file set, not only
+    # the subset it happens to list. Unlisted payloads are rejected.
+    $unlistedPath=Join-Path $root 'unlisted-payload.bin'
+    [IO.File]::WriteAllBytes($unlistedPath,[byte[]](1,2,3,4))
+    $unlistedRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }
+    catch { $unlistedRejected=$_.Exception.Message -match 'file set differs|unlisted file' }
+    finally { Remove-Item -LiteralPath $unlistedPath -Force -ErrorAction SilentlyContinue }
+    if(-not $unlistedRejected) { throw 'FAIL: package accepted a file not covered by the signed manifest.' }
+
     $malformedTrustRejected=$false
     try { $badTrust=$args.Clone();$badTrust.TrustedSignerThumbprints=@('NOT-A-THUMBPRINT');Test-MBInstallProvenanceManifest @badTrust | Out-Null } catch { $malformedTrustRejected=$_.Exception.Message -match 'exactly 40 hexadecimal characters' }
     if(-not $malformedTrustRejected) { throw 'FAIL: malformed trust anchor was not rejected explicitly.' }
