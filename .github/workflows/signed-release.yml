@@ -73,6 +73,9 @@ jobs:
       - name: Test installer signed-package gate and post-install receipt ordering (static)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerProvenanceGate.ps1
+      - name: Test independent bootstrap trust boundary contract (static)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBBootstrapTrustBoundary.ps1
       - name: Test provenance modules under Windows PowerShell 5.1
         shell: pwsh
         run: |
