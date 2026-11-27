@@ -20,21 +20,19 @@ namespace detail {
 constexpr wchar_t kPinnedSignerSha256[] =
     L"CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369";
 
-bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
+bool CertificateEncodingMatchesSha256(const BYTE* encoded, DWORD encodedSize,
+                                         const wchar_t* expectedSha256)
 {
-    if (certificate == nullptr) {
+    if (encoded == nullptr || encodedSize == 0 || expectedSha256 == nullptr ||
+        expectedSha256[0] == L'\\0') {
         return false;
     }
 
     std::array<BYTE, 32> digest{};
     DWORD digestSize = static_cast<DWORD>(digest.size());
     if (!CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM, 0, nullptr,
-                               certificate->pbCertEncoded,
-                               certificate->cbCertEncoded,
-                               digest.data(), &digestSize)) {
-        return false;
-    }
-    if (digestSize != digest.size()) {
+                               encoded, encodedSize, digest.data(), &digestSize) ||
+        digestSize != digest.size()) {
         return false;
     }
 
@@ -45,7 +43,15 @@ bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
         actual[i * 2 + 1] = hex[digest[i] & 0x0F];
     }
 
-    return CompareStringOrdinal(actual, -1, kPinnedSignerSha256, -1, TRUE) == CSTR_EQUAL;
+    return CompareStringOrdinal(actual, -1, expectedSha256, -1, TRUE) == CSTR_EQUAL;
+}
+
+bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
+{
+    return certificate != nullptr &&
+        CertificateEncodingMatchesSha256(certificate->pbCertEncoded,
+                                          certificate->cbCertEncoded,
+                                          kPinnedSignerSha256);
 }
 
 bool ExtractAndCheckSigner(WINTRUST_DATA& trust)
@@ -73,6 +79,14 @@ bool ExtractAndCheckSigner(WINTRUST_DATA& trust)
 }
 
 } // namespace detail
+
+#ifdef MICBRIDGE_BOOTSTRAP_TESTING
+bool TestCertificateEncodingMatchesSha256Pin(const BYTE* encoded, DWORD encodedSize,
+                                              const wchar_t* expectedSha256)
+{
+    return detail::CertificateEncodingMatchesSha256(encoded, encodedSize, expectedSha256);
+}
+#endif
 
 bool VerifyPinnedAuthenticodeSigner(const std::wstring& filePath)
 {
