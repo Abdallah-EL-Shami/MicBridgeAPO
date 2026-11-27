@@ -15,7 +15,8 @@ function Test-MBInstallProvenanceManifest {
         [Parameter(Mandatory)][string]$ManifestPath,
         [Parameter(Mandatory)][string]$SignaturePath,
         [Parameter(Mandatory)][string]$InstallDirectory,
-        [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints
+        [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
+        [string[]]$RevokedSignerThumbprints=@()
     )
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
     $manifestFull=Test-MBRegularNonReparseFile -Path $ManifestPath -Label 'Manifest'
