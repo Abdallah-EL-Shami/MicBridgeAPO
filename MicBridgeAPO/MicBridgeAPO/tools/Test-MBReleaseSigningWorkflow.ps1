@@ -35,11 +35,17 @@ if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCe
     throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
 }
 if ($release -notmatch 'SignatureStatus]::NotTrusted' -or
+    $release -notmatch 'SignatureStatus]::UnknownError' -or
+    $release -notmatch 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider[.]' -or
     $release -notmatch '\$signerThumb\s*-ne\s*\$thumb') {
-    throw 'Release signing workflow must verify Authenticode integrity and the pinned signer without requiring CI trust enrollment.'
+    throw 'Release signing workflow must accept only the exact pinned self-signed-root Authenticode result, not arbitrary UnknownError statuses.'
 }
-if ($release -notmatch 'AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI') {
-    throw 'Release signing workflow must distinguish signature integrity from certificate trust.'
+if ($release -notmatch 'AUTHENTICODE SIGNATURE RESULT ACCEPTED ONLY AS PINNED SIGNER WITH UNTRUSTED ROOT' -or
+    $release -notmatch 'SignerCertificate[.]Thumbprint\s*-eq\s*\$thumb') {
+    throw 'Release signing workflow must distinguish cryptographic signer pinning from certificate trust and constrain UnknownError to the pinned signer.'
+}
+if ($release -match 'X509Store|StoreLocation]::CurrentUser|\$publicCert\)') {
+    throw 'Release signing workflow must not add the certificate to a Windows trust store.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
 foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
