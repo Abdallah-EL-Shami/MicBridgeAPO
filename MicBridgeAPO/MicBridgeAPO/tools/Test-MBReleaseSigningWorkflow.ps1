@@ -32,6 +32,16 @@ $requiredReleasePatterns = [ordered]@{
 foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
     if ($release -notmatch $entry.Value) { throw "Release signing workflow is missing invariant: $($entry.Key)" }
 }
+$authenticodeIndex = $release.IndexOf('Set-AuthenticodeSignature',[StringComparison]::Ordinal)
+$manifestIndex = $release.IndexOf('$records = @()',[StringComparison]::Ordinal)
+if ($authenticodeIndex -lt 0 -or $manifestIndex -le $authenticodeIndex) {
+    throw 'Authenticode signatures must be applied and verified before package file hashes are written into the signed manifest.'
+}
+if ($release -notmatch 'AUTHENTICODE SCRIPTS VERIFIED' -or
+    $release -notmatch 'Remove\(\$publicCert\)' -or
+    $release -notmatch 'MicBridgeAPO-Release[.]cer') {
+    throw 'Release signing workflow must verify script signatures, export the public certificate, and remove temporary runner trust.'
+}
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
@@ -48,6 +58,12 @@ foreach ($workflowName in @('build','release')) {
     if ($workflowContent -notmatch 'powershell[.]exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest[.]ps1' -or
         $workflowContent -notmatch 'powershell[.]exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallTransactionReceipt[.]ps1') {
         throw "$workflowName workflow must exercise manifest and receipt modules under Windows PowerShell 5.1."
+    }
+}
+foreach ($workflowName in @('build','release')) {
+    $workflowContent = if ($workflowName -eq 'build') { $build } else { $release }
+    if ($workflowContent -notmatch 'Test-MBAuthenticodeBootstrap[.]ps1') {
+        throw "$workflowName workflow must test Authenticode trust and AllSigned rejection using a temporary CI certificate."
     }
 }
 if ($build -match 'MB_RELEASE_SIGNING_PFX_(BASE64|PASSWORD)') { throw 'Ordinary build workflow must never reference release signing secrets.' }
