@@ -97,14 +97,20 @@ Assert-Contains $uninstaller 'Remove-Item -LiteralPath \$comRegistrationPath -Re
 
 $uiSource = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.ps1') -Raw
 $uiLauncher = Get-Content -LiteralPath (Join-Path $root 'MicBridgeUI.bat') -Raw
+$installLauncher = Get-Content -LiteralPath (Join-Path $root 'install.bat') -Raw
+$uninstallLauncher = Get-Content -LiteralPath (Join-Path $root 'uninstall.bat') -Raw
 Assert-Contains $uiSource '\$env:ProgramData' 'UI uses the shared ProgramData environment path'
 Assert-Contains $uiSource "'control.ini'" 'UI writes the runtime control file'
 Assert-Contains $uiSource "'status.txt'" 'UI reads the runtime status file'
 Assert-Contains $uiSource 'function Set-Enabled' 'UI exposes a control-file writer'
 Assert-Contains $uiSource 'Add_Click' 'UI toggle button has a click handler'
 Assert-Contains $uiSource 'ShowDialog' 'UI creates and displays a WinForms window'
-Assert-Contains $uiLauncher 'ExecutionPolicy Bypass' 'UI launcher permits the packaged PowerShell script'
+Assert-Contains $uiLauncher 'ExecutionPolicy AllSigned' 'UI launcher requires an Authenticode-signed PowerShell script'
 Assert-Contains $uiLauncher 'MicBridgeUI.ps1' 'UI launcher targets the adjacent UI script'
+Assert-Contains $installLauncher 'ExecutionPolicy AllSigned' 'Install launcher requires an Authenticode-signed installer'
+Assert-Contains $uninstallLauncher 'ExecutionPolicy AllSigned' 'Uninstall launcher requires an Authenticode-signed uninstaller'
+Assert-Contains $installer '-ExecutionPolicy AllSigned' 'Elevated installer re-entry enforces Authenticode signatures'
+Assert-Contains $uninstaller '-ExecutionPolicy AllSigned' 'Elevated uninstaller re-entry enforces Authenticode signatures'
 
 $apoSource = Get-Content -LiteralPath (Join-Path $root 'src/MicBridgeAPO.cpp') -Raw
 Assert-Contains $apoSource 'm_blender\.Process\(outb, frames, ch, m_recvRing, true, tmp\)' 'APOProcess uses the tested crossfade blender'
