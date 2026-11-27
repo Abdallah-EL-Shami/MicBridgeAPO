@@ -28,7 +28,7 @@ The CI bootstrap audit now explicitly asserts that this import-before-verificati
 No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
 
 
-The native verifier currently requests `WTD_REVOKE_NONE` and cache-only URL retrieval. This does not establish fresh revocation status. Offline operation and first-run revocation policy remain a release decision; the design document records the strict-online and offline-capable alternatives and their respective risks. Do not describe the current verifier as performing revocation checks.
+The native verifier intentionally requests `WTD_REVOKE_NONE`, `WTD_REVOCATION_CHECK_NONE`, and cache-only URL retrieval. The selected project policy is offline-capable pinned-certificate verification: no fresh online revocation check is required at installation or runtime. This does not establish fresh revocation status; the residual compromise risk is accepted and documented. The existing single publisher certificate remains pinned. Certificate rotation is exceptional and requires an independently authenticated pin update and explicit approval; never create a new certificate per build.
 
 ## Manifest verifier limitations
 
