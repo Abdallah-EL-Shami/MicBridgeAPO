@@ -180,6 +180,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
     }
 }
 } catch {
+    if ($verifiedPackage) { try { Close-MBInstallProvenanceLeases -Verification $verifiedPackage } catch {} }
     if ($operationLock) { $operationLock.Dispose(); $operationLock = $null }
     Write-EarlyInstallLog 'ERROR' "Install preflight stopped before a new install transaction began. $($_.Exception.ToString())"
     Write-RecoveryLog 'ERROR' "Pre-install recovery/rollback preflight failed; new installation did not start. $($_.Exception.ToString())"
@@ -188,6 +189,7 @@ if (Test-Path -LiteralPath $dataDir -PathType Container) {
 # Read-only legacy audit gate: never install over unidentified or legacy MicBridge state.
 $legacyAuditModule = Join-Path $PSScriptRoot 'tools\MicBridge.LegacyInstallAudit.psm1'
 if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
+    Close-MBInstallProvenanceLeases -Verification $verifiedPackage
     throw "Legacy installation audit module is missing; refusing to start a new install transaction: $legacyAuditModule"
 }
 try {
@@ -204,6 +206,7 @@ try {
         throw "Legacy MicBridge state was detected or could not be ruled out. No cleanup or installation was attempted. Review findings: $details"
     }
 } catch {
+    Close-MBInstallProvenanceLeases -Verification $verifiedPackage
     Write-InstallLog 'ERROR' "Read-only legacy audit gate blocked installation. $($_.Exception.ToString())"
     throw
 }
