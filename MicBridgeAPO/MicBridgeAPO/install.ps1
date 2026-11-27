@@ -23,7 +23,7 @@ if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVe
     -not $verifiedPackage.FileProvenanceVerified -or
     $verifiedPackage.SignerThumbprint -ne $trustedReleaseThumbprint -or
     $verifiedPackage.IsExecutionAuthorized -or $verifiedPackage.OwnershipProven -or
-    -not $verifiedPackage.PackageFilesPinnedForUse -or $verifiedPackage.RaceSafeForExecution -or $verifiedPackage.BootstrapTrustEstablished) {
+    -not $verifiedPackage.PackageFilesPinnedForUse -or $verifiedPackage.RaceSafeForExecution -or -not $verifiedPackage.BootstrapTrustEstablished) {
     try { Close-MBInstallProvenanceLeases -Verification $verifiedPackage } catch {}
     throw 'Signed package verification did not return the required integrity evidence; installation was blocked.'
 }
