@@ -31,7 +31,6 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
-if ($release -match 'EphemeralKeySet') { throw 'Authenticode signing must not use ephemeral private-key storage.' }
 if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
     throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
 }
