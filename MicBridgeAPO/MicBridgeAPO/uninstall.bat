@@ -1,2 +1,2 @@
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1"
+powershell.exe -NoProfile -ExecutionPolicy AllSigned -File "%~dp0uninstall.ps1"
