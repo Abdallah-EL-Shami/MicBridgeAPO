@@ -7,26 +7,34 @@
 #include <bcrypt.h>
 
 #include <array>
+#include <cstddef>
 
 #pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-namespace {
+namespace micbridge {
+namespace bootstrap {
+namespace detail {
+
 constexpr wchar_t kPinnedSignerSha256[] =
     L"CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369";
 
 bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
 {
-    if (certificate == nullptr) return false;
+    if (certificate == nullptr) {
+        return false;
+    }
 
     std::array<BYTE, 32> digest{};
     DWORD digestSize = static_cast<DWORD>(digest.size());
     if (!CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM, 0, nullptr,
                                certificate->pbCertEncoded,
                                certificate->cbCertEncoded,
-                               digest.data(), &digestSize) ||
-        digestSize != digest.size()) {
+                               digest.data(), &digestSize)) {
+        return false;
+    }
+    if (digestSize != digest.size()) {
         return false;
     }
 
@@ -36,26 +44,41 @@ bool IsPinnedCertificate(PCCERT_CONTEXT certificate)
         actual[i * 2] = hex[digest[i] >> 4];
         actual[i * 2 + 1] = hex[digest[i] & 0x0F];
     }
+
     return CompareStringOrdinal(actual, -1, kPinnedSignerSha256, -1, TRUE) == CSTR_EQUAL;
 }
 
 bool ExtractAndCheckSigner(WINTRUST_DATA& trust)
 {
-    if (trust.hWVTStateData == nullptr) return false;
+    if (trust.hWVTStateData == nullptr) {
+        return false;
+    }
+
     CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(trust.hWVTStateData);
-    if (provider == nullptr) return false;
+    if (provider == nullptr) {
+        return false;
+    }
+
     CRYPT_PROVIDER_SGNR* signer = WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0);
-    if (signer == nullptr || signer->csCertChain == 0) return false;
+    if (signer == nullptr || signer->csCertChain == 0) {
+        return false;
+    }
+
     CRYPT_PROVIDER_CERT* signerCertificate = WTHelperGetProvCertFromChain(signer, 0);
-    if (signerCertificate == nullptr || signerCertificate->pCert == nullptr) return false;
+    if (signerCertificate == nullptr || signerCertificate->pCert == nullptr) {
+        return false;
+    }
+
     return IsPinnedCertificate(signerCertificate->pCert);
 }
-}
 
-namespace micbridge::bootstrap {
+} // namespace detail
+
 bool VerifyPinnedAuthenticodeSigner(const std::wstring& filePath)
 {
-    if (filePath.empty()) return false;
+    if (filePath.empty()) {
+        return false;
+    }
 
     WINTRUST_FILE_INFO fileInfo{};
     fileInfo.cbStruct = sizeof(fileInfo);
@@ -74,10 +97,14 @@ bool VerifyPinnedAuthenticodeSigner(const std::wstring& filePath)
 
     GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const LONG status = WinVerifyTrust(nullptr, &policy, &trust);
-    const bool signerPinned = status == ERROR_SUCCESS && ExtractAndCheckSigner(trust);
+    const bool signerPinned =
+        status == ERROR_SUCCESS && detail::ExtractAndCheckSigner(trust);
+
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &policy, &trust);
 
     return status == ERROR_SUCCESS && signerPinned;
 }
-}
+
+} // namespace bootstrap
+} // namespace micbridge
