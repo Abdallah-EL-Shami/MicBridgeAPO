@@ -73,6 +73,13 @@ jobs:
       - name: Test installer signed-package gate and post-install receipt ordering (static)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerProvenanceGate.ps1
+      - name: Test provenance modules under Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 manifest verifier test failed.' }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallTransactionReceipt.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 transaction receipt test failed.' }
       - name: Test exclusive legacy file handle lease (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyFileHandleLease.ps1
