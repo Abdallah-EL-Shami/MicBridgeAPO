@@ -136,10 +136,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $provenanceModule -PathType Leaf)) { throw "Required provenance verifier missing: $provenanceModule" }
           Copy-Item -LiteralPath $provenanceModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallProvenanceManifest.psm1') -PathType Leaf)) { throw 'Provenance verifier was not staged in the required tools directory.' }
-          $fileLeaseModule = Join-Path $source 'tools/MicBridge.LegacyFileHandleLease.psm1'
+          $fileLeaseModule = Join-Path $source 'tools/MicBridge.InstallPackageFileLease.psm1'
           if (-not (Test-Path -LiteralPath $fileLeaseModule -PathType Leaf)) { throw "Required mutation-resistant file lease module missing: $fileLeaseModule" }
           Copy-Item -LiteralPath $fileLeaseModule -Destination $toolsPackage
-          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.LegacyFileHandleLease.psm1') -PathType Leaf)) { throw 'Mutation-resistant file lease module was not staged in the required tools directory.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallPackageFileLease.psm1') -PathType Leaf)) { throw 'Mutation-resistant file lease module was not staged in the required tools directory.' }
           $rollbackValidator = Join-Path $source 'tools/MicBridge.InstallRollbackValidation.psm1'
           if (-not (Test-Path -LiteralPath $rollbackValidator -PathType Leaf)) { throw "Required rollback validator missing: $rollbackValidator" }
           Copy-Item -LiteralPath $rollbackValidator -Destination $toolsPackage
