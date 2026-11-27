@@ -812,5 +812,11 @@ Write-Host "إن لم يعمل فأعد تشغيل الجهاز مرة واحد�
     Write-Host "سجل التثبيت: $installLog" -ForegroundColor Yellow
     Write-Warning "قد تكون بعض تغييرات Registry قد نُفذت. لا تشغّل uninstall.bat ولا تحذف backup.json؛ أرسل Install.log للمراجعة."
 } finally {
+    # Release all verified package handles on success and every rollback/error path.
+    # The elevated child re-verifies and acquires its own leases after UAC.
+    if ($verifiedPackage) {
+        try { Close-MBInstallProvenanceLeases -Verification $verifiedPackage }
+        catch { Write-Warning "Could not release one or more package provenance leases cleanly: $($_.Exception.Message)" }
+    }
     if ($operationLock) { $operationLock.Dispose() }
 }
