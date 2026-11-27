@@ -72,7 +72,7 @@ namespace MicBridge.LegacyFileHandleLease {
             Length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
             try {
                 if (info.NumberOfLinks != 1)
-                    throw new InvalidOperationException("Candidate has multiple hard links; exclusive path validation is insufficient.");
+                    throw new InvalidOperationException("Candidate has multiple hard links; mutation-resistant path validation is insufficient.");
                 stream = new FileStream(handle, FileAccess.Read, 4096, false);
                 using (SHA256 sha = SHA256.Create()) {
                     byte[] digest = sha.ComputeHash(stream);
@@ -216,7 +216,7 @@ namespace MicBridge.LegacyFileHandleLease {
                         throw new InvalidOperationException("Install root is not a regular directory.");
                     rootFinal = FinalPath(root).TrimEnd('\\');
                 }
-                file = Native.CreateFile(fullCandidate, GENERIC_READ, 0, IntPtr.Zero,
+                file = Native.CreateFile(fullCandidate, GENERIC_READ, FILE_SHARE_READ, IntPtr.Zero,
                     OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
                 if (file.IsInvalid) {
                     int error = Marshal.GetLastWin32Error(); file.Dispose(); file = null;
