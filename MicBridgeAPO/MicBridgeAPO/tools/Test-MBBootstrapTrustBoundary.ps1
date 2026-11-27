@@ -12,9 +12,12 @@ $readinessPath = Join-Path $projectRoot 'SECURITY-READINESS-AND-RELEASE-GATES.md
 $launcherDesignPath = Join-Path $repositoryRoot 'docs\BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md'
 $cmakePath = Join-Path $projectRoot 'CMakeLists.txt'
 $launcherSourcePath = Join-Path $projectRoot 'src\MicBridgeBootstrap.cpp'
+$trustSourcePath = Join-Path $projectRoot 'src\MicBridgeBootstrapTrust.cpp'
+$trustHeaderPath = Join-Path $projectRoot 'src\MicBridgeBootstrapTrust.h'
+$signatureTestPath = Join-Path $projectRoot 'tests\bootstrap_signature_rejects_unsigned.cpp'
 $launcherTestPath = Join-Path $projectRoot 'tests\bootstrap_fail_closed.cpp'
 
-foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath,$cmakePath,$launcherSourcePath,$launcherTestPath)) {
+foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath,$cmakePath,$launcherSourcePath,$trustSourcePath,$trustHeaderPath,$signatureTestPath,$launcherTestPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "FAIL: required bootstrap contract input is missing: $required" }
 }
 
@@ -34,6 +37,9 @@ $readiness = [IO.File]::ReadAllText($readinessPath)
 $launcherDesign = [IO.File]::ReadAllText($launcherDesignPath)
 $cmake = [IO.File]::ReadAllText($cmakePath)
 $launcherSource = [IO.File]::ReadAllText($launcherSourcePath)
+$trustSource = [IO.File]::ReadAllText($trustSourcePath)
+$trustHeader = [IO.File]::ReadAllText($trustHeaderPath)
+$signatureTest = [IO.File]::ReadAllText($signatureTestPath)
 $launcherTest = [IO.File]::ReadAllText($launcherTestPath)
 
 if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPolicy\s+AllSigned\s+-File\s+"%~dp0install\.ps1"\s*$') {
@@ -81,10 +87,19 @@ foreach ($workflow in @(@{Name='build.yml';Text=$buildWorkflow},@{Name='signed-r
 if ($releaseWorkflow -notmatch '(?s)\$scriptFiles\s*=.*?Set-AuthenticodeSignature.*?Get-AuthenticodeSignature.*?\$manifestBytes\s*=') {
     throw 'FAIL: release workflow must Authenticode-sign and verify every staged PowerShell script before creating the signed manifest.'
 }
-if ($cmake -notmatch '(?s)add_executable\(MicBridgeBootstrap\s+src/MicBridgeBootstrap\.cpp\)' -or
+if ($cmake -notmatch '(?s)add_executable\(MicBridgeBootstrap\s+src/MicBridgeBootstrap\.cpp\s+src/MicBridgeBootstrapTrust\.cpp\s*\)' -or
+    $cmake -notmatch '(?s)add_executable\(micbridge_bootstrap_signature_test\s+tests/bootstrap_signature_rejects_unsigned\.cpp\s+src/MicBridgeBootstrapTrust\.cpp\s*\)' -or
+    $cmake -notmatch '(?s)add_test\(NAME micbridge_bootstrap_rejects_unsigned\s+COMMAND micbridge_bootstrap_signature_test \$<TARGET_FILE:micbridge_bootstrap_fail_closed>\)' -or
     $cmake -notmatch '(?s)add_test\(NAME micbridge_bootstrap_fail_closed\s+COMMAND micbridge_bootstrap_fail_closed \$<TARGET_FILE:MicBridgeBootstrap>\)' -or
     $launcherSource -notmatch '(?s)return 78;' -or
     $launcherSource -match '(?i)CreateProcess|ShellExecute|WinVerifyTrust|CryptMsgOpenToDecode' -or
+    $trustSource -notmatch '(?s)WinVerifyTrust' -or
+    $trustSource -notmatch '(?s)WTHelperGetProvSignerFromChain' -or
+    $trustSource -notmatch '(?s)WTHelperGetProvCertFromChain' -or
+    $trustSource -notmatch '(?s)CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369' -or
+    $trustHeader -notmatch '(?s)VerifyPinnedAuthenticodeSigner' -or
+    $signatureTest -notmatch '(?s)VerifyPinnedAuthenticodeSigner' -or
+    $signatureTest -notmatch '(?s)unsigned test executable unexpectedly passed' -or
     $launcherTest -notmatch '(?s)CreateProcessW' -or
     $launcherTest -notmatch '(?s)exitCode != 78') {
     throw 'FAIL: native bootstrap scaffold must compile as a CMake target and CTest must prove it exits fail-closed without launching a payload.'
