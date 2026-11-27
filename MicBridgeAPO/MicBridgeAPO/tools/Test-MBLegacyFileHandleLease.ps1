@@ -2,8 +2,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1') -Force
 
-$root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeHandleLease-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $root | Out-Null
+$sandboxParent = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeHandleLease-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path $sandboxParent 'install-root'
+New-Item -ItemType Directory -Path $root -Force | Out-Null
 try {
     $dll = Join-Path $root 'MicBridgeAPO.dll'
     [IO.File]::WriteAllBytes($dll,[byte[]](1,3,5,7,9,11))
@@ -32,6 +33,13 @@ try {
         if (-not $directoryRenameBlocked) {
             [IO.Directory]::Move($renamedRoot,$root)
             throw 'FAIL: install-root directory was renamed while directory pins were held.'
+        }
+        $renamedParent = $sandboxParent + '.renamed'
+        $ancestorRenameBlocked = $false
+        try { [IO.Directory]::Move($sandboxParent,$renamedParent) } catch { $ancestorRenameBlocked = $true }
+        if (-not $ancestorRenameBlocked) {
+            [IO.Directory]::Move($renamedParent,$sandboxParent)
+            throw 'FAIL: ancestor directory was renamed while directory pins were held.'
         }
 
         # Pin an intermediate candidate directory too; it must not be renameable during the lease.
@@ -113,7 +121,7 @@ namespace MicBridgeHandleLeaseHardLink {
         if (-not $outsideRejected) { throw 'FAIL: candidate outside install root was accepted.' }
     } finally { Remove-Item -LiteralPath $outside -Force }
 
-    Write-Host 'PASS: exclusive file and pinned root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
+    Write-Host 'PASS: exclusive file and pinned ancestor/root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
 } finally {
-    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $sandboxParent -Recurse -Force -ErrorAction SilentlyContinue
 }
