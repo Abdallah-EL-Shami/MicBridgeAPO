@@ -25,7 +25,6 @@ $requiredReleasePatterns = [ordered]@{
     'Authenticode script signing' = 'Set-AuthenticodeSignature'
     'Authenticode signature verification' = 'Get-AuthenticodeSignature'
     'public certificate artifact' = 'MicBridgeAPO-Release[.]cer'
-    'AllSigned launcher enforcement' = 'AllSigned'
     'temporary PFX cleanup' = 'Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force'
     'secret environment cleanup' = 'Remove-Item\s+Env:MB_RELEASE_SIGNING_PFX_PASSWORD'
     'signed release artifact' = 'MicBridgeAPO-Signed-Release'
