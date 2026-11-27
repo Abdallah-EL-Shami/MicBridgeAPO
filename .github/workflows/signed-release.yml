@@ -195,8 +195,6 @@ jobs:
           $cert = $null
           $raw = $null
           $publicCert = $null
-          $rootStore = $null
-          $publisherStore = $null
           try {
             if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Signing secrets are unavailable.' }
             if ($env:GITHUB_REF_NAME -notlike 'v*' -or $env:GITHUB_REF_NAME.Length -lt 2) { throw 'Only version tags beginning with v may be signed.' }
@@ -218,12 +216,8 @@ jobs:
             $publicCertPath = Join-Path $package 'MicBridgeAPO-Release.cer'
             [IO.File]::WriteAllBytes($publicCertPath,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
             $publicCert = [Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($publicCertPath))
-            $rootStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::Root,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-            $publisherStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::TrustedPublisher,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-            $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $publisherStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $rootStore.Add($publicCert)
-            $publisherStore.Add($publicCert)
+            # Signing and cryptographic integrity verification do not require
+            # trusting a self-signed certificate or mutating either Windows trust store.
 
             # Authenticode-sign every PowerShell entrypoint and module in the staged
             # package. AllSigned launchers and UAC re-entry then reject modified scripts.
@@ -233,10 +227,17 @@ jobs:
             foreach ($scriptFile in $scriptFiles) {
               $signedScript = Set-AuthenticodeSignature -FilePath $scriptFile.FullName -Certificate $cert -HashAlgorithm SHA256
               $checkedScript = Get-AuthenticodeSignature -FilePath $scriptFile.FullName
-              if ($signedScript.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-                  $checkedScript.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+              $acceptedVerificationStatuses = @(
+                [Management.Automation.SignatureStatus]::Valid,
+                [Management.Automation.SignatureStatus]::NotTrusted
+              )
+              if ($signedScript.Status -notin $acceptedVerificationStatuses -or
+                  $checkedScript.Status -notin $acceptedVerificationStatuses -or
                   $checkedScript.SignerCertificate.Thumbprint -ne $thumb) {
-                throw "Authenticode signing or verification failed for package script: $($scriptFile.FullName)"
+                throw "Authenticode signature integrity or pinned signer verification failed for package script: $($scriptFile.FullName); status=$($checkedScript.Status)"
+              }
+              if ($checkedScript.Status -eq [Management.Automation.SignatureStatus]::NotTrusted) {
+                Write-Host "AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI: $($scriptFile.Name)"
               }
             }
             Write-Host "AUTHENTICODE SCRIPTS VERIFIED: count=$($scriptFiles.Count); signer=$thumb"
@@ -267,14 +268,6 @@ jobs:
             Write-Host "SIGNED RELEASE VERIFIED: $version; files=$($records.Count); signer=$thumb"
           }
           finally {
-            if ($null -ne $publisherStore) {
-              try { if ($null -ne $publicCert) { $publisherStore.Remove($publicCert) } } catch {}
-              $publisherStore.Close()
-            }
-            if ($null -ne $rootStore) {
-              try { if ($null -ne $publicCert) { $rootStore.Remove($publicCert) } } catch {}
-              $rootStore.Close()
-            }
             if ($null -ne $publicCert) { $publicCert.Dispose() }
             if ($null -ne $cert) { $cert.Dispose() }
             if ($null -ne $raw) { [Array]::Clear($raw,0,$raw.Length) }
