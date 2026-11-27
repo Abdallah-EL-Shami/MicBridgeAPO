@@ -34,6 +34,15 @@ A future provenance source would need, at minimum:
 
 No such end-to-end manifest/trust-anchor lifecycle is currently implemented or validated. Therefore `OwnershipProven` remains false, cleanup review cannot be promoted, and no executor may be connected to the installer. Existing installations without trustworthy historical provenance require manual review or preservation, not inferred ownership.
 
+## Signed installation manifest verifier (experimental)
+
+- A read-only verifier now checks a detached CMS signature against an explicit signer-thumbprint allowlist supplied by the caller, signer validity dates, Code Signing EKU, digital-signature key usage, exact signed manifest bytes, schema/product identity, a non-empty installation transaction GUID, unique safe relative paths, and current SHA-256 values.
+- It rejects reparse points encountered along listed file paths and does not perform file, registry, installer, or cleanup mutations.
+- Its output deliberately keeps `OwnershipProven = false`, `ComOwnershipProven = false`, and `IsExecutionAuthorized = false`. It verifies only that listed file bytes match a signed manifest; it does not prove that the manifest was created by a successful installation unless a trustworthy release signing and transaction lifecycle is established independently.
+- The verifier currently does not implement certificate-chain building, online/offline revocation checking, timestamp validation, key-rotation policy, or a protected OS-managed trust-anchor store. The explicit thumbprint list is only as trustworthy as the mechanism that provisions and protects it.
+- The manifest's `ComRegistrations` field is not interpreted as proof of COM ownership. No COM registration is authorized for deletion by this verifier.
+- The prototype is not integrated into the installer and is not a cleanup executor. It must remain experimental until the trust-anchor lifecycle, installer manifest creation, upgrade/rollback semantics, revocation, and independent security review are complete.
+
 ## What this does not prove
 
 - It does not prove that a file or COM registration historically belongs to MicBridge. A matching name, path, hash, or CLSID is not ownership evidence.
