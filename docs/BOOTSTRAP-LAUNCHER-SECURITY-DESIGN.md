@@ -26,6 +26,18 @@ The launcher itself is not a trust anchor just because it is in the package. The
 8. Pass a short-lived, unforgeable verification handoff to the installer (for example, an inherited, non-inheritable-by-default handle to a launcher-owned verification record). The installer must validate the handoff and refuse direct invocation without it. The handoff must bind package root, manifest digest, signer fingerprint, process identity, and transaction nonce.
 9. Retain package file/directory handles until the installer has completed or exited. On any launch, handoff, or child exit failure, release handles and return a nonzero exit code. No log, lock, elevation request, registry, COM, file, service, or ProgramData mutation may occur before verification.
 
+
+## Revocation and offline operation policy
+
+The current verifier sets `fdwRevocationChecks = WTD_REVOKE_NONE` and uses cache-only URL retrieval. This is an explicit offline-availability choice, not evidence that the certificate has not been revoked. A successful result therefore establishes Windows Authenticode policy acceptance under the locally available trust state plus the pinned certificate identity; it does **not** establish fresh revocation status. Do not describe this mode as revocation-checked.
+
+Before production release, choose and document one of these policies:
+
+- **Strict online release validation:** require a successful revocation check at release/bootstrap time, fail closed when revocation data cannot be obtained, and clearly disclose that initial verification requires network access.
+- **Offline-capable pinned-certificate policy:** retain cache-only/no-revocation behavior for offline installation, but document the residual revocation risk, define certificate-compromise response (including a new pinned fingerprint and replacement launcher), and ensure users receive the updated trust material through an independently authenticated channel.
+
+The product requirement that normal installed operation works without Internet does not by itself decide whether first-time release verification may require network access. That decision must be explicit; neither behavior is to be inferred from the current flags.
+
 ## Privilege boundary
 
 The launcher must verify the package before elevation. The preferred model is a standard-user launcher that verifies first and then starts the already verified installer through a narrowly defined elevated helper/child flow. Any elevation transition must preserve the verified package identity and handoff; the elevated process must not re-open untrusted paths or repeat a path-only check. If Windows cannot securely preserve the handle-bound handoff across the elevation boundary, the design must stop and be revised rather than downgrade to path-based trust.
