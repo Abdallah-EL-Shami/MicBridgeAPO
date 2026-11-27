@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$installerPath = Join-Path $repoRoot 'MicBridgeAPO/install.ps1'
+$installerPath = Join-Path $repoRoot 'MicBridgeAPO/MicBridgeAPO/install.ps1'
 $buildWorkflowPath = Join-Path $repoRoot '.github/workflows/build.yml'
 $releaseWorkflowPath = Join-Path $repoRoot '.github/workflows/signed-release.yml'
 foreach ($path in @($installerPath,$buildWorkflowPath,$releaseWorkflowPath)) {
