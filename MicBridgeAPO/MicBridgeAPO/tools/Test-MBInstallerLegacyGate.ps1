@@ -24,9 +24,10 @@ $gate = $source.Substring($gateStart,$gateEnd-$gateStart)
 
 if (-not $gate.Contains("Import-Module -Name `$legacyAuditModule -Force -ErrorAction Stop")) { throw 'FAIL: installer does not import the read-only legacy audit module.' }
 if (-not $gate.Contains("Test-MBLegacyInstallationState -InstallDirectory `$installDir -DataDirectory `$dataDir -RegistryRoot 'HKLM:\'")) { throw 'FAIL: installer does not audit the intended HKLM root.' }
-if (-not $gate.Contains("`$legacyAudit.Outcome -ne 'NoLegacyResidueDetected'")) { throw 'FAIL: installer does not fail closed on legacy or ambiguous state.' }
+if (-not $gate.Contains("'MicBridgeCandidate'" ) -or -not $gate.Contains("'MicBridgeBinaryCandidate'" ) -or -not $gate.Contains("'ForeignOrSharedServer'")) { throw 'FAIL: clean-install gate does not block live MicBridge or foreign COM registrations.' }
+if (-not $gate.Contains('Old recovery files were not restored or changed.') -or -not $gate.Contains("'MicBridgeRecoveryEvidence'")) { throw 'FAIL: clean-install gate must preserve and ignore old recovery evidence rather than restore it.' }
 if (-not $gate.Contains("`$legacyAudit.OwnershipProven -ne `$false") -or -not $gate.Contains("`$legacyAudit.OwnershipEvidenceStatus -ne 'NotEstablished'")) { throw 'FAIL: installer does not require the audit to report ownership as unproven.' }
-if (-not $gate.Contains('No cleanup or installation was attempted.')) { throw 'FAIL: blocked install does not explain that no cleanup/install was attempted.' }
+if (-not $gate.Contains('No installation was attempted.')) { throw 'FAIL: blocked install does not explain that no installation was attempted.' }
 if ($gate -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-ItemProperty|reg\.exe\s+(delete|add))\b') {
     throw 'FAIL: first-install audit gate contains a Registry or file mutation command.'
 }
@@ -37,6 +38,8 @@ $upgradeCheckpoint = $source.IndexOf("Checkpoint-Computer -Description 'قبل M
 if ($auditCall1 -lt 0 -or $auditCall2 -le $auditCall1 -or $upgradeCheckpoint -le $auditCall2) {
     throw 'FAIL: both first-install and upgrade paths must audit before the first restore-point/snapshot mutation.'
 }
+if (-not $source.Contains("$backupFile = Join-Path `$dataDir 'install-baseline-v2.json'") -or -not $source.Contains("$compositeBackupFile = Join-Path `$dataDir 'install-composite-baseline-v2.json'")) { throw 'FAIL: new installer must use fresh v2 baseline paths and leave legacy backup.json untouched.' }
+if (-not $source.Contains('Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles') -or -not $source.Contains('No current-installer receipt exists')) { throw 'FAIL: managed upgrade must require a valid current-installer receipt.' }
 if (-not $workflowSource.Contains("Copy-Item -LiteralPath `$legacyAuditModule -Destination `$toolsPackage")) {
     throw 'FAIL: package staging does not include the required legacy audit module.'
 }
@@ -72,4 +75,4 @@ if (-not $workflowSource.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll' `$
     throw 'FAIL: staged package does not include the freshly built APO DLL.'
 }
 
-Write-Host 'PASS: installer parses; first-install and upgrade legacy gates fail closed before snapshot/restore-point work; audit gate is read-only; all imported modules and APO DLL are staged.'
+Write-Host 'PASS: installer parses; clean install preserves legacy recovery evidence without restoring it; managed upgrade requires receipt-backed files and clean COM state; audit gate is read-only; modules and APO DLL are staged.'
