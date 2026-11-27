@@ -6,11 +6,11 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The last confirmed successful workflow pair in this development sequence is Push and Pull Request runs 1293 and 1294 on commit de7878bf. This confirms only the checks present in that workflow at that commit. It is not a security certification and does not validate later changes.
+The latest confirmed successful workflow pair before the current certificate-policy test additions is Push and Pull Request runs 1301 and 1302 on commit 5fe0b884. This confirms only the checks present in that workflow at that commit. It is not a security certification. Commits bf75ccde and dcfa1851 add a negative test for a thumbprint-pinned certificate lacking Code Signing EKU and correct its fixture initialization order; their CI results must be confirmed separately.
 
 ## Manifest verifier limitations
 
-The current verifier checks CMS signature integrity, a caller-supplied signer thumbprint allowlist, certificate validity dates, Code Signing EKU, manifest identity, relative paths, reparse-point attributes, duplicate paths, and file SHA-256 values.
+The current verifier checks CMS signature integrity, a caller-supplied signer thumbprint allowlist, certificate validity dates, Code Signing EKU, digital-signature key usage, manifest identity, relative paths, reparse-point attributes, duplicate paths, and file SHA-256 values.
 
 The verifier still performs path-based file and directory inspection followed by path-based hashing. Those operations are not an atomic handle-relative traversal. A path component or file can potentially change between checks and hashing. Therefore:
 - Verification is not race-safe authorization.
