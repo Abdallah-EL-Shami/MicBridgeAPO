@@ -142,6 +142,11 @@ try {
         if(-not $rootAliasRejected) { throw 'FAIL: install root reached through a junction alias was accepted.' }
     } finally { Remove-Item -LiteralPath $rootAlias -Force -ErrorAction SilentlyContinue }
 
+    # Restore the fixture bytes after the hash-mismatch probe so later tests isolate their intended condition.
+    [IO.File]::WriteAllBytes($bin,[byte[]](1,3,5,7,9))
+    $restoredHash=(Get-FileHash -LiteralPath $bin -Algorithm SHA256).Hash
+    if(-not $restoredHash.Equals($hash,[StringComparison]::OrdinalIgnoreCase)) { throw 'FAIL: provenance fixture DLL could not be restored.' }
+
     # Duplicate paths are rejected case-insensitively before file verification.
     $duplicateManifest=[ordered]@{
         SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
