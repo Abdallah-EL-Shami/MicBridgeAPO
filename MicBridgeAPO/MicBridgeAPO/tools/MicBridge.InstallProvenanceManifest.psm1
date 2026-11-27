@@ -53,7 +53,17 @@ function Test-MBInstallProvenanceManifest {
     $revoked=[Collections.Generic.List[string]]::new()
     foreach($thumbprint in @($RevokedSignerThumbprints)) {
         $normalized=([string]$thumbprint -replace '\s','').ToUpperInvariant()
-        if($normalized -notmatch '^[A-F0-9]{40}    if($signer.NotBefore.ToUniversalTime() -gt $now -or $signer.NotAfter.ToUniversalTime() -le $now) {
+        if($normalized -notmatch '^[A-F0-9]{40}$') {
+            throw 'Revoked signer thumbprints must be exactly 40 hexadecimal characters.'
+        }
+        if($revoked.Contains($normalized)) { throw 'Revoked signer thumbprints must not contain duplicates.' }
+        $revoked.Add($normalized)
+    }
+    if($revoked.Contains($signer.Thumbprint.ToUpperInvariant())) {
+        throw 'Manifest signer is explicitly revoked by the caller-supplied denylist.'
+    }
+    $now=[DateTime]::UtcNow
+    if($signer.NotBefore.ToUniversalTime() -gt $now -or $signer.NotAfter.ToUniversalTime() -le $now) {
         throw 'Manifest signer certificate is outside its validity period.'
     }
     $keyUsage=$signer.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.15' } | Select-Object -First 1
@@ -131,15 +141,6 @@ function Test-MBInstallProvenanceManifest {
 }
 
 Export-ModuleMember -Function Test-MBInstallProvenanceManifest
-) {
-            throw 'Revoked signer thumbprints must be exactly 40 hexadecimal characters.'
-        }
-        if($revoked.Contains($normalized)) { throw 'Revoked signer thumbprints must not contain duplicates.' }
-        $revoked.Add($normalized)
-    }
-    if($revoked.Contains($signer.Thumbprint.ToUpperInvariant())) {
-        throw 'Manifest signer is explicitly revoked by the caller-supplied denylist.'
-    }
     $now=[DateTime]::UtcNow
     if($signer.NotBefore.ToUniversalTime() -gt $now -or $signer.NotAfter.ToUniversalTime() -le $now) {
         throw 'Manifest signer certificate is outside its validity period.'
