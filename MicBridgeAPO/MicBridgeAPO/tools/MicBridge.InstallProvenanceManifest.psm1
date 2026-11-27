@@ -115,6 +115,11 @@ function Test-MBInstallProvenanceManifest {
        [string]::IsNullOrWhiteSpace([string]$manifest.ProductVersion)) {
         throw 'Manifest schema, product identity, or version is invalid.'
     }
+    # Schema v1 does not define an authenticated COM-registration ownership model.
+    # Refuse non-empty claims rather than silently treating signed metadata as proof.
+    if($null -ne $manifest.ComRegistrations -and @($manifest.ComRegistrations).Count -gt 0) {
+        throw 'Manifest COM registration claims are unsupported by schema v1 and cannot establish COM ownership.'
+    }
     $transaction=[guid]::Empty
     if(-not [guid]::TryParse([string]$manifest.InstallTransactionId,[ref]$transaction) -or $transaction -eq [guid]::Empty) {
         throw 'Manifest installation transaction ID must be a non-empty GUID.'
