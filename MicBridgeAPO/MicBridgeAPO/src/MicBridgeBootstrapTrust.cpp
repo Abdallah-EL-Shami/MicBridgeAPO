@@ -1,6 +1,7 @@
 #include "MicBridgeBootstrapTrust.h"
 
 #include <windows.h>
+#include <wincrypt.h>
 #include <wintrust.h>
 #include <softpub.h>
 #include <bcrypt.h>
@@ -48,6 +49,7 @@ bool ExtractAndCheckSigner(WINTRUST_DATA& trust)
     CRYPT_PROVIDER_CERT* signerCertificate = WTHelperGetProvCertFromChain(signer, 0);
     if (signerCertificate == nullptr || signerCertificate->pCert == nullptr) return false;
     return IsPinnedCertificate(signerCertificate->pCert);
+}
 }
 
 namespace micbridge::bootstrap {
