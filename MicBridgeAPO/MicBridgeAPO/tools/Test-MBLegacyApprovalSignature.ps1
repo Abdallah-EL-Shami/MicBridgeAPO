@@ -80,7 +80,17 @@ try {
     try { Test-MBLegacyApprovalSignature @verifyArgs | Out-Null } catch { $staleRejected = $true }
     if (-not $staleRejected) { throw 'FAIL: signed approval survived candidate content change.' }
 
-    Write-Host 'PASS: CMS approval is bound to trusted signer, identity, journal and candidate; no execution/deletion occurs.'
+    # Restore the candidate so this next assertion isolates journal-digest binding.
+    [IO.File]::WriteAllBytes($dll,[byte[]](10,20,30,40,50))
+    $journalBytes = [IO.File]::ReadAllBytes($journalPath)
+    [IO.File]::WriteAllBytes($journalPath,[byte[]]($journalBytes + [byte]0x20))
+    $journalTamperRejected = $false
+    try { Test-MBLegacyApprovalSignature @verifyArgs | Out-Null } catch {
+        $journalTamperRejected = $_.Exception.ToString() -match 'Journal changed after approval was signed'
+    }
+    if (-not $journalTamperRejected) { throw 'FAIL: signed approval survived journal digest change.' }
+
+    Write-Host 'PASS: CMS approval is bound to an explicitly trusted signer, identity, journal digest and candidate; no execution/deletion occurs.'
 } finally {
     if ($cert) { $cert.Dispose() }
     $rsa.Dispose()
