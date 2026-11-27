@@ -49,6 +49,7 @@ function New-MBInstallTransactionReceipt {
         [Parameter(Mandatory)][string]$ReleaseManifestSha256,
         [Parameter(Mandatory)][string]$SignerThumbprint,
         [Parameter(Mandatory)][object[]]$InstalledFiles,
+        [guid]$TransactionId = [guid]::Empty,
         [string]$BaselineEvidenceSha256
     )
     Add-Type -AssemblyName System.Security
@@ -100,10 +101,11 @@ function New-MBInstallTransactionReceipt {
     if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Receipt parent directory cannot be a reparse point.' }
     if (Test-Path -LiteralPath $receiptFull) { throw 'An install transaction receipt already exists; refusing to overwrite history.' }
 
+    if ($TransactionId -eq [guid]::Empty) { $TransactionId = [guid]::NewGuid() }
     $payload = [ordered]@{
         SchemaVersion=1
         ProductId='MicBridgeAPO'
-        TransactionId=[guid]::NewGuid().ToString()
+        TransactionId=$TransactionId.ToString()
         ProductVersion=$ProductVersion
         ReleaseManifestSha256=$ReleaseManifestSha256.ToUpperInvariant()
         SignerThumbprint=$SignerThumbprint.ToUpperInvariant()
