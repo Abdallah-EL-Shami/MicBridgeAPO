@@ -76,6 +76,7 @@ jobs:
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBReleaseSigningWorkflow.ps1
       - name: Test Authenticode bootstrap and AllSigned enforcement (temporary certificate)
         shell: pwsh
+        timeout-minutes: 2
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBAuthenticodeBootstrap.ps1
       - name: Test exclusive legacy file handle lease (temp-only fixture)
         shell: pwsh
