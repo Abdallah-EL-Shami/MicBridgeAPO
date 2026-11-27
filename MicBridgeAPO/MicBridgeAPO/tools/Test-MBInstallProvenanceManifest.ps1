@@ -9,7 +9,7 @@ $rsa=[Security.Cryptography.RSA]::Create(2048)
 $cert=$null
 try {
     $request=[Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        [Security.Cryptography.X500DistinguishedName]::new('CN=MicBridge Manifest CI Signer'),
+        [Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridge Manifest CI Signer'),
         $rsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
     $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false,$false,0,$true))
     $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
