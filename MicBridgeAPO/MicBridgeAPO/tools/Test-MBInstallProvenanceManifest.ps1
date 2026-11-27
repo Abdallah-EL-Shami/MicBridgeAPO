@@ -57,6 +57,14 @@ try {
     try { $badTrust=$args.Clone();$badTrust.TrustedSignerThumbprints=@('NOT-A-THUMBPRINT');Test-MBInstallProvenanceManifest @badTrust | Out-Null } catch { $malformedTrustRejected=$_.Exception.Message -match 'exactly 40 hexadecimal characters' }
     if(-not $malformedTrustRejected) { throw 'FAIL: malformed trust anchor was not rejected explicitly.' }
 
+    $duplicateTrustRejected=$false
+    try {
+        $duplicateTrustArgs=$args.Clone()
+        $duplicateTrustArgs.TrustedSignerThumbprints=@($cert.Thumbprint,$cert.Thumbprint)
+        Test-MBInstallProvenanceManifest @duplicateTrustArgs | Out-Null
+    } catch { $duplicateTrustRejected=$_.Exception.Message -match 'must not contain duplicates' }
+    if(-not $duplicateTrustRejected) { throw 'FAIL: duplicate trusted signer thumbprints were accepted.' }
+
     # A thumbprint-pinned certificate without the Code Signing EKU is not an acceptable signer.
     $baselineManifestBytes=[IO.File]::ReadAllBytes($manifestPath)
     $noEkuRsa=[Security.Cryptography.RSA]::Create(2048)
