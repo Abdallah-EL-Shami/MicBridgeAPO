@@ -1,6 +1,6 @@
 # Independent bootstrap launcher — security design
 
-Status: **design approved for implementation planning; not implemented; production installation remains blocked.**
+Status: **security design documented; fail-closed native CMake scaffold and CTest added; signature/manifest verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked.**
 
 ## Why the current bootstrap is not trusted
 
@@ -43,13 +43,14 @@ The launcher must verify the package before elevation. The preferred model is a 
 
 ## Implementation gates
 
-1. Add the native launcher target and unit-testable parsing/crypto/path modules without changing installer behavior.
-2. Implement and test manifest/CMS verification independently of PowerShell.
-3. Implement file-handle and directory-handle pinning, race tests, and exact-file-set checks.
-4. Implement the authenticated handoff and installer-side rejection of direct invocation.
-5. Sign the launcher and PowerShell files in the protected release workflow; verify all signatures and the signed manifest in a clean staging directory.
-6. Only after all negative tests pass may the verifier report `BootstrapTrustEstablished=true` for a launcher-authenticated handoff.
-7. Keep release tagging, PFX use, target-machine trust enrollment, installation, and legacy cleanup as separate explicit approvals.
+1. **Scaffold complete:** add the native launcher target and a CTest that launches it and confirms exit code 78. The current executable deliberately performs no verification and never launches the installer. This is only a fail-closed placeholder, not a trusted launcher.
+2. Add unit-testable parsing/crypto/path modules without changing installer behavior.
+3. Implement and test manifest/CMS verification independently of PowerShell.
+4. Implement file-handle and directory-handle pinning, race tests, and exact-file-set checks.
+5. Implement the authenticated handoff and installer-side rejection of direct invocation.
+6. Sign the launcher and PowerShell files in the protected release workflow; verify all signatures and the signed manifest in a clean staging directory.
+7. Only after all negative tests pass may the verifier report `BootstrapTrustEstablished=true` for a launcher-authenticated handoff.
+8. Keep release tagging, PFX use, target-machine trust enrollment, installation, and legacy cleanup as separate explicit approvals.
 
 ## Non-goals
 
