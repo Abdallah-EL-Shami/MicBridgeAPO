@@ -17,7 +17,8 @@ function Test-MBInstallProvenanceManifest {
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
         [string[]]$RevokedSignerThumbprints=@(),
-        [switch]$RequireCertificateChain
+        [switch]$RequireCertificateChain,
+        [switch]$PinFiles
     )
     try {
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
@@ -173,30 +174,34 @@ function Test-MBInstallProvenanceManifest {
         }
     }
 
-    # Re-open every signed payload through a mutation-resistant Windows handle.
-    # The lease re-hashes the opened handle, validates its final path and file ID,
-    # pins every parent directory, rejects hard links/reparse points, and blocks
-    # write/delete sharing while still permitting the installer to read/copy it.
     $leaseResults=[Collections.Generic.List[object]]::new()
-    try {
-        $leaseModule=Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1'
-        if(-not (Test-Path -LiteralPath $leaseModule -PathType Leaf)) {
-            throw 'Mutation-resistant package file lease module is missing.'
-        }
-        Import-Module -Name $leaseModule -Force -ErrorAction Stop
-        foreach($record in $verified) {
-            $leaseResult=Open-MBLegacyExclusiveFileLease -CandidatePath $record.Path -InstallRoot $root -ExpectedSha256 $record.Sha256
-            if(-not $leaseResult.FinalHandleValidationPassed -or -not $leaseResult.Lease.IsOpen) {
-                throw "Package file could not be pinned to its verified handle: $($record.RelativePath)"
+    if($PinFiles) {
+        # Optionally retain mutation-resistant handles for the caller's complete use window.
+        # The lease re-hashes the opened handle, validates its final path and file ID,
+        # pins every parent directory, rejects hard links/reparse points, and blocks
+        # write/delete sharing while still permitting the installer to read/copy it.
+        $leaseResults=[Collections.Generic.List[object]]::new()
+        try {
+            $leaseModule=Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1'
+            if(-not (Test-Path -LiteralPath $leaseModule -PathType Leaf)) {
+                throw 'Mutation-resistant package file lease module is missing.'
             }
-            $record | Add-Member -NotePropertyName LeaseResult -NotePropertyValue $leaseResult -Force
-            $leaseResults.Add($leaseResult)
+            Import-Module -Name $leaseModule -Force -ErrorAction Stop
+            foreach($record in $verified) {
+                $leaseResult=Open-MBLegacyExclusiveFileLease -CandidatePath $record.Path -InstallRoot $root -ExpectedSha256 $record.Sha256
+                if(-not $leaseResult.FinalHandleValidationPassed -or -not $leaseResult.Lease.IsOpen) {
+                    throw "Package file could not be pinned to its verified handle: $($record.RelativePath)"
+                }
+                $record | Add-Member -NotePropertyName LeaseResult -NotePropertyValue $leaseResult -Force
+                $leaseResults.Add($leaseResult)
+            }
+        } catch {
+            foreach($leaseResult in $leaseResults) {
+                try { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult } catch {}
+            }
+            throw
         }
-    } catch {
-        foreach($leaseResult in $leaseResults) {
-            try { Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult } catch {}
-        }
-        throw
+    
     }
 
     [pscustomobject]@{
@@ -204,8 +209,8 @@ function Test-MBInstallProvenanceManifest {
         SignatureVerified=$true
         ManifestVerified=$true
         FileProvenanceVerified=$true
-        VerificationConsistency='ExclusiveHandlePinned'
-        RaceSafeForExecution=$true
+        VerificationConsistency=$(if($PinFiles){'ExclusiveHandlePinned'}else{'PathBasedNonAtomic'})
+        RaceSafeForExecution=[bool]$PinFiles
         CertificateChainValidated=$chainValidated
         CertificateDownloadsDisabled=$certificateDownloadsDisabled
         RevocationChecked=$false
