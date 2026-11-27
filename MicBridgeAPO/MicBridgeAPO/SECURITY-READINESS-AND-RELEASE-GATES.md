@@ -23,7 +23,9 @@ Before production use, select and implement one independently trusted bootstrap 
 
 For either model, add negative tests for a modified launcher, modified verifier, altered certificate, wrong signer thumbprint, missing trust anchor, and tampered package; prove that no elevation, logging, lock creation, registry/COM change, or file mutation occurs before verification. Do not treat a certificate shipped inside the same untrusted archive as an independent trust anchor. Do not claim protection against a hostile local administrator.
 
-The CI bootstrap audit now explicitly asserts that this import-before-verification condition remains disclosed; it is a guard against overstating readiness, not a mitigation. No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
+The CI bootstrap audit now explicitly asserts that this import-before-verification condition remains disclosed; it is a guard against overstating readiness, not a mitigation. The installer gate has been tightened to require `BootstrapTrustEstablished=true`; the current verifier deliberately returns false, so the installer now stops before elevation, log creation, locks, preflight, or system mutation. This is a fail-closed production block, not a fix for the earlier verifier-module execution: an untrusted `.psm1` must still not be run at all until a separately trusted bootstrap validates it.
+
+No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
 
 ## Manifest verifier limitations
 
