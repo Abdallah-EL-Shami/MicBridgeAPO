@@ -347,6 +347,52 @@ foreach ($endpointId in $preflightIds) {
     } finally { $key.Close() }
 }
 
+# Verify current-install provenance before any recovery journal or system mutation.
+# A receipt proves only the recorded MicBridge files; it is not ownership evidence for COM or Windows resources.
+$receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
+if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) {
+    throw "Install provenance receipt verifier is missing; uninstall stopped before changes: $receiptModule"
+}
+Import-Module -Name $receiptModule -Force -ErrorAction Stop
+$receiptCandidates = @()
+if (Test-Path -LiteralPath $dataDir -PathType Container) {
+    $dataItem = Get-Item -LiteralPath $dataDir -Force -ErrorAction Stop
+    if (($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'ProgramData receipt directory is a reparse point; uninstall stopped before changes.'
+    }
+    $receiptCandidates = @(Get-ChildItem -LiteralPath $dataDir -File -Filter 'install-transaction-*.receipt' -Force -ErrorAction Stop)
+}
+$verifiedInstallReceipt = $null
+$receiptFailures = [Collections.Generic.List[string]]::new()
+foreach ($candidate in $receiptCandidates) {
+    try {
+        if (($candidate.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Receipt candidate is a reparse point.'
+        }
+        $candidateResult = Test-MBInstallTransactionReceipt -ReceiptPath $candidate.FullName -VerifyInstalledFiles
+        if (-not $candidateResult.ReceiptIntegrityVerified -or
+            -not $candidateResult.MachineBound -or
+            -not $candidateResult.InstalledFilesVerified -or
+            $candidateResult.OwnershipProven -or $candidateResult.ComOwnershipProven -or
+            $candidateResult.IsExecutionAuthorized) {
+            throw 'Receipt verification returned an invalid or unsafe result.'
+        }
+        $expectedInstallRoot = [IO.Path]::GetFullPath($installDir).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        if (-not [string]::Equals([string]$candidateResult.InstallRoot,$expectedInstallRoot,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Receipt belongs to a different installation root.'
+        }
+        $verifiedInstallReceipt = $candidateResult
+        break
+    } catch {
+        $receiptFailures.Add("$($candidate.Name): $($_.Exception.Message)")
+    }
+}
+if (-not $verifiedInstallReceipt) {
+    $failureSummary = $receiptFailures -join '; '
+    throw "No valid machine-bound install receipt verified the current MicBridge files. Uninstall stopped before changes. ReceiptCount=$($receiptCandidates.Count). $failureSummary"
+}
+Write-UninstallLog 'INFO' "Install receipt verified read-only. TransactionId='$($verifiedInstallReceipt.TransactionId)'; file count=$(@($verifiedInstallReceipt.InstalledFiles).Count). This does not prove COM ownership or authorize shared-resource cleanup."
+
 # Re-audit permanent backup provenance and legacy files before creating the recovery plan
 # or mutating endpoint/COM registrations. Ambiguous state is preserved for manual review.
 $legacyAuditModule = Join-Path $PSScriptRoot 'tools\MicBridge.LegacyInstallAudit.psm1'
