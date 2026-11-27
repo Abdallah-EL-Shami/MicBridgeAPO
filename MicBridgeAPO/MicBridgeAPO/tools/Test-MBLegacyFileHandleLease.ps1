@@ -67,7 +67,7 @@ try {
 
         $wrongIdentityRejected = $false
         try {
-            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash -ExpectedIdentity '00000000:0000000000000000' | Out-Null
+            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash -ExpectedFileIdentity '00000000:0000000000000000' | Out-Null
         } catch { $wrongIdentityRejected = $_.Exception.Message -match 'identity differs' }
         if (-not $wrongIdentityRejected) { throw 'FAIL: incorrect approved file identity was accepted.' }
 
