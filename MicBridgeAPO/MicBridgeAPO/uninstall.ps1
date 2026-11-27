@@ -182,16 +182,16 @@ function Test-MBEndpointValueSnapshot([string]$DeviceSubKey, [string]$LegacyValu
 
 # Fail closed before any mutation if the original recovery snapshot is unavailable.
 if (-not (Test-Path -LiteralPath $backupFile)) {
-    throw 'backup.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
+    throw 'install-baseline-v2.json is missing. Uninstall stopped before changing endpoint registry, COM registration, Windows audio settings, or files.'
 }
 try {
     $preflightBackup = Get-Content -LiteralPath $backupFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 } catch {
-    throw "backup.json is unreadable or malformed; uninstall stopped before changes: $($_.Exception.Message)"
+    throw "install-baseline-v2.json is unreadable or malformed; uninstall stopped before changes: $($_.Exception.Message)"
 }
 $parsedDeviceId = [guid]::Empty
 if (-not $preflightBackup -or -not [guid]::TryParse([string]$preflightBackup.DeviceId, [ref]$parsedDeviceId)) {
-    throw 'backup.json has no valid capture endpoint DeviceId; uninstall stopped before changes.'
+    throw 'install-baseline-v2.json has no valid capture endpoint DeviceId; uninstall stopped before changes.'
 }
 if ($preflightBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$preflightBackup.ComRegistrationSnapshotVersion -ne 1) {
     throw 'This installation has no trustworthy persistent pre-install COM snapshot. Uninstall stopped before changes to avoid deleting a COM registration that may have existed before MicBridge.'
