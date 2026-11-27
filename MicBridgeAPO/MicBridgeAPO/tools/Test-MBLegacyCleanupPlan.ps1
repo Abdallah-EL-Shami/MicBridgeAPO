@@ -102,6 +102,26 @@ try {
         Findings = @([pscustomobject]@{Kind='Registration';Name='COM CLSID';Classification='Absent';Path='HKCU:\Software\Test\CLSID';ServerPath=$null;Sha256=$null})
     }
     $cleanPlan = New-MBLegacyCleanupPlan -Audit $cleanAudit -InstallDirectory $install
+
+    # Legacy callers may provide audit objects without ownership fields.
+    # Missing provenance must be treated as unproven, not as a StrictMode error.
+    $legacyShapeAudit = [pscustomobject]@{
+        IsReadOnly = $true
+        CleanupAllowed = $false
+        OriginalWindowsBaselineProven = $false
+        Outcome = 'InventoryOnly'
+        Findings = @([pscustomobject]@{
+            Kind='File'; Name='MicBridgeAPO.dll'; Classification='MicBridgeBinaryCandidate'
+            Path=$dll; ServerPath=$null; Sha256=$hash
+        })
+    }
+    $legacyShapePlan = New-MBLegacyCleanupPlan -Audit $legacyShapeAudit -InstallDirectory $install
+    if (-not ($legacyShapePlan.Items | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' -and $_.ProposedAction -eq 'Preserve' })) {
+        throw 'FAIL: audit object without ownership fields did not default to preservation.'
+    }
+    if ($legacyShapePlan.CanProceedToCleanupReview -or $legacyShapePlan.CleanupExecutionAllowed -or $legacyShapePlan.InstallAllowed) {
+        throw 'FAIL: audit object without ownership fields did not fail closed.'
+    }
     if (-not $cleanPlan.CanProceedToCleanupReview -or $cleanPlan.InstallAllowed -or $cleanPlan.CleanupExecutionAllowed) {
         throw 'FAIL: clean read-only plan has incorrect gate semantics.'
     }
