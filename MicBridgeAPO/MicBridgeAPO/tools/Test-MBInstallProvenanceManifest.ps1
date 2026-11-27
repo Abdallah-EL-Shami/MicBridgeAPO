@@ -367,6 +367,26 @@ try {
     catch { $duplicateRejected=$_.Exception.Message -match 'duplicate file path' }
     if(-not $duplicateRejected) { throw 'FAIL: case-insensitive duplicate manifest paths were accepted.' }
 
+    # Schema v1 must not let signed-but-unmodeled COM metadata masquerade as ownership evidence.
+    $comClaimManifest=[ordered]@{
+        SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
+        InstallTransactionId=[guid]::NewGuid().ToString()
+        Files=@(@{RelativePath='MicBridgeAPO.dll';Sha256=$hash})
+        ComRegistrations=@(@{Clsid='{A3F6C1D2-7B84-4E19-9C55-2D8E1F0B6A47}';Owner='MicBridgeAPO'})
+    }
+    $comClaimBytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject ([pscustomobject]$comClaimManifest) -Compress -Depth 8))
+    [IO.File]::WriteAllBytes($manifestPath,$comClaimBytes)
+    $comClaimCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($comClaimBytes),$false)
+    $comClaimSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $comClaimSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $comClaimCms.ComputeSignature($comClaimSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$comClaimCms.Encode())
+    $comClaimRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }
+    catch { $comClaimRejected=$_.Exception.Message -match 'COM registration claims are unsupported' }
+    if(-not $comClaimRejected) { throw 'FAIL: schema v1 accepted COM metadata that has no authenticated ownership semantics.' }
+
     Write-Host 'PASS: signed manifest trust, signer purpose, transaction identity and file hashes verified; COM ownership and execution remain unproven.'
 } finally {
     if($cert){$cert.Dispose()}
