@@ -151,7 +151,7 @@ Assert-Contains $cmake 'iphlpapi' 'APO links IP Helper for local sender validati
 
 
 Assert-NotContains $installer 'Set-Content -LiteralPath \$backupFile' 'Installer never rewrites the original backup.json during legacy migration'
-Assert-Contains $installer 'Clean install gate accepted preserved legacy recovery evidence only' 'Clean install ignores legacy recovery evidence without restoring it'
+Assert-Contains $installer 'Clean-install gate accepted preserved legacy recovery evidence only' 'Clean install ignores legacy recovery evidence without restoring it'
 Assert-Contains $installer 'Snapshot the currently installed state for transaction rollback' 'Installer captures the pre-attempt state'
 
 Assert-Contains $installer 'function Write-JsonAtomic' 'Installer writes recovery JSON through an atomic replacement helper'
