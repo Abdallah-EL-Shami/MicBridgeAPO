@@ -138,6 +138,38 @@ try {
         $afterFriendly = [string]$afterApo.GetValue('FriendlyName')
         $afterServer = [string]$afterClsid.OpenSubKey('InprocServer32').GetValue('')
     } finally { if ($afterClsid) {$afterClsid.Dispose()}; if ($afterApo) {$afterApo.Dispose()} }
+    # Nested junctions are reported, never traversed. Files reachable only
+    # through the junction must not be inventoried as installation-owned.
+    $nestedTarget = Join-Path $root 'nested-install-target'
+    $nestedLink = Join-Path $install 'external-link'
+    New-Item -ItemType Directory -Path $nestedTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $nestedTarget 'foreign-through-junction.dll'),'external')
+    New-Item -ItemType Junction -Path $nestedLink -Target $nestedTarget -ErrorAction Stop | Out-Null
+    try {
+        $nestedAudit = Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+        if (-not ($nestedAudit.Findings | Where-Object { $_.Path -eq $nestedLink -and $_.Classification -eq 'ReparsePointPreserved' })) {
+            throw 'FAIL: nested install junction was not reported as preserved.'
+        }
+        if ($nestedAudit.Findings | Where-Object { $_.Path -eq (Join-Path $nestedTarget 'foreign-through-junction.dll') }) {
+            throw 'FAIL: audit traversed a nested install junction and inventoried an external file.'
+        }
+    } finally { Remove-Item -LiteralPath $nestedLink -Force -ErrorAction Stop }
+
+    $nestedDataTarget = Join-Path $root 'nested-data-target'
+    $nestedDataLink = Join-Path $data 'external-data-link'
+    New-Item -ItemType Directory -Path $nestedDataTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $nestedDataTarget 'foreign-through-junction.dat'),'external')
+    New-Item -ItemType Junction -Path $nestedDataLink -Target $nestedDataTarget -ErrorAction Stop | Out-Null
+    try {
+        $nestedDataAudit = Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice
+        if (-not ($nestedDataAudit.Findings | Where-Object { $_.Path -eq $nestedDataLink -and $_.Classification -eq 'ReparsePointPreserved' })) {
+            throw 'FAIL: nested data junction was not reported as preserved.'
+        }
+        if ($nestedDataAudit.Findings | Where-Object { $_.Path -eq (Join-Path $nestedDataTarget 'foreign-through-junction.dat') }) {
+            throw 'FAIL: audit traversed a nested data junction and inventoried an external file.'
+        }
+    } finally { Remove-Item -LiteralPath $nestedDataLink -Force -ErrorAction Stop }
+
     if ($beforeDll -ne $afterDll -or $beforeLog -ne $afterLog -or $beforeFriendly -ne $afterFriendly -or $beforeServer -ne $afterServer) {
         throw 'FAIL: read-only audit changed Registry or file state'
     }
