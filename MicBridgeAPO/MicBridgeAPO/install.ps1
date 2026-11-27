@@ -220,23 +220,34 @@ try {
     Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
     $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\'
     Write-InstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
+    # Recovery evidence from the retired installer is preserved and ignored:
+    # it is neither restored nor used as the new install baseline. Only live
+    # registrations, old binaries/support files, unknown install files, foreign
+    # COM servers, unreadable state, and reparse points block a clean install.
+    $blockingLegacyClasses = @(
+        'Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath',
+        'ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved',
+        'InvalidOrInsufficient','MissingPermanentBackup','MicBridgeCandidate',
+        'MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate'
+    )
+    $blockingLegacy = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingLegacyClasses })
     if (-not $legacyAudit.IsReadOnly -or $legacyAudit.CleanupAllowed -ne $false -or
         $legacyAudit.OriginalWindowsBaselineProven -ne $false -or
         $legacyAudit.OwnershipProven -ne $false -or
         $legacyAudit.OwnershipEvidenceStatus -ne 'NotEstablished' -or
-        $legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
-        $details = @($legacyAudit.Findings | Where-Object { $_.Classification -notin @('Absent') } |
-            ForEach-Object { "$($_.Name): $($_.Classification) [$($_.Path)]" }) -join '; '
-        throw "Legacy MicBridge state was detected or could not be ruled out. No cleanup or installation was attempted. Review findings: $details"
+        $blockingLegacy.Count -gt 0) {
+        $details = @($blockingLegacy | ForEach-Object { "$($_.Name): $($_.Classification) [$($_.Path)]" }) -join '; '
+        throw "Clean install blocked by live/ambiguous legacy state. Old recovery files were not restored or changed. No installation was attempted. Review findings: $details"
     }
+    Write-InstallLog 'INFO' 'Clean-install gate accepted preserved legacy recovery evidence only; it will not be restored or reused.'
 } catch {
     Close-MBInstallProvenanceLeases -Verification $verifiedPackage
     Write-InstallLog 'ERROR' "Read-only legacy audit gate blocked installation. $($_.Exception.ToString())"
     throw
 }
 
-$compositeBackupFile = Join-Path $dataDir 'composite-efx-backup.json'
-$backupFile = Join-Path $dataDir 'backup.json'
+$compositeBackupFile = Join-Path $dataDir 'install-composite-baseline-v2.json'
+$backupFile = Join-Path $dataDir 'install-baseline-v2.json'
 $dllBackupPath = $null
 $dllBackupHash = $null
 $dllReplacementStarted = $false
@@ -386,20 +397,15 @@ $dev = $found[0]
 # Refuse to reuse a backup created for a different capture endpoint.
 # This check happens before checkpoints, file copies, ACL changes, or registry writes.
 if (Test-Path -LiteralPath $backupFile) {
-    $existingBackup = Get-Content -LiteralPath $backupFile -Raw | ConvertFrom-Json
+    $existingBackup = Get-Content -LiteralPath $backupFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     if ($existingBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$existingBackup.ComRegistrationSnapshotVersion -ne 1) {
-        throw 'The existing backup predates persistent COM recovery data. Its original COM state cannot be reconstructed safely; refusing an in-place upgrade that would make uninstall destructive.'
+        throw 'The current MicBridge baseline is incomplete; refusing upgrade without a trustworthy baseline created by this installer.'
     }
     if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
-        throw "ملف النسخة الاحتياطية يخص جهازًا آخر ($($existingBackup.DeviceId)) وليس المايك الحالي ($($dev.Id)). لم يتم إجراء أي تغييرات. لا تحذف backup.json؛ أرسل هذه الرسالة للمراجعة."
+        throw "The current MicBridge baseline belongs to another capture endpoint. Upgrade was blocked without changing the baseline."
     }
     if ($existingBackup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
-        if (($existingBackup.CreatedFx -eq $true) -and ($null -eq $existingBackup.FxKeySddl)) {
-            $existingBackup | Add-Member -NotePropertyName PrevFxAssociation -NotePropertyValue $null
-            Write-InstallLog 'WARN' 'Legacy backup compatibility field added in memory only; original backup.json was left byte-for-byte unchanged.'
-        } else {
-            throw "ملف backup.json قديم ولا يحتوي PrevFxAssociation، ولا توجد بيانات كافية لإثبات قيمتها الأصلية. أوقفت التثبيت دون تخمين أو تعديل النسخة الاحتياطية."
-        }
+        throw 'The current MicBridge baseline is missing required endpoint association state; upgrade was blocked.'
     }
     $backup = $existingBackup
 }
@@ -417,16 +423,38 @@ Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id)
 Write-UpgradeLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
 foreach ($finding in @($legacyAudit.Findings)) { Write-UpgradeLog 'INFO' "Finding: Kind=$($finding.Kind); Name=$($finding.Name); Classification=$($finding.Classification); Path=$($finding.Path); Detail=$($finding.Detail)" }
-if ($legacyAudit.Outcome -ne 'NoLegacyResidueDetected') {
-    # InventoryOnly is not permission to upgrade: a structurally valid legacy
-    # backup and matching hashes do not prove that it captured the original
-    # Windows state before an older MicBridge release changed the machine.
-    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup','MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate','MicBridgeRecoveryEvidence','StructurallyValidCandidate') })
-    $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
-    Write-InstallLog 'CRITICAL' "Read-only legacy installation audit requires manual review. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment). $reviewSummary"
-    throw "Legacy MicBridge artifacts were detected or the original Windows baseline cannot be established. Upgrade stopped without cleanup or system changes. Preserve ProgramData and install folders for manual review. $reviewSummary"
+$receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
+if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw 'Install receipt verifier is missing; upgrade is blocked.' }
+Import-Module -Name $receiptModule -Force -ErrorAction Stop
+$receiptFiles = @(Get-ChildItem -LiteralPath $dataDir -File -Filter 'install-transaction-*.receipt' -ErrorAction Stop |
+    Sort-Object LastWriteTimeUtc -Descending)
+if ($receiptFiles.Count -lt 1) { throw 'No current-installer receipt exists. This is not a trusted in-place upgrade; clean up the older installation first.' }
+$activeReceipt = $receiptFiles[0]
+$activeReceiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles
+if (-not $activeReceiptCheck.ReceiptIntegrityVerified -or -not $activeReceiptCheck.MachineBound -or
+    -not $activeReceiptCheck.InstalledFilesVerified -or
+    $activeReceiptCheck.SignerThumbprint -ne $trustedReleaseThumbprint -or
+    -not [string]::Equals([IO.Path]::GetFullPath($activeReceiptCheck.InstallRoot),[IO.Path]::GetFullPath($installDir),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The active install receipt is invalid, belongs to another install root, or was not created by the pinned release signer. Upgrade blocked.'
 }
-Write-InstallLog 'INFO' 'Read-only legacy audit found no MicBridge residue; proceeding with a first-install snapshot.'
+$receiptNames = @($activeReceiptCheck.InstalledFiles | ForEach-Object { [string]$_.RelativePath })
+foreach ($requiredInstalledFile in @('MicBridgeAPO.dll','MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
+    if ($receiptNames -notcontains $requiredInstalledFile) { throw "Active receipt does not cover required installed file: $requiredInstalledFile" }
+}
+$blockingUpgradeClasses = @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup')
+$reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingUpgradeClasses })
+$clsidFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'COM CLSID' })
+$apoFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'AudioEngine APO' })
+$expectedInstalledDll = Join-Path $installDir 'MicBridgeAPO.dll'
+if ($clsidFinding.Count -ne 1 -or $clsidFinding[0].Classification -ne 'MicBridgeCandidate' -or
+    -not [string]::Equals([IO.Path]::GetFullPath([string]$clsidFinding[0].ServerPath),[IO.Path]::GetFullPath($expectedInstalledDll),[StringComparison]::OrdinalIgnoreCase) -or
+    $apoFinding.Count -ne 1 -or $apoFinding[0].Classification -ne 'MicBridgeCandidate' -or
+    $reviewItems.Count -gt 0) {
+    $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
+    throw "Current-install receipt does not match a clean MicBridge registration state, or ambiguous/foreign state exists. Upgrade blocked without cleanup. $reviewSummary"
+}
+Write-UpgradeLog 'INFO' "Current installer receipt verified. TransactionId='$($activeReceiptCheck.TransactionId)'; Version='$($activeReceiptCheck.ProductVersion)'."
+Write-UpgradeLog 'INFO' 'Upgrade gate accepted only receipt-backed installed files and MicBridge CLSID registration; legacy backups remain preserved and unused.'
 
 # ---- 2) نقطة استعادة (قد تفشل، لا بأس)
 try { Checkpoint-Computer -Description 'قبل MicBridge APO' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; Write-Host 'تم إنشاء نقطة استعادة' }
