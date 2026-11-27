@@ -19,7 +19,7 @@ $requiredReleasePatterns = [ordered]@{
     'PFX password environment secret' = 'MB_RELEASE_SIGNING_PFX_PASSWORD:\s*\$\{\{\s*secrets\.MB_RELEASE_SIGNING_PFX_PASSWORD\s*\}\}'
     'pinned SHA-1 certificate thumbprint' = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
     'pinned SHA-256 certificate fingerprint' = 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369'
-    'ephemeral private key storage' = 'EphemeralKeySet'
+    'persistent private-key container import' = 'Import-PfxCertificate[\\s\\S]{0,300}Cert:\\CurrentUser\\My'
     'attached CMS SignedData signature' = 'SignedCms'
     'post-signature verification' = 'Test-MBInstallProvenanceManifest'
     'temporary PFX cleanup' = 'Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force'
@@ -31,6 +31,7 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
+if ($release -match 'EphemeralKeySet') { throw 'Authenticode signing must not use ephemeral private-key storage.' }
 if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
     throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
 }
