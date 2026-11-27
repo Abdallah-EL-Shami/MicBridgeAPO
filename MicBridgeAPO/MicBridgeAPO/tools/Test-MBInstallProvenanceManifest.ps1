@@ -11,7 +11,10 @@ try {
         throw
     }
 }
-Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallPackageFileLease.psm1') -Force
+$leaseModule=Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallPackageFileLease.psm1') -Force -PassThru
+if($null -eq $leaseModule -or -not $leaseModule.ExportedFunctions.ContainsKey('Open-MBInstallPackageFileLease') -or -not $leaseModule.ExportedFunctions.ContainsKey('Close-MBInstallPackageFileLease')) {
+    throw 'FAIL: package lease module did not export its required public functions.'
+}
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Force
 
 $root=Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeProvenance-' + [guid]::NewGuid().ToString('N'))
@@ -105,13 +108,13 @@ try {
     $nestedFile=Join-Path $nestedDir 'nested.bin'
     [IO.File]::WriteAllBytes($nestedFile,[byte[]](9,8,7,6))
     $nestedHash=(Get-FileHash -LiteralPath $nestedFile -Algorithm SHA256).Hash
-    $nestedLease=Open-MBInstallPackageFileLease -CandidatePath $nestedFile -InstallRoot $root -ExpectedSha256 $nestedHash
+    $nestedLease=& $leaseModule.ExportedFunctions['Open-MBInstallPackageFileLease'] -CandidatePath $nestedFile -InstallRoot $root -ExpectedSha256 $nestedHash
     $directoryRenameBlocked=$false
     try { [IO.Directory]::Move($nestedDir,(Join-Path $root 'nested-payload-moved')) }
     catch [IO.IOException] { $directoryRenameBlocked=$true }
     catch [UnauthorizedAccessException] { $directoryRenameBlocked=$true }
     if(-not $directoryRenameBlocked -or -not (Test-Path -LiteralPath $nestedFile -PathType Leaf)) {
-        Close-MBInstallPackageFileLease -LeaseResult $nestedLease
+        & $leaseModule.ExportedFunctions['Close-MBInstallPackageFileLease'] -LeaseResult $nestedLease
         throw 'FAIL: a parent package directory could be renamed while a descendant payload lease was held.'
     }
     Close-MBInstallPackageFileLease -LeaseResult $nestedLease
