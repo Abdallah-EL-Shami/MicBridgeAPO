@@ -9,8 +9,9 @@ $manifestVerifierPath = Join-Path $projectRoot 'tools\MicBridge.InstallProvenanc
 $buildWorkflowPath = Join-Path $repositoryRoot '.github\workflows\build.yml'
 $releaseWorkflowPath = Join-Path $repositoryRoot '.github\workflows\signed-release.yml'
 $readinessPath = Join-Path $projectRoot 'SECURITY-READINESS-AND-RELEASE-GATES.md'
+$launcherDesignPath = Join-Path $repositoryRoot 'docs\BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md'
 
-foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath)) {
+foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "FAIL: required bootstrap contract input is missing: $required" }
 }
 
@@ -27,6 +28,7 @@ $verifier = [IO.File]::ReadAllText($manifestVerifierPath)
 $buildWorkflow = [IO.File]::ReadAllText($buildWorkflowPath)
 $releaseWorkflow = [IO.File]::ReadAllText($releaseWorkflowPath)
 $readiness = [IO.File]::ReadAllText($readinessPath)
+$launcherDesign = [IO.File]::ReadAllText($launcherDesignPath)
 
 if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPolicy\s+AllSigned\s+-File\s+"%~dp0install\.ps1"\s*$') {
     throw 'FAIL: install.bat must launch install.ps1 with AllSigned and a script path anchored to the package directory.'
@@ -73,10 +75,15 @@ foreach ($workflow in @(@{Name='build.yml';Text=$buildWorkflow},@{Name='signed-r
 if ($releaseWorkflow -notmatch '(?s)\$scriptFiles\s*=.*?Set-AuthenticodeSignature.*?Get-AuthenticodeSignature.*?\$manifestBytes\s*=') {
     throw 'FAIL: release workflow must Authenticode-sign and verify every staged PowerShell script before creating the signed manifest.'
 }
+if ($launcherDesign -notmatch '(?im)Status: \*\*design approved for implementation planning; not implemented; production installation remains blocked\.\*\*' -or
+    $launcherDesign -notmatch '(?im)Required verification sequence' -or
+    $launcherDesign -notmatch '(?im)Required negative and adversarial tests') {
+    throw 'FAIL: independent native launcher design and its blocked/not-implemented status must remain present.'
+}
 if ($readiness -notmatch '(?im)Bootstrap trust boundary \(not yet closed\)' -or
     $readiness -notmatch '(?im)Execution policy is not a security boundary') {
     throw 'FAIL: security readiness document must explicitly retain the unresolved bootstrap trust limitation.'
 }
 
-Write-Host 'PASS: Current bootstrap limitation is explicitly detected and not misrepresented as independently trusted. Static ordering and release-signing contracts were also checked.'
+Write-Host 'PASS: Current bootstrap limitation is explicitly detected and not misrepresented as independently trusted. Static ordering, release-signing contracts, and the independent launcher design/status were also checked.'
 Write-Host 'LIMIT: this test documents a known unresolved bootstrap flaw. It does not establish trust, validate Windows trust-store state, or authorize production installation.'
