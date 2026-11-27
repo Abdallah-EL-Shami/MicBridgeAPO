@@ -80,6 +80,18 @@ try {
     try { Test-MBLegacyApprovalSignature @verifyArgs | Out-Null } catch { $staleRejected = $true }
     if (-not $staleRejected) { throw 'FAIL: signed approval survived candidate content change.' }
 
+    # Same bytes at the same path but a different NTFS file identity must not inherit approval.
+    [IO.File]::WriteAllBytes($dll,[byte[]](10,20,30,40,50))
+    $replacement = Join-Path $root 'replacement.dll'
+    [IO.File]::WriteAllBytes($replacement,[byte[]](10,20,30,40,50))
+    [IO.File]::Delete($dll)
+    [IO.File]::Move($replacement,$dll)
+    $sameBytesReplacementRejected = $false
+    try { Test-MBLegacyApprovalSignature @verifyArgs | Out-Null } catch {
+        $sameBytesReplacementRejected = $_.Exception.ToString() -match 'identity|file|approved'
+    }
+    if (-not $sameBytesReplacementRejected) { throw 'FAIL: approval accepted a replacement file with identical bytes but a different file identity.' }
+
     # Restore the candidate so this next assertion isolates journal-digest binding.
     [IO.File]::WriteAllBytes($dll,[byte[]](10,20,30,40,50))
     $journalBytes = [IO.File]::ReadAllBytes($journalPath)
