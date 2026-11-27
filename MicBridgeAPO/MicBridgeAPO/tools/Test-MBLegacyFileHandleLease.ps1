@@ -64,6 +64,23 @@ try {
             Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 ('0' * 64) | Out-Null
         } catch { $wrongHashRejected = $true }
         if (-not $wrongHashRejected) { throw 'FAIL: incorrect expected hash was accepted.' }
+
+        $wrongIdentityRejected = $false
+        try {
+            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash -ExpectedIdentity '00000000:0000000000000000' | Out-Null
+        } catch { $wrongIdentityRejected = $_.Exception.Message -match 'identity differs' }
+        if (-not $wrongIdentityRejected) { throw 'FAIL: incorrect approved file identity was accepted.' }
+
+        # Failed hash/identity validation must release the exclusive file and directory handles.
+        $reopenAfterRejectedApproval = $false
+        $probe = $null
+        try {
+            $probe = [IO.File]::Open($dll,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+            $reopenAfterRejectedApproval = $true
+        } finally { if ($probe) { $probe.Dispose() } }
+        if (-not $reopenAfterRejectedApproval) {
+            throw 'FAIL: rejected approval validation leaked an exclusive handle.'
+        }
     } finally {
         Close-MBLegacyExclusiveFileLease -LeaseResult $leaseResult
     }
@@ -121,7 +138,7 @@ namespace MicBridgeHandleLeaseHardLink {
         if (-not $outsideRejected) { throw 'FAIL: candidate outside install root was accepted.' }
     } finally { Remove-Item -LiteralPath $outside -Force }
 
-    Write-Host 'PASS: exclusive file and pinned ancestor/root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes, and out-of-root paths are rejected. No deletion occurs.'
+    Write-Host 'PASS: exclusive file and pinned ancestor/root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes/identities and out-of-root paths are rejected; rejected approvals release all handles. No deletion occurs.'
 } finally {
     Remove-Item -LiteralPath $sandboxParent -Recurse -Force -ErrorAction SilentlyContinue
 }
