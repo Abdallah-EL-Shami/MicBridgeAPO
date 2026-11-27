@@ -180,6 +180,17 @@ namespace MicBridgeHandleLeaseHardLink {
         if (-not $outsideRejected) { throw 'FAIL: candidate outside install root was accepted.' }
     } finally { Remove-Item -LiteralPath $outside -Force }
 
+    # Alternate data streams share a file identity but are not the primary file content.
+    $adsPath=$dll + ':MicBridgeLeaseTestStream'
+    try {
+        [IO.File]::WriteAllBytes($adsPath,[byte[]](3,1,4,1,5))
+        $adsHash=(Get-FileHash -LiteralPath $adsPath -Algorithm SHA256).Hash
+        $adsRejected=$false
+        try { Open-MBLegacyExclusiveFileLease -CandidatePath $adsPath -InstallRoot $root -ExpectedSha256 $adsHash | Out-Null }
+        catch { $adsRejected=$_.Exception.Message -match 'Alternate data streams' }
+        if(-not $adsRejected) { throw 'FAIL: alternate data stream was accepted as a standalone cleanup candidate.' }
+    } finally { Remove-Item -LiteralPath $adsPath -Force -ErrorAction SilentlyContinue }
+
     Write-Host 'PASS: exclusive file and pinned ancestor/root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes/identities and out-of-root paths are rejected; rejected approvals release all handles. No deletion occurs.'
 } finally {
     Remove-Item -LiteralPath $sandboxParent -Recurse -Force -ErrorAction SilentlyContinue
