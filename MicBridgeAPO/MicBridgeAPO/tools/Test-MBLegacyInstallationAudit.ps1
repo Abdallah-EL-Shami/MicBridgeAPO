@@ -89,7 +89,7 @@ try {
     if($tampered.Outcome -ne 'ReviewRequired' -or $tampered.BaselineAssessment -ne 'InvalidOrInsufficient') { throw 'FAIL: tampered permanent COM backup was accepted' }
     $legacyEvidenceHash=(Get-FileHash $backupJson -Algorithm SHA256).Hash
     $ignoredLegacy=Test-MBLegacyInstallationState -InstallDirectory $install -DataDirectory $data -RegistryRoot $registryRoot -ExpectedDeviceId $expectedDevice -IgnoreLegacyRecoveryBackups
-    if($ignoredLegacy.BaselineAssessment -ne 'IgnoredLegacyEvidence' -or $ignoredLegacy.Findings | Where-Object { $_.Classification -eq 'InvalidOrInsufficient' }) {
+    if($ignoredLegacy.BaselineAssessment -ne 'IgnoredLegacyEvidence' -or @($ignoredLegacy.Findings | Where-Object { $_.Classification -eq 'InvalidOrInsufficient' }).Count -gt 0) {
         throw 'FAIL: clean-install audit did not ignore malformed legacy recovery backup content.'
     }
     if((Get-FileHash $backupJson -Algorithm SHA256).Hash -ne $legacyEvidenceHash) { throw 'FAIL: ignoring legacy recovery evidence modified backup.json.' }
