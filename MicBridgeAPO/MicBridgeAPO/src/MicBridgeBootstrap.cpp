@@ -6,6 +6,6 @@ int wmain()
     // pinning, and an authenticated installer handoff are implemented.
     std::wcerr
         << L"MicBridgeBootstrap: verification is not implemented; "
-        << L"installation is blocked.\\n";
+        << L"installation is blocked.\n";
     return 78;
 }
