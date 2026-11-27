@@ -381,6 +381,11 @@ foreach ($candidate in $receiptCandidates) {
         if (-not [string]::Equals([string]$candidateResult.InstallRoot,$expectedInstallRoot,[StringComparison]::OrdinalIgnoreCase)) {
             throw 'Receipt belongs to a different installation root.'
         }
+        $actualBaselineSha256 = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ([string]::IsNullOrWhiteSpace([string]$candidateResult.BaselineEvidenceSha256) -or
+            -not [string]::Equals([string]$candidateResult.BaselineEvidenceSha256,$actualBaselineSha256,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Receipt does not authenticate the current v2 recovery baseline; uninstall stopped before changes.'
+        }
         $verifiedInstallReceipt = $candidateResult
         break
     } catch {
