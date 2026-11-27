@@ -128,9 +128,10 @@ jobs:
           if ($uiVersion -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw "Invalid package version: $uiVersion" }
           $uiScriptPath = Join-Path $package 'MicBridgeUI.ps1'
           $uiScript = Get-Content -LiteralPath $uiScriptPath -Raw
-          $versionAssignment = [regex]::Matches($uiScript, "(?m)^\$appVersion\s*=\s*'[^']*'\s*$")
+          $versionPattern = '(?m)^\$appVersion\s*=\s*''[^'']*''\s*$'
+          $versionAssignment = [regex]::Matches($uiScript, $versionPattern)
           if ($versionAssignment.Count -ne 1) { throw 'Expected exactly one UI version assignment before package signing.' }
-          $uiScript = [regex]::Replace($uiScript, "(?m)^\$appVersion\s*=\s*'[^']*'\s*$", ('$appVersion = ' + "'" + $uiVersion + "'"))
+          $uiScript = [regex]::Replace($uiScript, $versionPattern, ('$appVersion = ' + "'" + $uiVersion + "'"))
           [IO.File]::WriteAllText($uiScriptPath,$uiScript,[Text.UTF8Encoding]::new($false))
           # The installer imports this module from $PSScriptRoot\tools.
           # Keep the same relative layout in the staged package.
