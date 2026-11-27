@@ -30,6 +30,17 @@ The default output directory is `%USERPROFILE%\Documents\MicBridgeAPO-Signing`. 
 
 Do not install the certificate automatically from the installer or from the same package that contains it. The signed release artifact now carries `MicBridgeAPO-Release.cer`; first compare its SHA-1 thumbprint (`29BAC42BFC53F2586559A9B95D1FEEB658E8891A`) and SHA-256 fingerprint (`CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369`) with these values obtained through this separately trusted project record. Then, and only then, manually import the exact public certificate into the target machine's **Local Machine → Trusted Root Certification Authorities** and **Local Machine → Trusted Publishers** stores. This is a deliberate trust decision and requires administrator approval; the installer never performs it.
 
+To verify the downloaded public certificate before importing it, run from the package directory:
+
+```powershell
+$cer = Join-Path $PWD 'MicBridgeAPO-Release.cer'
+$cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cer)
+$cert.Thumbprint
+(Get-FileHash -LiteralPath $cer -Algorithm SHA256).Hash
+```
+
+Both values must match the fingerprints above. Then open `certlm.msc` as an administrator and import this same `.cer` separately under **Trusted Root Certification Authorities → Certificates** and **Trusted Publishers → Certificates**. Do not import a PFX or private key on the target machine. After enrollment, run the signed installer directly from PowerShell with `-ExecutionPolicy AllSigned`; do not run an unsigned wrapper as the trust bootstrap.
+
 The script deliberately reports `TrustInstalled=false` and `ReleaseSigningEnabled=false`. It does not modify any certificate store.
 
 ## Protected tag-only release signing workflow
