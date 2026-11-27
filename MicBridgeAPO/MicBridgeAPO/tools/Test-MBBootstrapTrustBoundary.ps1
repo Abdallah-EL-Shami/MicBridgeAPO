@@ -32,6 +32,14 @@ if ($batch -notmatch '(?im)^\s*powershell(?:\.exe)?\s+-NoProfile\s+-ExecutionPol
     throw 'FAIL: install.bat must launch install.ps1 with AllSigned and a script path anchored to the package directory.'
 }
 
+$verifierImportIndex = $installer.IndexOf('Import-Module -Name $provenanceVerifier',[StringComparison]::Ordinal)
+$verifyCallIndex = $installer.IndexOf('$verifiedPackage = Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
+if ($verifierImportIndex -lt 0 -or $verifyCallIndex -lt 0 -or $verifierImportIndex -ge $verifyCallIndex) {
+    throw 'FAIL: bootstrap audit expected to detect the current verifier-module execution before manifest verification; review and replace this test when an independent bootstrap is implemented.'
+}
+if ($readiness -notmatch '(?im)verifier module is imported and executed before the manifest check') {
+    throw 'FAIL: readiness document must explicitly disclose that the package verifier executes before package authentication.'
+}
 $verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
 $elevationIndex = $installer.IndexOf('Start-Process powershell -Verb RunAs',[StringComparison]::Ordinal)
 $diagnosticIndex = $installer.IndexOf('function Resolve-MBLogPath',[StringComparison]::Ordinal)
@@ -67,5 +75,5 @@ if ($readiness -notmatch '(?im)Bootstrap trust boundary \(not yet closed\)' -or
     throw 'FAIL: security readiness document must explicitly retain the unresolved bootstrap trust limitation.'
 }
 
-Write-Host 'PASS: AllSigned launcher, pre-elevation/pre-log/pre-lock package gate, pinned-file request, non-authorization flags, release script-signing order, and documented unresolved bootstrap boundary are contract-checked.'
-Write-Host 'LIMIT: this is a static source contract; it does not prove Windows trust-store state or resist an operator deliberately bypassing PowerShell execution policy.'
+Write-Host 'PASS: Current bootstrap limitation is explicitly detected and not misrepresented as independently trusted. Static ordering and release-signing contracts were also checked.'
+Write-Host 'LIMIT: this test documents a known unresolved bootstrap flaw. It does not establish trust, validate Windows trust-store state, or authorize production installation.'
