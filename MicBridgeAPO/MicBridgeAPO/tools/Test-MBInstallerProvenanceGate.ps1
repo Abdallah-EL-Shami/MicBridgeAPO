@@ -10,6 +10,12 @@ foreach ($path in @($installerPath,$buildWorkflowPath,$releaseWorkflowPath)) {
 }
 $installer = Get-Content -LiteralPath $installerPath -Raw
 $build = Get-Content -LiteralPath $buildWorkflowPath -Raw
+$launcherPath = Join-Path $repoRoot 'MicBridgeAPO/MicBridgeAPO/install.bat'
+if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { throw 'Installer launcher is missing.' }
+$launcher = Get-Content -LiteralPath $launcherPath -Raw
+if ($launcher -notmatch '(?i)install[.]ps1[" ]+[-]PublisherSignatureVerified' -or $launcher -notmatch '(?i)-ExecutionPolicy Bypass') {
+    throw 'FAIL: install.bat must invoke the documented manual-trust continuation switch and Bypass policy; signature enforcement is performed by the installer before module import.'
+}
 $release = Get-Content -LiteralPath $releaseWorkflowPath -Raw
 
 $manualTrustIndex = $installer.IndexOf('if (-not $PublisherSignatureVerified)',[StringComparison]::Ordinal)
