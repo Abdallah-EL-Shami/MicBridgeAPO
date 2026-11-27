@@ -124,9 +124,10 @@ if ($trustSource -notmatch '(?s)WTD_REVOKE_NONE' -or
     $trustSource -notmatch '(?s)WTD_CACHE_ONLY_URL_RETRIEVAL' -or
     $trustSource -notmatch '(?s)WTD_STATEACTION_CLOSE' -or
     $revocationDesign -notmatch '(?im)does \*\*not\*\* establish fresh revocation status' -or
-    $revocationDesign -notmatch '(?im)Strict online release validation' -or
-    $revocationDesign -notmatch '(?im)Offline-capable pinned-certificate policy') {
-    throw 'FAIL: Authenticode revocation behavior and its online/offline limitation must be explicit and consistent with the native verifier flags.'
+    $revocationDesign -notmatch '(?im)Selected project policy: offline-capable pinned-certificate policy' -or
+    $revocationDesign -notmatch '(?im)Do not generate a certificate per build' -or
+    $revocationDesign -notmatch '(?im)independently authenticated channel') {
+    throw 'FAIL: Native verifier flags must match the selected offline pinned-certificate policy, single active signer, and independently authenticated rotation procedure.'
 }
 
 if ($readiness -notmatch '(?im)Bootstrap trust boundary \(not yet closed\)' -or
