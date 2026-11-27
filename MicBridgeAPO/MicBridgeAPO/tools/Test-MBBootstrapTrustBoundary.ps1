@@ -9,6 +9,7 @@ $manifestVerifierPath = Join-Path $projectRoot 'tools\MicBridge.InstallProvenanc
 $buildWorkflowPath = Join-Path $repositoryRoot '.github\workflows\build.yml'
 $releaseWorkflowPath = Join-Path $repositoryRoot '.github\workflows\signed-release.yml'
 $readinessPath = Join-Path $projectRoot 'SECURITY-READINESS-AND-RELEASE-GATES.md'
+$manualBootstrapGuidePath = Join-Path $projectRoot 'INSTALL-TRUST-AR.md'
 $launcherDesignPath = Join-Path $repositoryRoot 'docs\BOOTSTRAP-LAUNCHER-SECURITY-DESIGN.md'
 $cmakePath = Join-Path $projectRoot 'CMakeLists.txt'
 $launcherSourcePath = Join-Path $projectRoot 'src\MicBridgeBootstrap.cpp'
@@ -17,7 +18,7 @@ $trustHeaderPath = Join-Path $projectRoot 'src\MicBridgeBootstrapTrust.h'
 $signatureTestPath = Join-Path $projectRoot 'tests\bootstrap_signature_rejects_unsigned.cpp'
 $launcherTestPath = Join-Path $projectRoot 'tests\bootstrap_fail_closed.cpp'
 
-foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$launcherDesignPath,$cmakePath,$launcherSourcePath,$trustSourcePath,$trustHeaderPath,$signatureTestPath,$launcherTestPath)) {
+foreach ($required in @($installerPath,$batchPath,$manifestVerifierPath,$buildWorkflowPath,$releaseWorkflowPath,$readinessPath,$manualBootstrapGuidePath,$launcherDesignPath,$cmakePath,$launcherSourcePath,$trustSourcePath,$trustHeaderPath,$signatureTestPath,$launcherTestPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "FAIL: required bootstrap contract input is missing: $required" }
 }
 
@@ -34,6 +35,7 @@ $verifier = [IO.File]::ReadAllText($manifestVerifierPath)
 $buildWorkflow = [IO.File]::ReadAllText($buildWorkflowPath)
 $releaseWorkflow = [IO.File]::ReadAllText($releaseWorkflowPath)
 $readiness = [IO.File]::ReadAllText($readinessPath)
+$manualBootstrapGuide = [IO.File]::ReadAllText($manualBootstrapGuidePath)
 $launcherDesign = [IO.File]::ReadAllText($launcherDesignPath)
 $cmake = [IO.File]::ReadAllText($cmakePath)
 $launcherSource = [IO.File]::ReadAllText($launcherSourcePath)
