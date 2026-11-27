@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
 }
 Import-Module -Name $provenanceVerifier -Force -ErrorAction Stop
 $trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
-$verifiedPackage = Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $manifestSignaturePath -InstallDirectory $PSScriptRoot -TrustedSignerThumbprints @($trustedReleaseThumbprint)
+$verifiedPackage = Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $manifestSignaturePath -InstallDirectory $PSScriptRoot -TrustedSignerThumbprints @($trustedReleaseThumbprint) -PinFiles
 if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVerified -or
     -not $verifiedPackage.FileProvenanceVerified -or
     $verifiedPackage.SignerThumbprint -ne $trustedReleaseThumbprint -or
