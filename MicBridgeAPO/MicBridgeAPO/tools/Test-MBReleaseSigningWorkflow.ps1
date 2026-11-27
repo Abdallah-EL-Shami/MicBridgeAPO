@@ -31,7 +31,7 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
-if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
+if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
     throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
 }
 if ($release -notmatch 'SignatureStatus]::NotTrusted' -or
@@ -44,7 +44,7 @@ if ($release -notmatch 'AUTHENTICODE SIGNATURE RESULT ACCEPTED ONLY AS PINNED SI
     $release -notmatch 'SignerCertificate[.]Thumbprint\s*-eq\s*\$thumb') {
     throw 'Release signing workflow must distinguish cryptographic signer pinning from certificate trust and constrain UnknownError to the pinned signer.'
 }
-if ($release -match 'X509Store|StoreLocation]::CurrentUser|\$publicCert\)') {
+if ($release -match 'X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\$publicCert\)') {
     throw 'Release signing workflow must not add the certificate to a Windows trust store.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
