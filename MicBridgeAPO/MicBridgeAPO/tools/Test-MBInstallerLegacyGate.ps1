@@ -72,10 +72,11 @@ $cleanupOnly = @('MicBridge.LegacyCleanupPlan.psm1','MicBridge.LegacyCleanupJour
 foreach ($name in $cleanupOnly) {
     if ($source.Contains($name) -or $workflow.Contains($name)) { throw "FAIL: unapproved legacy cleanup prototype is connected: $name" }
 }
-$modules = @('MicBridge.RecoveryJournal.psm1','MicBridge.InstallRollbackValidation.psm1','MicBridge.FullInstallRollbackExecutor.psm1','MicBridge.LegacyInstallAudit.psm1','MicBridge.RegistryAclRollback.psm1','MicBridge.InstallTransactionReceipt.psm1','MicBridge.InstallPackageFileLease.psm1')
+$modules = @('MicBridge.RecoveryJournal.psm1','MicBridge.InstallRollbackValidation.psm1','MicBridge.FullInstallRollbackExecutor.psm1','MicBridge.LegacyInstallAudit.psm1','MicBridge.RegistryAclRollback.psm1','MicBridge.InstallTransactionReceipt.psm1')
 foreach ($name in $modules) {
     if (-not $source.Contains($name) -or -not $workflow.Contains($name)) { throw "FAIL: installer dependency is missing from source or package staging: $name" }
 }
+if (-not $workflow.Contains('MicBridge.InstallPackageFileLease.psm1')) { throw 'FAIL: package staging omits the package file lease module required by the provenance verifier.' }
 if (-not $workflow.Contains('Test-MBInstallerLegacyGate.ps1') -or -not $workflow.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll'")) {
     throw 'FAIL: CI must run this gate test and stage the built APO DLL.'
 }
