@@ -74,6 +74,9 @@ try {
     if (-not $result.IsReadOnly -or $result.CleanupAllowed -or $result.OriginalWindowsBaselineProven) {
         throw 'FAIL: audit claimed mutation permission or a proven original Windows baseline'
     }
+    if ($result.OwnershipProven -ne $false -or $result.OwnershipEvidenceStatus -ne 'NotEstablished') {
+        throw 'FAIL: audit overstated historical MicBridge ownership without independent provenance.'
+    }
     if ($result.Outcome -eq 'NoLegacyResidueDetected') { throw 'FAIL: product-owned test candidates were not inventoried' }
 
     # Tampering or endpoint mismatch invalidates the baseline candidate without changing the live state.
