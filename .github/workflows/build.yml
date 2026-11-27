@@ -162,6 +162,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) { throw "Required legacy audit module missing: $legacyAuditModule" }
           Copy-Item -LiteralPath $legacyAuditModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.LegacyInstallAudit.psm1') -PathType Leaf)) { throw 'Legacy audit module was not staged in the required tools directory.' }
+          $legacyInventory = Join-Path $source 'tools/Inspect-MBLegacyInstallation.ps1'
+          if (-not (Test-Path -LiteralPath $legacyInventory -PathType Leaf)) { throw "Required read-only legacy inventory command missing: $legacyInventory" }
+          Copy-Item -LiteralPath $legacyInventory -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'Inspect-MBLegacyInstallation.ps1') -PathType Leaf)) { throw 'Read-only legacy inventory command was not staged in the required tools directory.' }
           $aclRollbackModule = Join-Path $source 'tools/MicBridge.RegistryAclRollback.psm1'
           if (-not (Test-Path -LiteralPath $aclRollbackModule -PathType Leaf)) { throw "Required ACL rollback module missing: $aclRollbackModule" }
           Copy-Item -LiteralPath $aclRollbackModule -Destination $toolsPackage
