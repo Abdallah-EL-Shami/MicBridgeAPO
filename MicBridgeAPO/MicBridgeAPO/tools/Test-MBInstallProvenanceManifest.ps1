@@ -387,6 +387,21 @@ try {
     catch { $comClaimRejected=$_.Exception.Message -match 'COM registration claims are unsupported' }
     if(-not $comClaimRejected) { throw 'FAIL: schema v1 accepted COM metadata that has no authenticated ownership semantics.' }
 
+    # Guard the race between the initial package enumeration and acquisition of all file leases.
+    $verifierSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'MicBridge.InstallProvenanceManifest.psm1') -Raw
+    $pinLoopIndex=$verifierSource.IndexOf('foreach($record in $verified)',[StringComparison]::Ordinal)
+    $postPinEnumerationIndex=$verifierSource.IndexOf('$pinnedActualFiles=',[StringComparison]::Ordinal)
+    $leaseReturnIndex=$verifierSource.IndexOf('[pscustomobject]@{',[StringComparison]::Ordinal)
+    if($pinLoopIndex -lt 0 -or $postPinEnumerationIndex -le $pinLoopIndex -or $leaseReturnIndex -le $postPinEnumerationIndex) {
+        throw 'FAIL: verifier must re-enumerate and compare the exact package file set after all mutation-resistant file leases are held.'
+    }
+    $postPinRegion=$verifierSource.Substring($postPinEnumerationIndex,$leaseReturnIndex-$postPinEnumerationIndex)
+    foreach($requiredPostPinCheck in @('Get-ChildItem -LiteralPath $root -Force -Recurse','FileAttributes]::ReparsePoint','$pinnedActualFiles.Count -ne $seen.Count','Install tree contains a file outside the signed manifest after pinning')) {
+        if($postPinRegion -notmatch [regex]::Escape($requiredPostPinCheck)) {
+            throw "FAIL: post-pin package revalidation is missing invariant: $requiredPostPinCheck"
+        }
+    }
+
     Write-Host 'PASS: signed manifest trust, signer purpose, transaction identity and file hashes verified; COM ownership and execution remain unproven.'
 } finally {
     if($cert){$cert.Dispose()}
