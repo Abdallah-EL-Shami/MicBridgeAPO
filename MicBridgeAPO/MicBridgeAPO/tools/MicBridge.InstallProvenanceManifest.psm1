@@ -162,7 +162,15 @@ function Test-MBInstallProvenanceManifest {
         if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Install tree contains a reparse point: $($entry.FullName)"
         }
-        if($entry.PSIsContainer) { continue }
+        if($entry.PSIsContainer) {
+            # Every package directory must contain a descendant entry. Empty leaf
+            # directories have no file lease to pin their path against replacement.
+            $firstChild=Get-ChildItem -LiteralPath $entry.FullName -Force -ErrorAction Stop | Select-Object -First 1
+            if($null -eq $firstChild) {
+                throw "Install tree contains an empty directory that cannot be covered by a payload lease: $($entry.FullName)"
+            }
+            continue
+        }
         $full=[IO.Path]::GetFullPath($entry.FullName)
         if([string]::Equals($full,$manifestFull,[StringComparison]::OrdinalIgnoreCase) -or
            [string]::Equals($full,$signatureFull,[StringComparison]::OrdinalIgnoreCase)) { continue }
@@ -209,7 +217,13 @@ function Test-MBInstallProvenanceManifest {
                 if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
                     throw "Install tree changed to contain a reparse point while pinning: $($entry.FullName)"
                 }
-                if($entry.PSIsContainer) { continue }
+                if($entry.PSIsContainer) {
+                    $firstChild=Get-ChildItem -LiteralPath $entry.FullName -Force -ErrorAction Stop | Select-Object -First 1
+                    if($null -eq $firstChild) {
+                        throw "Install tree gained or retained an empty directory during pinning: $($entry.FullName)"
+                    }
+                    continue
+                }
                 $full=[IO.Path]::GetFullPath($entry.FullName)
                 if([string]::Equals($full,$manifestFull,[StringComparison]::OrdinalIgnoreCase) -or
                    [string]::Equals($full,$signatureFull,[StringComparison]::OrdinalIgnoreCase)) { continue }
