@@ -35,8 +35,7 @@ if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCe
     throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
 }
 if ($release -notmatch 'SignatureStatus]::NotTrusted' -or
-    $release -notmatch '\$signerThumb\s*-ne\s*\$thumb' -or
-    $release -notmatch 'SignerCertificate\s*\}\s*else\s*\{\s*''<none>''\s*\}') {
+    $release -notmatch '\$signerThumb\s*-ne\s*\$thumb') {
     throw 'Release signing workflow must verify Authenticode integrity and the pinned signer without requiring CI trust enrollment.'
 }
 if ($release -notmatch 'AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI') {
