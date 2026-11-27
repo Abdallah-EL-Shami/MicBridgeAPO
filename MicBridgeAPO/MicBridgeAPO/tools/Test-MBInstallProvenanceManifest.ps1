@@ -256,7 +256,8 @@ try {
     $restoreExpiredCms.ComputeSignature($restoreExpiredSigner)
     [IO.File]::WriteAllBytes($signaturePath,$restoreExpiredCms.Encode())
 
-    $wrongTrust=$false    try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
+    $wrongTrust=$false
+    try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
     $revokedSignerRejected=$false
     try {
