@@ -70,7 +70,8 @@ try {
     if((Get-Command Test-MBInstallProvenanceManifest).Parameters.ContainsKey('RequireCertificateRevocation')) {
         throw 'FAIL: online certificate revocation option must not be exposed by the offline verifier.'
     }
-    $ok=Test-MBInstallProvenanceManifest @args
+    $pinArgs=$args.Clone();$pinArgs.PinFiles=$true
+    $ok=Test-MBInstallProvenanceManifest @pinArgs
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
        $ok.CertificateChainValidated -or $ok.CertificateDownloadsDisabled -or $ok.RevocationChecked -or $ok.CertificateRevocationMode -ne 'NotCheckedOffline' -or $ok.IsReleaseTrustEstablished -or
