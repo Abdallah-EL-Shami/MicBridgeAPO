@@ -28,6 +28,14 @@ if(MICBRIDGE_BUILD_APO)
     target_link_libraries(MicBridgeAPO PRIVATE ws2_32 ole32 iphlpapi)
 endif()
 
+if(WIN32)
+    # This bootstrap is intentionally non-operational until its independent
+    # signature, manifest, file-handle, and handoff checks are implemented.
+    add_executable(MicBridgeBootstrap src/MicBridgeBootstrap.cpp)
+    target_compile_options(MicBridgeBootstrap PRIVATE /W4 /permissive- /EHsc)
+    target_compile_definitions(MicBridgeBootstrap PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
 if(BUILD_TESTING)
     add_executable(micbridge_core_tests tests/core_tests.cpp)
     target_include_directories(micbridge_core_tests PRIVATE src)
@@ -37,6 +45,13 @@ if(BUILD_TESTING)
         target_compile_options(micbridge_core_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME micbridge_core_tests COMMAND micbridge_core_tests)
+
+    if(WIN32)
+        add_executable(micbridge_bootstrap_fail_closed tests/bootstrap_fail_closed.cpp)
+        target_compile_options(micbridge_bootstrap_fail_closed PRIVATE /W4 /permissive- /EHsc)
+        add_test(NAME micbridge_bootstrap_fail_closed
+            COMMAND micbridge_bootstrap_fail_closed $<TARGET_FILE:MicBridgeBootstrap>)
+    endif()
 
     if(WIN32)
         add_executable(micbridge_udp_broadcast_share_smoke tests/udp_broadcast_share_smoke.cpp)
