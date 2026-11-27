@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\\..\\..')).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $installerPath = Join-Path $repoRoot 'MicBridgeAPO/install.ps1'
 $buildWorkflowPath = Join-Path $repoRoot '.github/workflows/build.yml'
 $releaseWorkflowPath = Join-Path $repoRoot '.github/workflows/signed-release.yml'
@@ -20,9 +20,9 @@ if ($verifyIndex -lt 0 -or $elevationIndex -lt 0 -or $diagnosticsIndex -lt 0 -or
     throw 'FAIL: signed package verification must execute before elevation, logging, locks, or installer preflight.'
 }
 foreach ($pattern in @(
-    'install-manifest\\.json',
-    'install-manifest\\.p7s',
-    'MicBridge\\.InstallProvenanceManifest\\.psm1',
+    'install-manifest[.]json',
+    'install-manifest[.]p7s',
+    'MicBridge[.]InstallProvenanceManifest[.]psm1',
     '29BAC42BFC53F2586559A9B95D1FEEB658E8891A',
     'SignatureVerified',
     'ManifestVerified',
@@ -46,11 +46,11 @@ if ($serviceIndex -lt 0 -or $receiptCreateIndex -le $serviceIndex -or
     throw 'FAIL: receipt must be created and verified after successful system setup and before transaction cleanup/completion.'
 }
 foreach ($pattern in @(
-    'MicBridgeAPO\\.dll',
-    'MicBridgeUI\\.ps1',
-    'MicBridgeUI\\.bat',
-    'uninstall\\.ps1',
-    'uninstall\\.bat',
+    'MicBridgeAPO[.]dll',
+    'MicBridgeUI[.]ps1',
+    'MicBridgeUI[.]bat',
+    'uninstall[.]ps1',
+    'uninstall[.]bat',
     'OwnershipProven',
     'ComOwnershipProven',
     'IsExecutionAuthorized'
@@ -60,11 +60,11 @@ foreach ($pattern in @(
 if ($installer -notmatch 'ReceiptIntegrityVerified' -or $installer -notmatch 'InstalledFilesVerified') {
     throw 'FAIL: installer does not independently verify the persisted receipt and installed file hashes.'
 }
-if ($build -notmatch 'MicBridge\\.InstallTransactionReceipt\\.psm1' -or
-    $build -notmatch 'Test-MBInstallerProvenanceGate\\.ps1') {
+if ($build -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
+    $build -notmatch 'Test-MBInstallerProvenanceGate[.]ps1') {
     throw 'FAIL: ordinary CI package staging or installer provenance integration test is missing.'
 }
-if ($release -notmatch 'MicBridge\\.InstallTransactionReceipt\\.psm1' -or
+if ($release -notmatch 'MicBridge[.]InstallTransactionReceipt[.]psm1' -or
     $release -notmatch 'Test-MBInstallProvenanceManifest') {
     throw 'FAIL: signed release workflow must stage receipt support and verify the release manifest after signing.'
 }
