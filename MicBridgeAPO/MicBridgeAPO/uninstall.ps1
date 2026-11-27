@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`""
+    Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy AllSigned -NoExit -File `"$PSCommandPath`""
     exit
 }
 
