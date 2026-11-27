@@ -55,6 +55,44 @@ try {
     try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
 
+    # Altering the detached manifest bytes without re-signing must be rejected.
+    $signedManifestBytes=[IO.File]::ReadAllBytes($manifestPath)
+    $tamperedBytes=[byte[]]$signedManifestBytes.Clone()
+    $tamperedBytes[0]=[byte]([int]$tamperedBytes[0] -bxor 1)
+    [IO.File]::WriteAllBytes($manifestPath,$tamperedBytes)
+    $tamperedManifestRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null } catch { $tamperedManifestRejected=$_.Exception.Message -match 'Manifest bytes differ' }
+    if(-not $tamperedManifestRejected) { throw 'FAIL: manifest content changed after signing was accepted.' }
+    [IO.File]::WriteAllBytes($manifestPath,$signedManifestBytes)
+
+    # Even a correctly signed manifest must not permit traversal outside install root.
+    $traversalManifest=[ordered]@{
+        SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
+        InstallTransactionId=[guid]::NewGuid().ToString()
+        Files=@(@{RelativePath='../outside.dll';Sha256=$hash})
+        ComRegistrations=@()
+    }
+    $traversalBytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject ([pscustomobject]$traversalManifest) -Compress -Depth 8))
+    [IO.File]::WriteAllBytes($manifestPath,$traversalBytes)
+    $traversalCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($traversalBytes),$false)
+    $traversalSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $traversalSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $traversalCms.ComputeSignature($traversalSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$traversalCms.Encode())
+    $traversalRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null } catch { $traversalRejected=$_.Exception.Message -match 'unsafe relative path' }
+    if(-not $traversalRejected) { throw 'FAIL: signed manifest path traversal was accepted.' }
+
+    # Restore the valid signed manifest/signature before testing installed-file tampering.
+    [IO.File]::WriteAllBytes($manifestPath,$signedManifestBytes)
+    $originalCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($signedManifestBytes),$false)
+    $originalSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $originalSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $originalCms.ComputeSignature($originalSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$originalCms.Encode())
+
     [IO.File]::WriteAllBytes($bin,[byte[]](2,4,6,8,10))
     $hashMismatch=$false
     try { Test-MBInstallProvenanceManifest @args | Out-Null } catch { $hashMismatch=$_.Exception.Message -match 'Manifest file hash mismatch' }
