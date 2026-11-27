@@ -75,10 +75,10 @@ try {
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
        $ok.CertificateChainValidated -or $ok.CertificateDownloadsDisabled -or $ok.RevocationChecked -or $ok.CertificateRevocationMode -ne 'NotCheckedOffline' -or $ok.IsReleaseTrustEstablished -or
-       $ok.VerificationConsistency -ne 'ExclusiveHandlePinned' -or -not $ok.RaceSafeForExecution -or
+       $ok.VerificationConsistency -ne 'ExclusiveHandlePinned' -or -not $ok.PackageFilesPinnedForUse -or $ok.RaceSafeForExecution -or $ok.BootstrapTrustEstablished -or
        $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotCheckedOffline' -or
        -not $ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed -or -not $ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen) {
-        throw ('FAIL: manifest verification returned unsafe or incomplete capability flags: ' + (ConvertTo-Json -InputObject ([pscustomobject]@{Count=$ok.VerifiedFiles.Count;Consistency=$ok.VerificationConsistency;RaceSafe=$ok.RaceSafeForExecution;LeaseResult=$ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed;LeaseOpen=$ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen;Sha=$ok.VerifiedFiles[0].LeaseResult.Sha256;Expected=$hash}) -Compress))
+        throw ('FAIL: manifest verification returned unsafe or incomplete capability flags: ' + (ConvertTo-Json -InputObject ([pscustomobject]@{Count=$ok.VerifiedFiles.Count;Consistency=$ok.VerificationConsistency;FilesPinned=$ok.PackageFilesPinnedForUse;RaceSafe=$ok.RaceSafeForExecution;BootstrapTrust=$ok.BootstrapTrustEstablished;LeaseResult=$ok.VerifiedFiles[0].LeaseResult.FinalHandleValidationPassed;LeaseOpen=$ok.VerifiedFiles[0].LeaseResult.Lease.IsOpen;Sha=$ok.VerifiedFiles[0].LeaseResult.Sha256;Expected=$hash}) -Compress))
     }
     $writeBlocked=$false
     try {
