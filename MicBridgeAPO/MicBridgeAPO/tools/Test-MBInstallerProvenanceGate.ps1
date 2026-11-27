@@ -57,7 +57,8 @@ foreach ($pattern in @(
 )) {
     if ($installer -notmatch $pattern) { throw "FAIL: receipt integration is missing expected evidence/safety invariant: $pattern" }
 }
-if ($installer -notmatch '-TransactionId \(\[guid\]::Parse\(\[string\]\$verifiedPackage\.InstallTransactionId\)\)' -or
+if ($installer -notmatch '-TransactionId \(\[guid\]::Parse\(\[string\]\$rollbackJournal\.TransactionId\)\)' -or
+    $installer -notmatch '-ReleaseManifestTransactionId \(\[guid\]::Parse\(\[string\]\$verifiedPackage\.InstallTransactionId\)\)' -or
     $installer -notmatch 'ReceiptIntegrityVerified' -or $installer -notmatch 'InstalledFilesVerified') {
     throw 'FAIL: installer does not independently verify the persisted receipt and installed file hashes.'
 }
