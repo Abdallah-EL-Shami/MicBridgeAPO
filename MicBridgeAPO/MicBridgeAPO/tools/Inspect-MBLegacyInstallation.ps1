@@ -4,20 +4,25 @@ param(
     [string]$DataDirectory = (Join-Path $env:ProgramData 'MicBridgeAPO'),
     [ValidatePattern('^(HKLM:|HKCU:)\\.*$')]
     [string]$RegistryRoot = 'HKLM:\',
-    [guid]$ExpectedDeviceId = [guid]::Empty,
-    [Parameter(Mandatory)]
-    [switch]$PublisherSignatureVerified
+    [guid]$ExpectedDeviceId = [guid]::Empty
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $PublisherSignatureVerified) {
-    throw 'Verify this script signature and compare the publisher SHA-256/SHA-1 pins in INSTALL-TRUST-AR.md before rerunning with -PublisherSignatureVerified. No system changes were attempted.'
-}
-
 $trustedReleaseThumbprint = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
 $trustedReleaseCertificateSha256 = 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369'
+
+# Check this entrypoint's Authenticode integrity and pinned publisher before
+# importing any module or inspecting system state. The operator must still
+# compare this script's fingerprint out-of-band before invoking it.
+$scriptSignature = Get-AuthenticodeSignature -FilePath $PSCommandPath
+if ($scriptSignature.Status -notin @([System.Management.Automation.SignatureStatus]::Valid,[System.Management.Automation.SignatureStatus]::NotTrusted) -or
+    $null -eq $scriptSignature.SignerCertificate -or
+    -not $scriptSignature.SignerCertificate.Thumbprint.Equals($trustedReleaseThumbprint,[StringComparison]::OrdinalIgnoreCase) -or
+    -not $scriptSignature.SignerCertificate.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256).Equals($trustedReleaseCertificateSha256,[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Inventory entrypoint signature or pinned publisher identity is invalid. No system inspection or changes were attempted.'
+}
 $modulePath = Join-Path $PSScriptRoot 'MicBridge.LegacyInstallAudit.psm1'
 if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
     throw "Read-only audit module is missing: $modulePath"
