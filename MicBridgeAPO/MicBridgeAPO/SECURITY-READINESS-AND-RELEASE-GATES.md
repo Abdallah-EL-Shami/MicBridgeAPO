@@ -6,7 +6,24 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed successful run for the current recovery branch is run **1607** (`46048429140`) on commit `20dacc0bbec24a3aaf3acd33485071afdc6fdc76` (`recovery/provenance-from-run-1548`). Every job step passed, including build, Windows APO COM smoke test, installer/rollback checks, legacy audit and approval tests, signed manifest verification, mutation-resistant package file leases, transaction receipt, installer provenance gate, Windows PowerShell 5.1 compatibility, release-workflow invariants, isolated COM rollback, DLL/file/metadata rollback, endpoint rollback, package staging, and artifact upload. This is a CI validation result for that exact commit, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership. Runs 1603–1606 failed in test/fixture integration; the parser defect was corrected in commit `20dacc0`, and run 1607 passed.
+The latest confirmed CI run on the current recovery branch is run **1610** (`46048931118`) on commit `46270f4e485787e3f4d897625fb4a2eb766afceb`; runs 1607–1610 completed successfully on their respective commits. Run 1607 (`46048429140`) is the latest fully inspected end-to-end build/test/artifact result. Runs 1608–1610 confirm the subsequent documentation and release-workflow invariant changes. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
+
+## Bootstrap trust boundary (not yet closed)
+
+The current package has two separate mechanisms that must not be conflated:
+
+- The release workflow Authenticode-signs staged PowerShell scripts and verifies signature integrity plus the pinned signer thumbprint in CI. CI deliberately accepts `NotTrusted` for this integrity check and does not enroll the self-signed certificate.
+- The package manifest is CMS-signed and checked by the PowerShell verifier. The verifier itself is part of the package, so it cannot be the independent root that authenticates its own first execution.
+
+`install.bat` only launches `install.ps1` with `-ExecutionPolicy AllSigned`. PowerShell execution policy is not a security boundary against a user who can invoke PowerShell differently or replace the bootstrap. Therefore the batch wrapper and the manifest verifier do not establish bootstrap trust.
+
+Before production use, select and implement one independently trusted bootstrap model:
+1. A separately distributed, Authenticode-signed native launcher whose signer is already trusted on the target and which verifies the package manifest before launching any package script; or
+2. A documented manual bootstrap procedure where the operator independently obtains and compares the certificate fingerprint, deliberately provisions the exact public certificate, verifies the signed package, and only then invokes the installer.
+
+For either model, add negative tests for a modified launcher, modified verifier, altered certificate, wrong signer thumbprint, missing trust anchor, and tampered package; prove that no elevation, logging, lock creation, registry/COM change, or file mutation occurs before verification. Do not treat a certificate shipped inside the same untrusted archive as an independent trust anchor. Do not claim protection against a hostile local administrator.
+
+No launcher implementation or target-machine trust enrollment is approved by this change. Until one bootstrap model is selected, implemented, and independently reviewed, BootstrapTrustEstablished must remain false and production installation remains blocked.
 
 ## Manifest verifier limitations
 
