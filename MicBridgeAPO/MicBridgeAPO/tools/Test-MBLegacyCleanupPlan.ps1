@@ -13,6 +13,8 @@ try {
     $audit = [pscustomobject]@{
         IsReadOnly = $true
         CleanupAllowed = $false
+        OwnershipProven = $false
+        OwnershipEvidenceStatus = 'NotEstablished'
         OriginalWindowsBaselineProven = $false
         Outcome = 'ReviewRequired'
         Findings = @(
@@ -35,8 +37,14 @@ try {
     if (-not ($plan.Items | Where-Object { $_.Name -eq 'user.ini' -and $_.ProposedAction -eq 'Preserve' })) {
         throw 'FAIL: data file was not preserved.'
     }
-    if (-not ($plan.Items | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' -and $_.ProposedAction -eq 'CandidateForReviewedRemoval' })) {
-        throw 'FAIL: verified product DLL was not limited to reviewed-removal candidate.'
+    if (-not ($plan.Items | Where-Object { $_.Name -eq 'MicBridgeAPO.dll' -and $_.ProposedAction -eq 'Preserve' })) {
+        throw 'FAIL: DLL without independent ownership provenance was not preserved.'
+    }
+    if (-not ($plan.Blockers | Where-Object { $_ -match 'Product binary ownership' })) {
+        throw 'FAIL: missing independent DLL ownership provenance did not block cleanup review.'
+    }
+    if (-not ($plan.Items | Where-Object { $_.Name -eq 'COM CLSID' -and $_.ProposedAction -eq 'Preserve' })) {
+        throw 'FAIL: COM registration without independent ownership provenance was not preserved.'
     }
     if ((Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash -ne $before) {
         throw 'FAIL: planning modified a file.'
