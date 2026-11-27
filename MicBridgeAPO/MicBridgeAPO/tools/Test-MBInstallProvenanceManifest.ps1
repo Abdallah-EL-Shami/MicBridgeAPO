@@ -117,7 +117,7 @@ try {
         & $leaseModule.ExportedFunctions['Close-MBInstallPackageFileLease'] -LeaseResult $nestedLease
         throw 'FAIL: a parent package directory could be renamed while a descendant payload lease was held.'
     }
-    Close-MBInstallPackageFileLease -LeaseResult $nestedLease
+    & $leaseModule.ExportedFunctions['Close-MBInstallPackageFileLease'] -LeaseResult $nestedLease
     $movedNestedDir=Join-Path $root 'nested-payload-moved'
     [IO.Directory]::Move($nestedDir,$movedNestedDir)
     Remove-Item -LiteralPath $movedNestedDir -Recurse -Force
@@ -127,8 +127,7 @@ try {
     $unlistedPath=Join-Path $root 'unlisted-payload.bin'
     [IO.File]::WriteAllBytes($unlistedPath,[byte[]](1,2,3,4))
     $unlistedRejected=$false
-    try { Test-MBInstallProvenanceManifest @args | Out-Null }
-    catch { $unlistedRejected=$_.Exception.Message -match 'file set differs|unlisted file' }
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }    catch { $unlistedRejected=$_.Exception.Message -match 'file set differs|unlisted file' }
     finally { Remove-Item -LiteralPath $unlistedPath -Force -ErrorAction SilentlyContinue }
     if(-not $unlistedRejected) { throw 'FAIL: package accepted a file not covered by the signed manifest.' }
 
@@ -257,8 +256,7 @@ try {
     $restoreExpiredCms.ComputeSignature($restoreExpiredSigner)
     [IO.File]::WriteAllBytes($signaturePath,$restoreExpiredCms.Encode())
 
-    $wrongTrust=$false
-    try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
+    $wrongTrust=$false    try { $bad=$args.Clone();$bad.TrustedSignerThumbprints=@('0000000000000000000000000000000000000000');Test-MBInstallProvenanceManifest @bad | Out-Null } catch { $wrongTrust=$true }
     if(-not $wrongTrust) { throw 'FAIL: untrusted manifest signer was accepted.' }
     $revokedSignerRejected=$false
     try {
@@ -387,8 +385,7 @@ try {
     $duplicateCms.ComputeSignature($duplicateSigner)
     [IO.File]::WriteAllBytes($signaturePath,$duplicateCms.Encode())
     $duplicateRejected=$false
-    try { Test-MBInstallProvenanceManifest @args | Out-Null }
-    catch { $duplicateRejected=$_.Exception.Message -match 'duplicate file path' }
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }    catch { $duplicateRejected=$_.Exception.Message -match 'duplicate file path' }
     if(-not $duplicateRejected) { throw 'FAIL: case-insensitive duplicate manifest paths were accepted.' }
 
     # Schema v1 must not let signed-but-unmodeled COM metadata masquerade as ownership evidence.
