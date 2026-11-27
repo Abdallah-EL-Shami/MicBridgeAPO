@@ -16,14 +16,15 @@ $releaseWorkflow=[IO.File]::ReadAllText((Join-Path $repoRoot '..\..\.github\work
 foreach($workflow in @($buildWorkflow,$releaseWorkflow)) {
     if(-not $workflow.Contains("Inspect-MBLegacyInstallation.ps1")) { throw 'FAIL: inventory command is not staged in both unsigned CI and signed release packages.' }
 }
-$trust=$source.IndexOf('if (-not $PublisherSignatureVerified)',[StringComparison]::Ordinal)
-$signature=$source.IndexOf('Get-AuthenticodeSignature -FilePath $modulePath',[StringComparison]::Ordinal)
+$entrySignature=$source.IndexOf('Get-AuthenticodeSignature -FilePath $PSCommandPath',[StringComparison]::Ordinal)
+$moduleSignature=$source.IndexOf('Get-AuthenticodeSignature -FilePath $modulePath',[StringComparison]::Ordinal)
 $import=$source.IndexOf('Import-Module -Name $modulePath',[StringComparison]::Ordinal)
 $audit=$source.IndexOf('Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
 $json=$source.IndexOf('ConvertTo-Json -Depth 8',[StringComparison]::Ordinal)
-if($trust -lt 0 -or $signature -le $trust -or $import -le $signature -or $audit -le $import -or $json -le $audit) {
-    throw 'FAIL: manual trust, pinned module signature, import, read-only audit and report ordering is invalid.'
+if($entrySignature -lt 0 -or $moduleSignature -le $entrySignature -or $import -le $moduleSignature -or $audit -le $import -or $json -le $audit) {
+    throw 'FAIL: entrypoint and module signatures must be pinned and verified before import, audit and report.'
 }
+if($source.Contains('PublisherSignatureVerified')) { throw 'FAIL: inventory command must not rely on a caller-supplied trust bypass switch.' }
 foreach($required in @('29BAC42BFC53F2586559A9B95D1FEEB658E8891A','CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369','CleanupAllowed = $false','OwnershipProven = $false','OriginalWindowsBaselineProven = $false','-ExpectedDeviceId $ExpectedDeviceId')) {
     if(-not $source.Contains($required)) { throw "FAIL: inventory trust/report contract missing: $required" }
 }
