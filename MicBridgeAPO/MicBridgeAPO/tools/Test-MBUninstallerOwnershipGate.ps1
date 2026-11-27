@@ -31,4 +31,17 @@ if (-not $source.Contains('Remove-Item -LiteralPath $apoRegistrationPath') -or -
     throw 'FAIL: expected COM cleanup actions changed; review the uninstaller contract test.'
 }
 
+$receiptModuleLoad = $source.IndexOf("Import-Module -Name $receiptModule -Force -ErrorAction Stop",[StringComparison]::Ordinal)
+$receiptVerify = $source.IndexOf('Test-MBInstallTransactionReceipt -ReceiptPath $candidate.FullName -VerifyInstalledFiles',[StringComparison]::Ordinal)
+$receiptFailClosed = $source.IndexOf('No valid machine-bound install receipt verified the current MicBridge files. Uninstall stopped before changes.',[StringComparison]::Ordinal)
+$receiptBeforeAudit = $source.IndexOf('$legacyAudit = Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
+$receiptBeforeJournal = $source.IndexOf('New-MBRecoveryJournal -Path $uninstallJournal',[StringComparison]::Ordinal)
+if ($receiptModuleLoad -lt 0 -or $receiptVerify -le $receiptModuleLoad -or $receiptFailClosed -le $receiptVerify -or
+    $receiptBeforeAudit -le $receiptFailClosed -or $receiptBeforeJournal -le $receiptFailClosed) {
+    throw 'FAIL: uninstaller must verify the install receipt and fail closed before legacy audit/journal/mutations.'
+}
+$receiptGateText = $source.Substring($receiptModuleLoad,[Math]::Max(0,$receiptBeforeAudit-$receiptModuleLoad))
+foreach ($required in @('$candidateResult.InstalledFilesVerified','$candidateResult.OwnershipProven -or $candidateResult.ComOwnershipProven','$candidateResult.IsExecutionAuthorized','$candidateResult.InstallRoot')) {
+    if (-not $receiptGateText.Contains($required)) { throw "FAIL: receipt gate is missing required verification/safety invariant: $required" }
+}
 Write-Host 'PASS: uninstaller parses and refuses to proceed before journal or system mutation unless independent ownership evidence is explicitly Proven.'
