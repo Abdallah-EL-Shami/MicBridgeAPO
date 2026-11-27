@@ -75,6 +75,7 @@ jobs:
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerProvenanceGate.ps1
       - name: Test Authenticode bootstrap and AllSigned enforcement (temporary certificate)
         shell: pwsh
+        timeout-minutes: 2
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBAuthenticodeBootstrap.ps1
       - name: Test provenance modules under Windows PowerShell 5.1
         shell: pwsh
