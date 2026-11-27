@@ -115,6 +115,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $recoveryModule -PathType Leaf)) { throw "Required recovery module missing: $recoveryModule" }
           Copy-Item -LiteralPath $recoveryModule -Destination $toolsPackage
           if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.RecoveryJournal.psm1') -PathType Leaf)) { throw 'Recovery module was not staged in the required tools directory.' }
+          $receiptModule = Join-Path $source 'tools/MicBridge.InstallTransactionReceipt.psm1'
+          if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw "Required transaction receipt module missing: $receiptModule" }
+          Copy-Item -LiteralPath $receiptModule -Destination $toolsPackage
+          if (-not (Test-Path -LiteralPath (Join-Path $toolsPackage 'MicBridge.InstallTransactionReceipt.psm1') -PathType Leaf)) { throw 'Transaction receipt module was not staged in the required tools directory.' }
           $provenanceModule = Join-Path $source 'tools/MicBridge.InstallProvenanceManifest.psm1'
           if (-not (Test-Path -LiteralPath $provenanceModule -PathType Leaf)) { throw "Required provenance verifier missing: $provenanceModule" }
           Copy-Item -LiteralPath $provenanceModule -Destination $toolsPackage
