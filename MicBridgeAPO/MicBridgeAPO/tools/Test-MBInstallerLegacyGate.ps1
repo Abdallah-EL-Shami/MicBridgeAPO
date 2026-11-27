@@ -39,6 +39,24 @@ if ($auditCall1 -lt 0 -or $auditCall2 -le $auditCall1 -or $upgradeCheckpoint -le
 if (-not $workflowSource.Contains("Copy-Item -LiteralPath `$legacyAuditModule -Destination `$toolsPackage")) {
     throw 'FAIL: package staging does not include the required legacy audit module.'
 }
+
+# Legacy cleanup planning, approval and handle-lease prototypes must remain outside
+# the installer/package until race-safe path-relative deletion is independently proven.
+$cleanupOnlyModules = @(
+    'MicBridge.LegacyCleanupPlan.psm1',
+    'MicBridge.LegacyCleanupJournal.psm1',
+    'MicBridge.LegacyCleanupPreflight.psm1',
+    'MicBridge.LegacyApprovalSignature.psm1',
+    'MicBridge.LegacyFileHandleLease.psm1'
+)
+foreach ($moduleName in $cleanupOnlyModules) {
+    if ($source.Contains($moduleName)) {
+        throw "FAIL: installer references cleanup prototype '$moduleName' before security approval."
+    }
+    if ($workflowSource.Contains($moduleName)) {
+        throw "FAIL: install package stages cleanup prototype '$moduleName' before security approval."
+    }
+}
 if (-not $workflowSource.Contains('Test-MBInstallerLegacyGate.ps1')) {
     throw 'FAIL: CI workflow does not run this installer-gate contract test.'
 }
