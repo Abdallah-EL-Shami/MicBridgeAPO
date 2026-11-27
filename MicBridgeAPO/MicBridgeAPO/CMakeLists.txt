@@ -31,9 +31,26 @@ endif()
 if(WIN32)
     # This bootstrap is intentionally non-operational until its independent
     # signature, manifest, file-handle, and handoff checks are implemented.
-    add_executable(MicBridgeBootstrap src/MicBridgeBootstrap.cpp)
+    add_executable(MicBridgeBootstrap
+        src/MicBridgeBootstrap.cpp
+        src/MicBridgeBootstrapTrust.cpp
+    )
     target_compile_options(MicBridgeBootstrap PRIVATE /W4 /permissive- /EHsc)
     target_compile_definitions(MicBridgeBootstrap PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(MicBridgeBootstrap PRIVATE wintrust crypt32 bcrypt)
+
+    if(BUILD_TESTING)
+        add_executable(micbridge_bootstrap_signature_test
+            tests/bootstrap_signature_rejects_unsigned.cpp
+            src/MicBridgeBootstrapTrust.cpp
+        )
+        target_include_directories(micbridge_bootstrap_signature_test PRIVATE src)
+        target_compile_options(micbridge_bootstrap_signature_test PRIVATE /W4 /permissive- /EHsc)
+        target_compile_definitions(micbridge_bootstrap_signature_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_link_libraries(micbridge_bootstrap_signature_test PRIVATE wintrust crypt32 bcrypt)
+        add_test(NAME micbridge_bootstrap_rejects_unsigned
+            COMMAND micbridge_bootstrap_signature_test $<TARGET_FILE:micbridge_bootstrap_fail_closed>)
+    endif()
 endif()
 
 if(BUILD_TESTING)
