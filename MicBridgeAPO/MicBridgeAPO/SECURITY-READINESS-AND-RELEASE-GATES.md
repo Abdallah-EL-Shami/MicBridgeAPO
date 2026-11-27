@@ -6,7 +6,7 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed CI baseline before the Authenticode verifier component is run **1636** (`46052536960`) on commit `2863ee6a2d9894c54f4c473fd17afc57128cb2c`. Newer verifier-component changes require fresh CI confirmation. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
+The latest confirmed CI baseline for the native Authenticode verifier component is run **1649** (`46053400168`) on commit `f0077fddc762b93d281276483b021f1c2f4a9240`. This run completed the Windows build, CTest suite, bootstrap trust-boundary static contract, provenance/receipt tests, rollback tests, and package staging. It validates the current component and fail-closed scaffold, not a production launcher or trust handoff. These are CI validation results, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership.
 
 ## Bootstrap trust boundary (not yet closed)
 
