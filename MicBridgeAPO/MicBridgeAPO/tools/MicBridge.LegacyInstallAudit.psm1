@@ -31,7 +31,8 @@ function Test-MBLegacyInstallationState {
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string]$DataDirectory,
         [string]$RegistryRoot = 'HKLM:\',
-        [guid]$ExpectedDeviceId = [guid]::Empty
+        [guid]$ExpectedDeviceId = [guid]::Empty,
+        [switch]$IgnoreLegacyRecoveryBackups
     )
 
     # Read-only audit. No Registry, file, ACL, service, or shortcut mutations.
@@ -47,13 +48,13 @@ function Test-MBLegacyInstallationState {
         [pscustomobject]@{Name='AudioEngine APO';Path=($RegistryRoot+'\SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\'+$clsid)}
     )
     $findings=[Collections.Generic.List[object]]::new()
-    $baselineAssessment='NotPresent'
+    $baselineAssessment=if($IgnoreLegacyRecoveryBackups){'IgnoredLegacyEvidence'}else{'NotPresent'}
     $backupJson=Join-Path $dataFull 'backup.json'
 
     # Validate the immutable first-install backup as evidence, never as proof of
     # the true Windows baseline. Hashes establish integrity only against the
     # manifest; they cannot prove that the captured values were historically correct.
-    if(Test-Path -LiteralPath $backupJson) {
+    if((Test-Path -LiteralPath $backupJson) -and -not $IgnoreLegacyRecoveryBackups) {
         try {
             $backupItem=Get-Item -LiteralPath $backupJson -Force -ErrorAction Stop
             if(($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'backup.json is a reparse point.' }
@@ -110,7 +111,7 @@ function Test-MBLegacyInstallationState {
     }
 
     $compositeJson=Join-Path $dataFull 'composite-efx-backup.json'
-    if(Test-Path -LiteralPath $compositeJson) {
+    if((Test-Path -LiteralPath $compositeJson) -and -not $IgnoreLegacyRecoveryBackups) {
         try {
             $compositeItem=Get-Item -LiteralPath $compositeJson -Force -ErrorAction Stop
             if(($compositeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Composite EFX backup is a reparse point.' }
@@ -217,7 +218,7 @@ function Test-MBLegacyInstallationState {
     }
 
     $legacyArtifacts=@($findings | Where-Object { $_.Classification -in @('MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate','MicBridgeRecoveryEvidence') })
-    if($baselineAssessment -eq 'NotPresent' -and $legacyArtifacts.Count -gt 0) {
+    if(-not $IgnoreLegacyRecoveryBackups -and $baselineAssessment -eq 'NotPresent' -and $legacyArtifacts.Count -gt 0) {
         $baselineAssessment='Missing'
         $findings.Add([pscustomobject]@{Kind='PermanentBackup';Name='backup.json';Classification='MissingPermanentBackup';Path=$backupJson;ServerPath=$null;Sha256=$null})
     }
