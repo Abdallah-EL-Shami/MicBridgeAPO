@@ -17,8 +17,7 @@ function Test-MBInstallProvenanceManifest {
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
         [string[]]$RevokedSignerThumbprints=@(),
-        [switch]$RequireCertificateChain,
-        [switch]$RequireCertificateRevocation
+        [switch]$RequireCertificateChain
     )
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
     $manifestFull=Test-MBRegularNonReparseFile -Path $ManifestPath -Label 'Manifest'
@@ -76,29 +75,25 @@ function Test-MBInstallProvenanceManifest {
     if($null -eq $eku -or -not (([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$eku).EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' })) {
         throw 'Manifest signer certificate must contain the Code Signing EKU.'
     }
-    if($RequireCertificateRevocation -and -not $RequireCertificateChain) {
-        throw 'Certificate revocation checking requires strict certificate-chain validation.'
-    }
     $chainValidated=$false
+    $certificateDownloadsDisabled=$false
     $revocationChecked=$false
     if($RequireCertificateChain) {
         $chain=[Security.Cryptography.X509Certificates.X509Chain]::new()
         try {
-            $chain.ChainPolicy.RevocationMode=$(if($RequireCertificateRevocation){
-                [Security.Cryptography.X509Certificates.X509RevocationMode]::Online
-            }else{
-                [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-            })
+            # Offline-only chain validation: use certificates already present in
+            # the Windows certificate stores. Never fetch intermediates or CRLs.
+            $chain.ChainPolicy.RevocationMode=[Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
             $chain.ChainPolicy.RevocationFlag=[Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
-            $chain.ChainPolicy.UrlRetrievalTimeout=[TimeSpan]::FromSeconds(15)
+            $chain.ChainPolicy.DisableCertificateDownloads=$true
+            $certificateDownloadsDisabled=$true
             $chain.ChainPolicy.VerificationFlags=[Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
             [void]$chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
             $chainValidated=$chain.Build($signer)
             if(-not $chainValidated) {
                 $status=(@($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) -join ', ')
-                throw "Manifest signer certificate chain is not trusted for Code Signing: $status"
+                throw "Manifest signer certificate chain is not trusted using locally available certificates: $status"
             }
-            if($RequireCertificateRevocation) { $revocationChecked=$true }
         } finally { $chain.Dispose() }
     }
     if(-not ([Convert]::ToBase64String([byte[]]$cms.ContentInfo.Content) -ceq [Convert]::ToBase64String([byte[]]$manifestBytes))) {
@@ -152,10 +147,11 @@ function Test-MBInstallProvenanceManifest {
         VerificationConsistency='PathBasedNonAtomic'
         RaceSafeForExecution=$false
         CertificateChainValidated=$chainValidated
-        RevocationChecked=$revocationChecked
+        CertificateDownloadsDisabled=$certificateDownloadsDisabled
+        RevocationChecked=$false
         CallerRevocationDenylistChecked=($revoked.Count -gt 0)
-        CertificateRevocationMode=$(if($revocationChecked){'OnlineExcludeRoot'}else{'NotChecked'})
-        SignerRevocationStatus=$(if($revoked.Count -gt 0){'NotListedInCallerDenylist'}elseif($revocationChecked){'CertificateChainRevocationChecked'}else{'NotChecked'})
+        CertificateRevocationMode='NotCheckedOffline'
+        SignerRevocationStatus=$(if($revoked.Count -gt 0){'NotListedInCallerDenylist'}else{'NotCheckedOffline'})
         IsReleaseTrustEstablished=$false
         OwnershipProven=$false
         ComOwnershipProven=$false
@@ -164,7 +160,7 @@ function Test-MBInstallProvenanceManifest {
         ProductVersion=[string]$manifest.ProductVersion
         InstallTransactionId=$transaction.ToString()
         VerifiedFiles=@($verified)
-        Note='Signed manifest and listed file hashes verified. This is provenance evidence only; it does not prove shared COM ownership or authorize deletion.'
+        Note='Signed manifest and listed file hashes verified. Certificate-chain building is offline-only and uses locally available certificates; revocation is not checked online. This is provenance evidence only; it does not prove shared COM ownership or authorize deletion.'
     }
 }
 
