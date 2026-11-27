@@ -38,7 +38,7 @@ $upgradeCheckpoint = $source.IndexOf("Checkpoint-Computer -Description 'قبل M
 if ($auditCall1 -lt 0 -or $auditCall2 -le $auditCall1 -or $upgradeCheckpoint -le $auditCall2) {
     throw 'FAIL: both first-install and upgrade paths must audit before the first restore-point/snapshot mutation.'
 }
-if (-not $source.Contains("$backupFile = Join-Path `$dataDir 'install-baseline-v2.json'") -or -not $source.Contains("$compositeBackupFile = Join-Path `$dataDir 'install-composite-baseline-v2.json'")) { throw 'FAIL: new installer must use fresh v2 baseline paths and leave legacy backup.json untouched.' }
+if (-not $source.Contains('$backupFile = Join-Path $dataDir ''install-baseline-v2.json''') -or -not $source.Contains('$compositeBackupFile = Join-Path $dataDir ''install-composite-baseline-v2.json''')) { throw 'FAIL: new installer must use fresh v2 baseline paths and leave legacy backup.json untouched.' }
 if (-not $source.Contains('Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles') -or -not $source.Contains('No current-installer receipt exists')) { throw 'FAIL: managed upgrade must require a valid current-installer receipt.' }
 if (-not $workflowSource.Contains("Copy-Item -LiteralPath `$legacyAuditModule -Destination `$toolsPackage")) {
     throw 'FAIL: package staging does not include the required legacy audit module.'
