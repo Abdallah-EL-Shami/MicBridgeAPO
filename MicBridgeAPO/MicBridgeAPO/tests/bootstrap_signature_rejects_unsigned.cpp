@@ -58,7 +58,9 @@ bool TestCertificatePinComparison()
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (!TestCertificatePinComparison()) return 6;\n\n    if (argc != 2) {
+    if (!TestCertificatePinComparison()) return 6;
+
+    if (argc != 2) {
         std::wcerr << L"Expected an unsigned test executable path.\n";
         return 2;
     }
