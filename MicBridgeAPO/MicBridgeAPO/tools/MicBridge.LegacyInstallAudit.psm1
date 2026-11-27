@@ -222,6 +222,8 @@ function Test-MBLegacyInstallationState {
         IsReadOnly=$true
         Outcome=$outcome
         CleanupAllowed=$false
+        OwnershipProven=$false
+        OwnershipEvidenceStatus='NotEstablished'
         OriginalWindowsBaselineProven=$false
         BaselineAssessment=$baselineAssessment
         Findings=@($findings)
