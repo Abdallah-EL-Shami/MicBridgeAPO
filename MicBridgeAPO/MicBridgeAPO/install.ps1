@@ -719,7 +719,7 @@ try {
         $ws = New-Object -ComObject WScript.Shell
         $lnk = $ws.CreateShortcut($shortcutTempPath)
         $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-        $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
+        $lnk.Arguments = "-NoProfile -ExecutionPolicy AllSigned -WindowStyle Hidden -File `"$installDir\MicBridgeUI.ps1`""
         $lnk.Save()
         $transactionState.ShortcutNewSha256 = (Get-FileHash -LiteralPath $shortcutTempPath -Algorithm SHA256 -ErrorAction Stop).Hash
         Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
