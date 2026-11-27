@@ -47,7 +47,9 @@ try {
     $args=@{ManifestPath=$manifestPath;SignaturePath=$signaturePath;InstallDirectory=$root;TrustedSignerThumbprints=@($cert.Thumbprint)}
     $ok=Test-MBInstallProvenanceManifest @args
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
-       $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1) {
+       $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
+       $ok.CertificateChainValidated -or $ok.RevocationChecked -or $ok.IsReleaseTrustEstablished -or
+       $ok.VerificationConsistency -ne 'PathBasedNonAtomic' -or $ok.RaceSafeForExecution) {
         throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
     }
 
