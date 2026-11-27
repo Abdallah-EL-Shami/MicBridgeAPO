@@ -225,7 +225,7 @@ function Test-MBInstallProvenanceManifest {
         ProductVersion=[string]$manifest.ProductVersion
         InstallTransactionId=$transaction.ToString()
         VerifiedFiles=@($verified)
-        Note='Signed manifest and listed file hashes verified, then every payload was re-opened and re-hashed through a mutation-resistant handle with parent directories pinned. Handles remain open in VerifiedFiles.LeaseResult until Close-MBInstallProvenanceLeases is called or the process exits. Certificate-chain building is offline-only; revocation is not checked online. This does not prove shared COM ownership or authorize deletion.'
+        Note=$(if($PinFiles){'Signed manifest and listed file hashes verified, then every payload was re-opened and re-hashed through a mutation-resistant handle with parent directories pinned. Handles remain open in VerifiedFiles.LeaseResult until Close-MBInstallProvenanceLeases is called or the process exits.'}else{'Signed manifest and listed file hashes verified by path. This mode is read-only provenance evidence and is not race-safe for execution.'}) + ' Certificate-chain building is offline-only; revocation is not checked online. This does not prove shared COM ownership or authorize deletion.'
     }
 }
 
