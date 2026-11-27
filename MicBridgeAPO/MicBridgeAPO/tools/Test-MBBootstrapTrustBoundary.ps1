@@ -37,7 +37,7 @@ $verifyCallIndex = $installer.IndexOf('$verifiedPackage = Test-MBInstallProvenan
 if ($verifierImportIndex -lt 0 -or $verifyCallIndex -lt 0 -or $verifierImportIndex -ge $verifyCallIndex) {
     throw 'FAIL: bootstrap audit expected to detect the current verifier-module execution before manifest verification; review and replace this test when an independent bootstrap is implemented.'
 }
-if ($readiness -notmatch '(?im)verifier module is imported and executed before the manifest check') {
+if ($readiness -notmatch '(?im)imported \.psm1 code therefore runs before the package authenticates that module') {
     throw 'FAIL: readiness document must explicitly disclose that the package verifier executes before package authentication.'
 }
 $verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
