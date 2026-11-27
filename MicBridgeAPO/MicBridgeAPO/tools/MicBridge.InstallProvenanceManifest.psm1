@@ -200,6 +200,33 @@ function Test-MBInstallProvenanceManifest {
                 $record | Add-Member -NotePropertyName LeaseResult -NotePropertyValue $leaseResult -Force
                 $leaseResults.Add($leaseResult)
             }
+            # Close the enumeration-to-handle race: once every payload and its
+            # parent chain is pinned, enumerate the package again while those
+            # directory handles remain open. Any file added, removed, renamed,
+            # or redirected before the complete pin set was established fails closed.
+            $pinnedActualFiles=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach($entry in @(Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction Stop)) {
+                if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Install tree changed to contain a reparse point while pinning: $($entry.FullName)"
+                }
+                if($entry.PSIsContainer) { continue }
+                $full=[IO.Path]::GetFullPath($entry.FullName)
+                if([string]::Equals($full,$manifestFull,[StringComparison]::OrdinalIgnoreCase) -or
+                   [string]::Equals($full,$signatureFull,[StringComparison]::OrdinalIgnoreCase)) { continue }
+                $relativeActual=$full.Substring($root.Length + 1).Replace('\\','/')
+                if(-not $pinnedActualFiles.Add($relativeActual)) {
+                    throw "Pinned install tree contains a duplicate normalized file path: $relativeActual"
+                }
+            }
+            if($pinnedActualFiles.Count -ne $seen.Count) {
+                throw "Install tree changed while package handles were being pinned: signed=$($seen.Count), pinned=$($pinnedActualFiles.Count)."
+            }
+            foreach($actualPath in $pinnedActualFiles) {
+                $candidate=[IO.Path]::GetFullPath((Join-Path $root $actualPath))
+                if(-not $seen.Contains($candidate)) {
+                    throw "Install tree contains a file outside the signed manifest after pinning: $actualPath"
+                }
+            }
         } catch {
             foreach($leaseResult in $leaseResults) {
                 try { Close-MBInstallPackageFileLease -LeaseResult $leaseResult } catch {}
