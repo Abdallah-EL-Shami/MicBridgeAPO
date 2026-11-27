@@ -267,17 +267,28 @@ jobs:
               $verifyMessage = [string]$checkedScript.StatusMessage
               $signerThumb = if ($null -ne $checkedScript.SignerCertificate) { [string]$checkedScript.SignerCertificate.Thumbprint } else { '<none>' }
               Write-Host ("AUTHENTICODE DIAGNOSTIC: file={0}; setStatus={1}; setMessage={2}; verifyStatus={3}; verifyMessage={4}; signerThumbprint={5}" -f $scriptFile.Name,$setStatus,$setMessage,$verifyStatus,$verifyMessage,$signerThumb)
-              $acceptedVerificationStatuses = @(
-                [Management.Automation.SignatureStatus]::Valid,
-                [Management.Automation.SignatureStatus]::NotTrusted
-              )
-              if ($signedScript.Status -notin $acceptedVerificationStatuses -or
-                  $checkedScript.Status -notin $acceptedVerificationStatuses -or
+              # PowerShell 7 on the hosted Windows runner reports this exact
+              # untrusted-root chain error as UnknownError for our pinned
+              # self-signed certificate. Accept no other UnknownError condition.
+              $isAcceptedAuthenticodeResult = {
+                param($signature)
+                if ($signature.Status -in @(
+                    [Management.Automation.SignatureStatus]::Valid,
+                    [Management.Automation.SignatureStatus]::NotTrusted)) { return $true }
+                return (
+                  $signature.Status -eq [Management.Automation.SignatureStatus]::UnknownError -and
+                  [string]$signature.StatusMessage -eq 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.' -and
+                  $null -ne $signature.SignerCertificate -and
+                  [string]$signature.SignerCertificate.Thumbprint -eq $thumb
+                )
+              }
+              if (-not (& $isAcceptedAuthenticodeResult $signedScript) -or
+                  -not (& $isAcceptedAuthenticodeResult $checkedScript) -or
                   $signerThumb -ne $thumb) {
                 throw "Authenticode signature integrity or pinned signer verification failed for package script: $($scriptFile.FullName); setStatus=$setStatus; setMessage=$setMessage; verifyStatus=$verifyStatus; verifyMessage=$verifyMessage; signer=$signerThumb"
               }
-              if ($checkedScript.Status -eq [Management.Automation.SignatureStatus]::NotTrusted) {
-                Write-Host "AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI: $($scriptFile.Name)"
+              if ($checkedScript.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+                Write-Host "AUTHENTICODE SIGNATURE RESULT ACCEPTED ONLY AS PINNED SIGNER WITH UNTRUSTED ROOT; TRUST NOT ESTABLISHED IN CI: $($scriptFile.Name)"
               }
             }
             Write-Host "AUTHENTICODE SCRIPTS VERIFIED: count=$($scriptFiles.Count); signer=$thumb"
