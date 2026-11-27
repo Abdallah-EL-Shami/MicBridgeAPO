@@ -86,7 +86,17 @@ try {
         $probe.Dispose()
     } catch [IO.IOException] { $writeBlocked=$true }
     if(-not $writeBlocked) { throw 'FAIL: verified package payload remained writable while its provenance lease was held.' }
+    $readProbe=[IO.File]::Open($bin,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try { if($readProbe.ReadByte() -ne 1) { throw 'FAIL: read access to a pinned package payload was not preserved.' } }
+    finally { $readProbe.Dispose() }
+    $deleteBlocked=$false
+    try { [IO.File]::Delete($bin) } catch [IO.IOException] { $deleteBlocked=$true }
+    if(-not $deleteBlocked -or -not (Test-Path -LiteralPath $bin -PathType Leaf)) {
+        throw 'FAIL: pinned package payload could be deleted or renamed during its protected use window.'
+    }
     Close-MBInstallProvenanceLeases -Verification $ok
+    $writeAfterRelease=[IO.File]::Open($bin,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+    $writeAfterRelease.Dispose()
 
     # A signed manifest must bind the complete package file set, not only
     # the subset it happens to list. Unlisted payloads are rejected.
