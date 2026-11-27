@@ -40,6 +40,9 @@ jobs:
       - name: Test read-only legacy installation audit (HKCU fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyInstallationAudit.ps1
+      - name: Test read-only legacy inventory command (static)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyInventoryCommand.ps1
       - name: Test read-only legacy cleanup planner (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyCleanupPlan.ps1
