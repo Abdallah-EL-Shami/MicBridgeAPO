@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $releasePath = Join-Path $repoRoot '.github/workflows/signed-release.yml'
 $buildPath = Join-Path $repoRoot '.github/workflows/build.yml'
 foreach ($path in @($releasePath,$buildPath)) {
