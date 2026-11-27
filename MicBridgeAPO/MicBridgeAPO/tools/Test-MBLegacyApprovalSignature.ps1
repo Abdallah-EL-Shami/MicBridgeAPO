@@ -55,6 +55,23 @@ try {
         throw 'FAIL: trusted CMS signature did not verify with safe capability flags.'
     }
 
+    # Retained-lease mode must keep the file and every path component pinned until
+    # the caller explicitly closes the lease; a rename/replacement must fail meanwhile.
+    $retained = Test-MBLegacyApprovalSignature @verifyArgs -RetainLease
+    if (-not $retained.LeaseRetained -or $null -eq $retained.LeaseResult -or
+        -not $retained.LeaseResult.Lease.IsOpen) {
+        throw 'FAIL: retained approval did not return an open exclusive file lease.'
+    }
+    $replaceBlocked = $false
+    try {
+        [IO.File]::Move($dll,(Join-Path $root 'blocked-replacement.dll'))
+    } catch { $replaceBlocked = $true }
+    if (-not $replaceBlocked) {
+        Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
+        throw 'FAIL: candidate rename succeeded while the exclusive lease was retained.'
+    }
+    Close-MBLegacyExclusiveFileLease -LeaseResult $retained.LeaseResult
+
     $wrongTrustRejected = $false
     try {
         $badTrustArgs = $verifyArgs.Clone()
