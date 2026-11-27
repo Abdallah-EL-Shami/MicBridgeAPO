@@ -61,8 +61,8 @@ if ($manualTrustIndex -lt 0 -or $scriptSignatureIndex -lt 0 -or $verifierImportI
 if ($installer -notmatch '(?s)-not\s+\$manualBootstrapTrustEstablished' -or
     $installer -notmatch '(?s)PublisherSignatureVerified' -or
     $installer -notmatch '(?s)SignatureStatus]::NotTrusted' -or
-    $installer -notmatch '(?s)SignerCertificate\.Thumbprint -ne \$trustedReleaseThumbprint'' -or
-    $installer -notmatch '(?s)SignerCertificate\.GetCertHashString.*trustedReleaseCertificateSha256) {
+    $installer -notmatch '(?s)SignerCertificate\.Thumbprint -ne \$trustedReleaseThumbprint' -or
+    $installer -notmatch '(?s)SignerCertificate\.GetCertHashString.*trustedReleaseCertificateSha256') {
     throw 'FAIL: installer must require explicit manual bootstrap confirmation and pin every script/module signature to the release signer.'
 }
 $verifyIndex = $installer.IndexOf('Test-MBInstallProvenanceManifest',[StringComparison]::Ordinal)
