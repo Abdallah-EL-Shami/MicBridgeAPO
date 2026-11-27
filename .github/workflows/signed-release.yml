@@ -67,6 +67,12 @@ jobs:
       - name: Test signed install provenance manifest (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest.ps1
+      - name: Test machine-bound install transaction provenance receipt (temp-only)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallTransactionReceipt.ps1
+      - name: Test installer signed-package gate and post-install receipt ordering (static)
+        shell: pwsh
+        run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallerProvenanceGate.ps1
       - name: Test exclusive legacy file handle lease (temp-only fixture)
         shell: pwsh
         run: ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBLegacyFileHandleLease.ps1
