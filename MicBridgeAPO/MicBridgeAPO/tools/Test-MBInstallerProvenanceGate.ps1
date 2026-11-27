@@ -62,7 +62,8 @@ if ($installer -notmatch '-TransactionId \(\[guid\]::Parse\(\[string\]\$rollback
     $installer -notmatch 'ReceiptIntegrityVerified' -or $installer -notmatch 'InstalledFilesVerified') {
     throw 'FAIL: installer does not independently verify the persisted receipt and installed file hashes.'
 }
-if ($installer -notmatch 'Close-MBInstallProvenanceLeases' -or
+if ($installer -notmatch 'Test-MBInstallProvenanceManifest[^\r\n]*-PinFiles' -or
+    $installer -notmatch 'Close-MBInstallProvenanceLeases' -or
     $installer -notmatch 'DllSource must resolve to the exact MicBridgeAPO[.]dll') {
     throw 'FAIL: installer must release package leases and bind DLL input to the signed package file.'
 }
