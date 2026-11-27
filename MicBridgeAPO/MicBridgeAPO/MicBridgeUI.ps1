@@ -51,14 +51,7 @@ function Update-AudioDgCpu {
     }
 }
 
-$versionFile = Join-Path $PSScriptRoot 'version.txt'
-$appVersion = 'unknown'
-try {
-    if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
-        $candidateVersion = (Get-Content -LiteralPath $versionFile -Raw -ErrorAction Stop).Trim()
-        if ($candidateVersion -match '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { $appVersion = $candidateVersion }
-    }
-} catch { }
+$appVersion = '0.1.1-dev'
 
 $form = New-Object Windows.Forms.Form
 $form.Text = "MicBridge v$appVersion"
