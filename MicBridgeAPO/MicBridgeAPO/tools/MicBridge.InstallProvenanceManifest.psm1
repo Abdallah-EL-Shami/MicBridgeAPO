@@ -16,7 +16,8 @@ function Test-MBInstallProvenanceManifest {
         [Parameter(Mandatory)][string]$SignaturePath,
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string[]]$TrustedSignerThumbprints,
-        [string[]]$RevokedSignerThumbprints=@()
+        [string[]]$RevokedSignerThumbprints=@(),
+        [switch]$RequireCertificateChain
     )
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs -ErrorAction Stop
     $manifestFull=Test-MBRegularNonReparseFile -Path $ManifestPath -Label 'Manifest'
@@ -74,6 +75,20 @@ function Test-MBInstallProvenanceManifest {
     if($null -eq $eku -or -not (([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$eku).EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' })) {
         throw 'Manifest signer certificate must contain the Code Signing EKU.'
     }
+    $chainValidated=$false
+    if($RequireCertificateChain) {
+        $chain=[Security.Cryptography.X509Certificates.X509Chain]::new()
+        try {
+            $chain.ChainPolicy.RevocationMode=[Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            $chain.ChainPolicy.VerificationFlags=[Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+            [void]$chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+            $chainValidated=$chain.Build($signer)
+            if(-not $chainValidated) {
+                $status=(@($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) -join ', ')
+                throw "Manifest signer certificate chain is not trusted for Code Signing: $status"
+            }
+        } finally { $chain.Dispose() }
+    }
     if(-not ([Convert]::ToBase64String([byte[]]$cms.ContentInfo.Content) -ceq [Convert]::ToBase64String([byte[]]$manifestBytes))) {
         throw 'Manifest bytes differ from the signed CMS content.'
     }
@@ -124,7 +139,7 @@ function Test-MBInstallProvenanceManifest {
         FileProvenanceVerified=$true
         VerificationConsistency='PathBasedNonAtomic'
         RaceSafeForExecution=$false
-        CertificateChainValidated=$false
+        CertificateChainValidated=$chainValidated
         RevocationChecked=$false
         CallerRevocationDenylistChecked=($revoked.Count -gt 0)
         SignerRevocationStatus=$(if($revoked.Count -gt 0){'NotListedInCallerDenylist'}else{'NotChecked'})
