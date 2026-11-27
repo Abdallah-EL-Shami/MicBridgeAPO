@@ -210,7 +210,9 @@ function Test-MBInstallProvenanceManifest {
         ManifestVerified=$true
         FileProvenanceVerified=$true
         VerificationConsistency=$(if($PinFiles){'ExclusiveHandlePinned'}else{'PathBasedNonAtomic'})
-        RaceSafeForExecution=[bool]$PinFiles
+        PackageFilesPinnedForUse=[bool]$PinFiles
+        RaceSafeForExecution=$false
+        BootstrapTrustEstablished=$false
         CertificateChainValidated=$chainValidated
         CertificateDownloadsDisabled=$certificateDownloadsDisabled
         RevocationChecked=$false
