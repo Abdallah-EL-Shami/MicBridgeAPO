@@ -10,10 +10,8 @@ namespace micbridge::bootstrap {
     bool VerifyPinnedAuthenticodeSigner(const std::wstring& filePath);
 }
 
-#ifdef MICBRIDGE_BOOTSTRAP_TESTING
 namespace micbridge::bootstrap {
     // Test-only seam; excluded from production builds and never used to set the production pin.
     bool TestCertificateEncodingMatchesSha256Pin(const BYTE* encoded, DWORD encodedSize,
                                                   const wchar_t* expectedSha256);
 }
-#endif
