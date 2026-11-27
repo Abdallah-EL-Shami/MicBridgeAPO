@@ -98,6 +98,62 @@ try {
     try { Test-MBInstallProvenanceManifest @args | Out-Null } catch { $hashMismatch=$_.Exception.Message -match 'Manifest file hash mismatch' }
     if(-not $hashMismatch) { throw 'FAIL: modified installed file passed manifest verification.' }
 
+
+    # A correctly signed manifest must still reject a path traversing a junction.
+    $outsideDir=Join-Path $root 'outside-target'
+    New-Item -ItemType Directory -Path $outsideDir | Out-Null
+    $outsideFile=Join-Path $outsideDir 'outside.dll'
+    [IO.File]::WriteAllBytes($outsideFile,[byte[]](31,41,59,26))
+    $outsideHash=(Get-FileHash -LiteralPath $outsideFile -Algorithm SHA256).Hash
+    $junctionPath=Join-Path $root 'manifest-junction'
+    New-Item -ItemType Junction -Path $junctionPath -Target $outsideDir -ErrorAction Stop | Out-Null
+    try {
+        $junctionManifest=[ordered]@{
+            SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
+            InstallTransactionId=[guid]::NewGuid().ToString()
+            Files=@(@{RelativePath='manifest-junction\\outside.dll';Sha256=$outsideHash})
+            ComRegistrations=@()
+        }
+        $junctionBytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject ([pscustomobject]$junctionManifest) -Compress -Depth 8))
+        [IO.File]::WriteAllBytes($manifestPath,$junctionBytes)
+        $junctionCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($junctionBytes),$false)
+        $junctionSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+            [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+        $junctionSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+        $junctionCms.ComputeSignature($junctionSigner)
+        [IO.File]::WriteAllBytes($signaturePath,$junctionCms.Encode())
+        $junctionRejected=$false
+        try { Test-MBInstallProvenanceManifest @args | Out-Null }
+        catch { $junctionRejected=$_.Exception.Message -match 'Manifest path traverses a reparse point' }
+        if(-not $junctionRejected) { throw 'FAIL: correctly signed manifest traversing a junction was accepted.' }
+    } finally {
+        Remove-Item -LiteralPath $junctionPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $outsideDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # Duplicate paths are rejected case-insensitively before file verification.
+    $duplicateManifest=[ordered]@{
+        SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
+        InstallTransactionId=[guid]::NewGuid().ToString()
+        Files=@(
+            @{RelativePath='MicBridgeAPO.dll';Sha256=$hash},
+            @{RelativePath='micbridgeapo.dll';Sha256=$hash}
+        )
+        ComRegistrations=@()
+    }
+    $duplicateBytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject ([pscustomobject]$duplicateManifest) -Compress -Depth 8))
+    [IO.File]::WriteAllBytes($manifestPath,$duplicateBytes)
+    $duplicateCms=[Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($duplicateBytes),$false)
+    $duplicateSigner=[Security.Cryptography.Pkcs.CmsSigner]::new(
+        [Security.Cryptography.Pkcs.SubjectIdentifierType]::IssuerAndSerialNumber,$cert)
+    $duplicateSigner.IncludeOption=[Security.Cryptography.X509Certificates.X509IncludeOption]::EndCertOnly
+    $duplicateCms.ComputeSignature($duplicateSigner)
+    [IO.File]::WriteAllBytes($signaturePath,$duplicateCms.Encode())
+    $duplicateRejected=$false
+    try { Test-MBInstallProvenanceManifest @args | Out-Null }
+    catch { $duplicateRejected=$_.Exception.Message -match 'duplicate file path' }
+    if(-not $duplicateRejected) { throw 'FAIL: case-insensitive duplicate manifest paths were accepted.' }
+
     Write-Host 'PASS: signed manifest trust, signer purpose, transaction identity and file hashes verified; COM ownership and execution remain unproven.'
 } finally {
     if($cert){$cert.Dispose()}
