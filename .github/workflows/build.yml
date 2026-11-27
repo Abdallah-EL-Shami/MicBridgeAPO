@@ -8,6 +8,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify clean source checkout
+        shell: pwsh
+        run: |
+          git clean -ffdx
+          if ($LASTEXITCODE -ne 0) { throw 'Could not clean the checkout before building.' }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the checked-out commit.' }
+          if ($actual -ne $env:GITHUB_SHA) {
+            throw "Checked-out commit $actual does not match workflow commit $env:GITHUB_SHA."
+          }
+          $dirty = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify checkout status.' }
+          if ($dirty) { throw "Source checkout is not clean after cleanup: $dirty" }
+          Write-Host "CLEAN SOURCE CHECKOUT: $actual"
       - name: Configure
         run: cmake -S MicBridgeAPO/MicBridgeAPO -B build -A x64
       - name: Build
