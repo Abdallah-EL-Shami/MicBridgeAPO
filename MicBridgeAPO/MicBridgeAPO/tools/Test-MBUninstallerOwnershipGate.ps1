@@ -31,7 +31,7 @@ if (-not $source.Contains('Remove-Item -LiteralPath $apoRegistrationPath') -or -
     throw 'FAIL: expected COM cleanup actions changed; review the uninstaller contract test.'
 }
 
-$receiptModuleLoad = $source.IndexOf("Import-Module -Name $receiptModule -Force -ErrorAction Stop",[StringComparison]::Ordinal)
+$receiptModuleLoad = $source.IndexOf('Import-Module -Name $receiptModule -Force -ErrorAction Stop',[StringComparison]::Ordinal)
 $receiptVerify = $source.IndexOf('Test-MBInstallTransactionReceipt -ReceiptPath $candidate.FullName -VerifyInstalledFiles',[StringComparison]::Ordinal)
 $receiptFailClosed = $source.IndexOf('No valid machine-bound install receipt verified the current MicBridge files. Uninstall stopped before changes.',[StringComparison]::Ordinal)
 $receiptBeforeAudit = $source.IndexOf('$legacyAudit = Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
