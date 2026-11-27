@@ -45,6 +45,15 @@ try {
     [IO.File]::WriteAllBytes($signaturePath,$cms.Encode())
 
     $args=@{ManifestPath=$manifestPath;SignaturePath=$signaturePath;InstallDirectory=$root;TrustedSignerThumbprints=@($cert.Thumbprint)}
+    # The CI signer is intentionally self-signed. Strict chain mode must reject it;
+    # a thumbprint pin alone must not be mistaken for a trusted certificate chain.
+    $untrustedChainRejected=$false
+    try {
+        $strictChainArgs=$args.Clone()
+        $strictChainArgs.RequireCertificateChain=$true
+        Test-MBInstallProvenanceManifest @strictChainArgs | Out-Null
+    } catch { $untrustedChainRejected=$_.Exception.Message -match 'certificate chain is not trusted' }
+    if(-not $untrustedChainRejected) { throw 'FAIL: self-signed CI signer passed strict certificate-chain validation.' }
     $ok=Test-MBInstallProvenanceManifest @args
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
