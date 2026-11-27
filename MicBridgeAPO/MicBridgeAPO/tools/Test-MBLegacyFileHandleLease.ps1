@@ -189,7 +189,7 @@ namespace MicBridgeHandleLeaseHardLink {
         try { Open-MBLegacyExclusiveFileLease -CandidatePath $adsPath -InstallRoot $root -ExpectedSha256 $adsHash | Out-Null }
         catch { $adsRejected=$_.Exception.Message -match 'Alternate data streams' }
         if(-not $adsRejected) { throw 'FAIL: alternate data stream was accepted as a standalone cleanup candidate.' }
-    } finally { Remove-Item -LiteralPath $adsPath -Force -ErrorAction SilentlyContinue }
+    } finally { [IO.File]::Delete($adsPath) }
 
     Write-Host 'PASS: exclusive file and pinned ancestor/root/intermediate directory handles block writes/renames; hard links, junction traversal, wrong hashes/identities and out-of-root paths are rejected; rejected approvals release all handles. No deletion occurs.'
 } finally {
