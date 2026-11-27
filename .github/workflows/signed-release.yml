@@ -216,7 +216,7 @@ jobs:
           $securePfxPassword = $null
           $certImported = $false
           $rootCertAdded = $false
-          $rootStorePath = "Cert:\\CurrentUser\\Root\\$thumb"
+          $rootStorePath = "Cert:\CurrentUser\Root\$thumb"
           try {
             if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Signing secrets are unavailable.' }
             if ($env:GITHUB_REF_NAME -notlike 'v*' -or $env:GITHUB_REF_NAME.Length -lt 2) { throw 'Only version tags beginning with v may be signed.' }
@@ -252,7 +252,7 @@ jobs:
             # so WinVerifyTrust must finish both digest and chain validation. Refuse to
             # overwrite pre-existing trust and always remove the temporary root entry.
             if (Test-Path -LiteralPath $rootStorePath) { throw 'Pinned release certificate already exists in the runner Root store; refusing to alter existing trust.' }
-            $null = Import-Certificate -FilePath $publicCertPath -CertStoreLocation 'Cert:\\CurrentUser\\Root'
+            $null = Import-Certificate -FilePath $publicCertPath -CertStoreLocation 'Cert:\CurrentUser\Root'
             $rootCertAdded = $true
             $rootCert = Get-Item -LiteralPath $rootStorePath
             if ($null -eq $rootCert -or $rootCert.Thumbprint -ne $thumb -or $rootCert.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $certHash) {
