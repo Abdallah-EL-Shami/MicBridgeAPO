@@ -187,6 +187,12 @@ namespace MicBridge.LegacyFileHandleLease {
                                                      string expectedSha256, string expectedIdentity) {
             string fullCandidate = Path.GetFullPath(candidatePath);
             string fullRoot = Path.GetFullPath(installRoot);
+            string candidatePrefix = fullRoot.TrimEnd('\\') + "\\";
+            if (!fullCandidate.StartsWith(candidatePrefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Candidate path is not lexically contained by the installation root.");
+            string relativeCandidate = fullCandidate.Substring(candidatePrefix.Length);
+            if (relativeCandidate.IndexOf(':') >= 0)
+                throw new InvalidOperationException("Alternate data streams are not valid cleanup candidates.");
             DirectoryPinSet pins = new DirectoryPinSet();
             DirectoryPinSet rootPins = null;
             DirectoryPinSet parentPins = null;
