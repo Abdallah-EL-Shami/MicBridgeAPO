@@ -13,7 +13,7 @@ $build = Get-Content -LiteralPath $buildWorkflowPath -Raw
 $launcherPath = Join-Path $repoRoot 'MicBridgeAPO/MicBridgeAPO/install.bat'
 if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { throw 'Installer launcher is missing.' }
 $launcher = Get-Content -LiteralPath $launcherPath -Raw
-if ($launcher -match '(?i)PublisherSignatureVerified' -or $launcher -notmatch '(?i)install[.]ps1' -or $launcher -notmatch '(?i)-ExecutionPolicy Bypass') {
+if ($launcher -match '(?i)PublisherSignatureVerified' -or $launcher -notmatch '(?i)install[.]ps1' -or $launcher -notmatch '(?i)-ExecutionPolicy AllSigned') {
     throw 'FAIL: install.bat must remain fail-closed and must not assert manual publisher verification for the operator.'
 }
 $release = Get-Content -LiteralPath $releaseWorkflowPath -Raw
