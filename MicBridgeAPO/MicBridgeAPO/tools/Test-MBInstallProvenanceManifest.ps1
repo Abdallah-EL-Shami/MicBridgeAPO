@@ -131,6 +131,17 @@ try {
         Remove-Item -LiteralPath $outsideDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+
+    # A trusted manifest cannot redirect the verifier by supplying an install-root junction.
+    $rootAlias=Join-Path ([IO.Path]::GetDirectoryName($root)) ('MicBridgeProvenanceAlias-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Junction -Path $rootAlias -Target $root -ErrorAction Stop | Out-Null
+    try {
+        $rootAliasRejected=$false
+        try { Test-MBInstallProvenanceManifest -ManifestPath $manifestPath -SignaturePath $signaturePath -InstallDirectory $rootAlias -TrustedSignerThumbprints @($cert.Thumbprint) | Out-Null }
+        catch { $rootAliasRejected=$_.Exception.Message -match 'Install directory must be a real directory' }
+        if(-not $rootAliasRejected) { throw 'FAIL: install root reached through a junction alias was accepted.' }
+    } finally { Remove-Item -LiteralPath $rootAlias -Force -ErrorAction SilentlyContinue }
+
     # Duplicate paths are rejected case-insensitively before file verification.
     $duplicateManifest=[ordered]@{
         SchemaVersion=1; ProductId='MicBridgeAPO'; ProductVersion='0.0.0-ci'
