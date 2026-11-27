@@ -1,6 +1,6 @@
 # Independent bootstrap launcher — security design
 
-Status: **security design documented; fail-closed native CMake scaffold and CTest added; signature/manifest verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked.**
+Status: **native fail-closed launcher scaffold plus a separately compiled WinVerifyTrust/pinned-SHA256 signer-verification component and unsigned-file negative test are implemented; the verifier is not yet called by the launcher; manifest/CMS verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked.**
 
 ## Why the current bootstrap is not trusted
 
@@ -43,14 +43,15 @@ The launcher must verify the package before elevation. The preferred model is a 
 
 ## Implementation gates
 
-1. **Scaffold complete:** add the native launcher target and a CTest that launches it and confirms exit code 78. The current executable deliberately performs no verification and never launches the installer. This is only a fail-closed placeholder, not a trusted launcher.
-2. Add unit-testable parsing/crypto/path modules without changing installer behavior.
-3. Implement and test manifest/CMS verification independently of PowerShell.
-4. Implement file-handle and directory-handle pinning, race tests, and exact-file-set checks.
-5. Implement the authenticated handoff and installer-side rejection of direct invocation.
-6. Sign the launcher and PowerShell files in the protected release workflow; verify all signatures and the signed manifest in a clean staging directory.
-7. Only after all negative tests pass may the verifier report `BootstrapTrustEstablished=true` for a launcher-authenticated handoff.
-8. Keep release tagging, PFX use, target-machine trust enrollment, installation, and legacy cleanup as separate explicit approvals.
+1. **Fail-closed scaffold complete:** add the native launcher target and a CTest that launches it and confirms exit code 78. The current executable deliberately performs no verification and never launches the installer. This is only a fail-closed placeholder, not a trusted launcher.
+2. **Authenticode verifier component implemented, integration pending:** `MicBridgeBootstrapTrust.cpp` calls `WinVerifyTrust` with UI and revocation retrieval disabled, obtains the verified signer from the WinTrust provider state, and compares the certificate SHA-256 to the pinned release fingerprint. A negative CTest passes an unsigned executable. The launcher does not call this component yet; the test does not prove correct acceptance of a genuine signed binary, rejection of a wrong signer, or end-to-end package trust.
+3. Add unit-testable parsing/crypto/path modules without changing installer behavior.
+4. Implement and test manifest/CMS verification independently of PowerShell.
+5. Implement file-handle and directory-handle pinning, race tests, and exact-file-set checks.
+6. Implement the authenticated handoff and installer-side rejection of direct invocation.
+7. Sign the launcher and PowerShell files in the protected release workflow; verify all signatures and the signed manifest in a clean staging directory.
+8. Only after all negative tests pass may the verifier report `BootstrapTrustEstablished=true` for a launcher-authenticated handoff.
+9. Keep release tagging, PFX use, target-machine trust enrollment, installation, and legacy cleanup as separate explicit approvals.
 
 ## Non-goals
 
