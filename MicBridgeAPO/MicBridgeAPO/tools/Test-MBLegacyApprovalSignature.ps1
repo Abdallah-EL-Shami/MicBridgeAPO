@@ -3,6 +3,7 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.Security.Cryptography.Pkcs
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupJournal.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyCleanupPreflight.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyFileHandleLease.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MicBridge.LegacyApprovalSignature.psm1') -Force
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('MicBridgeApprovalSignature-' + [guid]::NewGuid().ToString('N'))
