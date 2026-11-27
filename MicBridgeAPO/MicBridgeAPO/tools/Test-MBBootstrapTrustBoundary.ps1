@@ -114,6 +114,16 @@ if ($launcherSource -notmatch '(?s)return 78;' -or
     $launcherTest -notmatch '(?s)exitCode != 78') {
     throw 'FAIL: native bootstrap scaffold must compile as a CMake target and CTest must prove it exits fail-closed without launching a payload.'
 }
+if ($trustSource -notmatch '(?s)CertificateEncodingMatchesSha256' -or
+    $trustSource -notmatch '(?s)MICBRIDGE_BOOTSTRAP_TESTING' -or
+    $trustHeader -notmatch '(?s)TestCertificateEncodingMatchesSha256Pin' -or
+    $signatureTest -notmatch '(?s)matching SHA-256 pin was rejected' -or
+    $signatureTest -notmatch '(?s)mismatching SHA-256 pin was accepted' -or
+    $signatureTest -notmatch '(?s)malformed pin-comparison input was accepted' -or
+    $cmake -notmatch '(?s)MICBRIDGE_BOOTSTRAP_TESTING') {
+    throw 'FAIL: test-only certificate pin comparator must cover matching, mismatching, malformed inputs and remain excluded from production targets.'
+}
+
 if ($launcherDesign -notmatch '(?im)Status: \*\*native fail-closed launcher scaffold plus a separately compiled WinVerifyTrust/pinned-SHA256 signer-verification component and unsigned-file negative test are implemented; the verifier is not yet called by the launcher; manifest/CMS verification, file pinning, authenticated handoff, and production launch are not implemented; production installation remains blocked\.\*\*' -or
     $launcherDesign -notmatch '(?im)Required verification sequence' -or
     $launcherDesign -notmatch '(?im)Required negative and adversarial tests') {
