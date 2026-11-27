@@ -31,6 +31,16 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
+if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
+    throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
+}
+if ($release -notmatch 'SignatureStatus]::NotTrusted' -or
+    $release -notmatch 'SignerCertificate[.]Thumbprint -ne \$thumb') {
+    throw 'Release signing workflow must verify Authenticode integrity and the pinned signer without requiring CI trust enrollment.'
+}
+if ($release -notmatch 'AUTHENTICODE SIGNATURE INTEGRITY VERIFIED; TRUST NOT ESTABLISHED IN CI') {
+    throw 'Release signing workflow must distinguish signature integrity from certificate trust.'
+}
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
 foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
     if ($release -notmatch [regex]::Escape($testName.Replace('[.]','.'))) {
