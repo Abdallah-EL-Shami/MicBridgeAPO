@@ -219,7 +219,7 @@ if (-not (Test-Path -LiteralPath $legacyAuditModule -PathType Leaf)) {
 try {
     Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
     $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\'
-    Write-InstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
+    Write-EarlyInstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
     # Recovery evidence from the retired installer is preserved and ignored:
     # it is neither restored nor used as the new install baseline. Only live
     # registrations, old binaries/support files, unknown install files, foreign
