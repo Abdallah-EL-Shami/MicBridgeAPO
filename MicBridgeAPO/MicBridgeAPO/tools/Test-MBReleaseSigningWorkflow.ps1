@@ -20,7 +20,7 @@ $requiredReleasePatterns = [ordered]@{
     'pinned SHA-1 certificate thumbprint' = '29BAC42BFC53F2586559A9B95D1FEEB658E8891A'
     'pinned SHA-256 certificate fingerprint' = 'CF4104CA62A9A1384DE546B41B82E5C336462764AEA30488815922105EF7D369'
     'ephemeral private key storage' = 'EphemeralKeySet'
-    'detached CMS signature' = 'SignedCms'
+    'attached CMS SignedData signature' = 'SignedCms'
     'post-signature verification' = 'Test-MBInstallProvenanceManifest'
     'temporary PFX cleanup' = 'Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force'
     'secret environment cleanup' = 'Remove-Item\s+Env:MB_RELEASE_SIGNING_PFX_PASSWORD'
@@ -58,5 +58,5 @@ foreach ($workflowName in @('build','release')) {
 if ($build -match 'MB_RELEASE_SIGNING_PFX_(BASE64|PASSWORD)') { throw 'Ordinary build workflow must never reference release signing secrets.' }
 if ($build -match '(?im)^\s*environment:\s*release-signing\s*$') { throw 'Ordinary build workflow must never enter the protected signing environment.' }
 
-Write-Host 'PASS: release signing workflow has tag-only gating, protected environment, pinned certificate, detached CMS verification, and private-key cleanup.'
+Write-Host 'PASS: release signing workflow has tag-only gating, protected environment, pinned certificate, attached CMS SignedData verification, and private-key cleanup.'
 Write-Host 'PASS: ordinary build workflow has no release signing secrets or protected signing environment.'
