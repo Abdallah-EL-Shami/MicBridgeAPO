@@ -38,7 +38,7 @@ if($source -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-I
 if($module -notmatch 'IsReadOnly=\$true' -or $module -notmatch 'CleanupAllowed=\$false' -or $module -notmatch 'OwnershipProven=\$false') {
     throw 'FAIL: underlying audit module does not preserve read-only/no-ownership invariants.'
 }
-$documentedCommand = '& .\tools\Inspect-MBLegacyInstallation.ps1 | Tee-Object -FilePath .\legacy-inventory.json'
+$documentedCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Inspect-MBLegacyInstallation.ps1 | Tee-Object -FilePath .\legacy-inventory.json'
 if(-not $trustDoc.Contains($documentedCommand) -or $trustDoc.Contains('Inspect-MBLegacyInstallation.ps1 -PublisherSignatureVerified')) {
     throw 'FAIL: documented inventory command must invoke the self-verifying read-only entrypoint without a removed bypass switch and write legacy-inventory.json.'
 }
