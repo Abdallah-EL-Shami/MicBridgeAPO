@@ -65,11 +65,20 @@ try {
         } catch { $wrongHashRejected = $true }
         if (-not $wrongHashRejected) { throw 'FAIL: incorrect expected hash was accepted.' }
 
+        $identityProbe = Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash
+        try { $actualIdentity = [string]$identityProbe.FileIdentity }
+        finally { Close-MBLegacyExclusiveFileLease -LeaseResult $identityProbe }
+        if ([string]::IsNullOrWhiteSpace($actualIdentity) -or $actualIdentity.Length -lt 2) {
+            throw 'FAIL: lease did not return a usable file identity.'
+        }
+        $replacementFirst = if ($actualIdentity[0] -eq '0') { '1' } else { '0' }
+        $wrongIdentity = $replacementFirst + $actualIdentity.Substring(1)
+        if ($wrongIdentity -eq $actualIdentity) { throw 'FAIL: test did not construct a distinct file identity.' }
         $wrongIdentityRejected = $false
         try {
-            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash -ExpectedFileIdentity '00000000:0000000000000000' | Out-Null
+            Open-MBLegacyExclusiveFileLease -CandidatePath $dll -InstallRoot $root -ExpectedSha256 $hash -ExpectedFileIdentity $wrongIdentity | Out-Null
         } catch { $wrongIdentityRejected = $_.Exception.ToString() -match 'identity differs' }
-        if (-not $wrongIdentityRejected) { throw 'FAIL: incorrect approved file identity was accepted.' }
+        if (-not $wrongIdentityRejected) { throw ('FAIL: incorrect approved file identity was accepted. Actual identity: ' + $actualIdentity) }
 
         # Failed hash/identity validation must release the exclusive file and directory handles.
         $reopenAfterRejectedApproval = $false
