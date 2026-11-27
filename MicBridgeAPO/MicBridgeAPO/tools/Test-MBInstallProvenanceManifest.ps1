@@ -54,19 +54,15 @@ try {
         Test-MBInstallProvenanceManifest @strictChainArgs | Out-Null
     } catch { $untrustedChainRejected=$_.Exception.Message -match 'certificate chain is not trusted' }
     if(-not $untrustedChainRejected) { throw 'FAIL: self-signed CI signer passed strict certificate-chain validation.' }
-    $revocationWithoutChainRejected=$false
-    try {
-        $revocationArgs=$args.Clone()
-        $revocationArgs.RequireCertificateRevocation=$true
-        Test-MBInstallProvenanceManifest @revocationArgs | Out-Null
-    } catch { $revocationWithoutChainRejected=$_.Exception.Message -match 'requires strict certificate-chain validation' }
-    if(-not $revocationWithoutChainRejected) { throw 'FAIL: online revocation checking was allowed without strict certificate-chain validation.' }
+    if((Get-Command Test-MBInstallProvenanceManifest).Parameters.ContainsKey('RequireCertificateRevocation')) {
+        throw 'FAIL: online certificate revocation option must not be exposed by the offline verifier.'
+    }
     $ok=Test-MBInstallProvenanceManifest @args
     if(-not $ok.ManifestVerified -or -not $ok.FileProvenanceVerified -or $ok.OwnershipProven -or
        $ok.ComOwnershipProven -or $ok.IsExecutionAuthorized -or $ok.VerifiedFiles.Count -ne 1 -or
-       $ok.CertificateChainValidated -or $ok.RevocationChecked -or $ok.CertificateRevocationMode -ne 'NotChecked' -or $ok.IsReleaseTrustEstablished -or
+       $ok.CertificateChainValidated -or $ok.CertificateDownloadsDisabled -or $ok.RevocationChecked -or $ok.CertificateRevocationMode -ne 'NotCheckedOffline' -or $ok.IsReleaseTrustEstablished -or
        $ok.VerificationConsistency -ne 'PathBasedNonAtomic' -or $ok.RaceSafeForExecution -or
-       $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotChecked') {
+       $ok.CallerRevocationDenylistChecked -or $ok.SignerRevocationStatus -ne 'NotCheckedOffline') {
         throw 'FAIL: manifest verification returned unsafe or incomplete capability flags.'
     }
 
