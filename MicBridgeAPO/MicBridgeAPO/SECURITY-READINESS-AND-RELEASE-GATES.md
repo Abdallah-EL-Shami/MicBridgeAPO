@@ -6,7 +6,7 @@ The legacy cleanup feature is NOT approved for execution and is NOT part of the 
 
 ## Verified CI baseline
 
-The latest confirmed successful workflow pair before the current certificate-policy test additions is Push and Pull Request runs 1301 and 1302 on commit 5fe0b884. This confirms only the checks present in that workflow at that commit. It is not a security certification. Commits bf75ccde and dcfa1851 add a negative test for a thumbprint-pinned certificate lacking Code Signing EKU and correct its fixture initialization order; their CI results must be confirmed separately.
+The latest confirmed successful run for the current recovery branch is run **1607** (`46048429140`) on commit `20dacc0bbec24a3aaf3acd33485071afdc6fdc76` (`recovery/provenance-from-run-1548`). Every job step passed, including build, Windows APO COM smoke test, installer/rollback checks, legacy audit and approval tests, signed manifest verification, mutation-resistant package file leases, transaction receipt, installer provenance gate, Windows PowerShell 5.1 compatibility, release-workflow invariants, isolated COM rollback, DLL/file/metadata rollback, endpoint rollback, package staging, and artifact upload. This is a CI validation result for that exact commit, not a security certification, not a real PFX-backed tag release, and not proof of bootstrap trust or historical COM ownership. Runs 1603–1606 failed in test/fixture integration; the parser defect was corrected in commit `20dacc0`, and run 1607 passed.
 
 ## Manifest verifier limitations
 
