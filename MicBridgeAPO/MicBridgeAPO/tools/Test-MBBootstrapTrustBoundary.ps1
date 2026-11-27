@@ -41,7 +41,7 @@ if ($verifyIndex -lt 0 -or $elevationIndex -lt 0 -or $diagnosticIndex -lt 0 -or 
     throw 'FAIL: signed package verification must precede elevation, log-path creation, and lock acquisition.'
 }
 
-$bootstrapPrefix = $installer.Substring(0,$diagnosticIndex)
+$bootstrapPrefix = $installer.Substring(0,$verifyIndex)
 if ($bootstrapPrefix -match '(?im)\b(Start-Process|New-Item|Add-Content|Set-ItemProperty|Remove-Item|reg\.exe|Enter-MBRecoveryOperationLock)\b') {
     throw 'FAIL: bootstrap prefix contains a process launch, file/log creation, registry mutation, or lock acquisition before verification.'
 }
