@@ -25,6 +25,13 @@ if (-not $verifiedPackage.SignatureVerified -or -not $verifiedPackage.ManifestVe
     $verifiedPackage.IsExecutionAuthorized -or $verifiedPackage.OwnershipProven) {
     throw 'Signed package verification did not return the required integrity evidence; installation was blocked.'
 }
+$expectedPackageDll = @($verifiedPackage.VerifiedFiles | Where-Object {
+    [string]::Equals([string]$_.RelativePath,'MicBridgeAPO.dll',[StringComparison]::OrdinalIgnoreCase)
+})
+if ($expectedPackageDll.Count -ne 1 -or
+    -not [string]::Equals([IO.Path]::GetFullPath($DllSource),[IO.Path]::GetFullPath([string]$expectedPackageDll[0].Path),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'DllSource must resolve to the exact MicBridgeAPO.dll covered by the signed release manifest.'
+}
 
 # رفع الصلاحيات تلقائيًا
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
