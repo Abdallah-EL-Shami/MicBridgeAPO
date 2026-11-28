@@ -90,11 +90,11 @@ if ($stateInit -lt 0 -or $stateWrite -lt $stateInit -or $journalCreate -lt $stat
 
 # Partial baselines are preserved byte-for-byte before the canonical path is
 # replaced, and only after the copy hash is verified.
-$archiveCopy = $source.IndexOf('[IO.File]::Copy($backupFile,$partialArchivePath,$false)',[StringComparison]::Ordinal)
+$archiveMove = $source.IndexOf('[IO.File]::Move($backupFile,$partialArchivePath)',[StringComparison]::Ordinal)
 $archiveVerify = $source.IndexOf('$partialArchiveHash.Equals($partialBaselineHash',[StringComparison]::Ordinal)
-$archiveMove = $source.IndexOf('Remove-Item -LiteralPath $backupFile -Force -ErrorAction Stop',[StringComparison]::Ordinal)
-if ($archiveCopy -lt 0 -or $archiveVerify -le $archiveCopy -or $archiveMove -le $archiveVerify) {
-    throw 'FAIL: incomplete baseline is not preserved and hash-verified before canonical baseline replacement.'
+if ($archiveMove -lt 0 -or $archiveVerify -le $archiveMove -or
+    $source.Contains('Remove-Item -LiteralPath $backupFile -Force -ErrorAction Stop')) {
+    throw 'FAIL: incomplete baseline must be atomically archived and hash-verified without deleting evidence.'
 }
 if ($source.IndexOf('$orphanTransactions = @(Get-ChildItem',[StringComparison]::Ordinal) -lt $source.IndexOf('if ($receiptFiles.Count -gt 0)',[StringComparison]::Ordinal)) {
     throw 'FAIL: receipt-free transaction inventory must be checked before accepting a partial baseline.'
