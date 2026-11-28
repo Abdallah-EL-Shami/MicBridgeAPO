@@ -53,6 +53,7 @@ foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstall
     }
 }
 if ($build -notmatch 'Test-MBInstallTransactionReceipt\.ps1') { throw 'Ordinary CI must execute transaction receipt security tests.' }
+if ($build -notmatch 'Test-MBUIEncoding\.ps1') { throw 'Ordinary CI must execute the MicBridgeUI UTF-16LE and Windows PowerShell 5.1 parser regression test.' }
 foreach ($workflowName in @('build','release')) {
     $workflowContent = if ($workflowName -eq 'build') { $build } else { $release }
     if ($workflowContent -notmatch 'powershell[.]exe -NoProfile -ExecutionPolicy Bypass -File ./MicBridgeAPO/MicBridgeAPO/tools/Test-MBInstallProvenanceManifest[.]ps1' -or
