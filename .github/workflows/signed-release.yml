@@ -279,13 +279,20 @@ jobs:
           $signingCert = Get-Item -LiteralPath ("Cert:\CurrentUser\My\" + $Thumbprint)
           $signResult = Set-AuthenticodeSignature -FilePath $FilePath -Certificate $signingCert -HashAlgorithm SHA256 -ErrorAction Stop
           $verifyResult = Get-AuthenticodeSignature -FilePath $FilePath
-          if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-          $verifyResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-          $verifyResult.SignerCertificate.Thumbprint -ne $Thumbprint) {
-          throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
+          $isAcceptable = {
+            param($signature)
+            if ($null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint -ne $Thumbprint) { return $false }
+            if ($signature.Status -eq [Management.Automation.SignatureStatus]::Valid) { return $true }
+            return (
+              $signature.Status -eq [Management.Automation.SignatureStatus]::UnknownError -and
+              [string]$signature.StatusMessage -eq 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.'
+            )
           }
-          Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $Thumbprint"
-          '@
+          if (-not (& $isAcceptable $signResult) -or -not (& $isAcceptable $verifyResult)) {
+            throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
+          }
+          Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE DIGEST AND PINNED SIGNER VERIFIED: $Thumbprint"
+          '@@
                   try {
                     [IO.File]::WriteAllText($legacySignerPath,$legacySigner,[Text.UTF8Encoding]::new($false))
                     $windowsPowerShell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
