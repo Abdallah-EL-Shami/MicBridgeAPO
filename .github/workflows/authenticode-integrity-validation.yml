@@ -1,10 +1,5 @@
 name: authenticode-integrity-validation
 on:
-  push:
-    branches:
-      - release/practical-stability
-    paths:
-      - '.github/workflows/authenticode-integrity-validation.yml'
   workflow_dispatch:
 
 permissions:
