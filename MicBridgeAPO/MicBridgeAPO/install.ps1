@@ -407,21 +407,17 @@ if ($found.Count -eq 0) {
 if ($found.Count -gt 1) { $found | Format-Table | Out-String | Write-Host; throw "أكثر من جهاز يطابق الاسم. اكتب اسمًا أدق عبر -DeviceName" }
 $dev = $found[0]
 
-# Refuse to reuse a backup created for a different capture endpoint.
-# This check happens before checkpoints, file copies, ACL changes, or registry writes.
-$isManagedUpgrade = Test-Path -LiteralPath $backupFile
-if ($isManagedUpgrade) {
-    $existingBackup = Get-Content -LiteralPath $backupFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    if ($existingBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$existingBackup.ComRegistrationSnapshotVersion -ne 1) {
-        throw 'The current MicBridge baseline is incomplete; refusing upgrade without a trustworthy baseline created by this installer.'
+# A baseline file alone is not proof of a completed install. It is classified
+# only after the read-only live-state audit and receipt inventory below.
+$baselinePresent = Test-Path -LiteralPath $backupFile
+$isManagedUpgrade = $false
+$partialBaselineDetected = $false
+$existingBackup = $null
+if ($baselinePresent) {
+    $baselineItem = Get-Item -LiteralPath $backupFile -Force -ErrorAction Stop
+    if ($baselineItem.PSIsContainer -or (($baselineItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'The MicBridge baseline path is not a regular file; preserving it and blocking installation.'
     }
-    if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
-        throw "The current MicBridge baseline belongs to another capture endpoint. Upgrade was blocked without changing the baseline."
-    }
-    if ($existingBackup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
-        throw 'The current MicBridge baseline is missing required endpoint association state; upgrade was blocked.'
-    }
-    $backup = $existingBackup
 }
 Write-Host "تم العثور على: $($dev.Names)  ($($dev.Id))"
 $devSub = "$capSub\$($dev.Id)"
@@ -437,43 +433,89 @@ Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
 $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -ExpectedDeviceId ([guid]$dev.Id) -IgnoreLegacyRecoveryBackups
 Write-UpgradeLog 'INFO' "Read-only legacy audit completed. Outcome=$($legacyAudit.Outcome); BaselineAssessment=$($legacyAudit.BaselineAssessment)."
 foreach ($finding in @($legacyAudit.Findings)) { Write-UpgradeLog 'INFO' "Finding: Kind=$($finding.Kind); Name=$($finding.Name); Classification=$($finding.Classification); Path=$($finding.Path); Detail=$($finding.Detail)" }
-if ($isManagedUpgrade) {
-$receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
-if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw 'Install receipt verifier is missing; upgrade is blocked.' }
-Import-Module -Name $receiptModule -Force -ErrorAction Stop
-$receiptFiles = @(Get-ChildItem -LiteralPath $dataDir -File -Filter 'install-transaction-*.receipt' -ErrorAction Stop |
-    Sort-Object LastWriteTimeUtc -Descending)
-if ($receiptFiles.Count -lt 1) { throw 'No current-installer receipt exists. This is not a trusted in-place upgrade; clean up the older installation first.' }
-$activeReceipt = $receiptFiles[0]
-$activeReceiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles
-if (-not $activeReceiptCheck.ReceiptIntegrityVerified -or -not $activeReceiptCheck.MachineBound -or
-    -not $activeReceiptCheck.InstalledFilesVerified -or
-    $activeReceiptCheck.SignerThumbprint -ne $trustedReleaseThumbprint -or
-    -not [string]::Equals([string]$activeReceiptCheck.BaselineEvidenceSha256,(Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash,[StringComparison]::OrdinalIgnoreCase) -or
-    -not [string]::Equals([IO.Path]::GetFullPath($activeReceiptCheck.InstallRoot),[IO.Path]::GetFullPath($installDir),[StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The active install receipt is invalid, belongs to another install root, or was not created by the pinned release signer. Upgrade blocked.'
+$receiptFiles = @()
+if (Test-Path -LiteralPath $dataDir -PathType Container) {
+    $receiptFiles = @(Get-ChildItem -LiteralPath $dataDir -File -Filter 'install-transaction-*.receipt' -ErrorAction Stop |
+        Sort-Object LastWriteTimeUtc -Descending)
 }
-$receiptNames = @($activeReceiptCheck.InstalledFiles | ForEach-Object { [string]$_.RelativePath })
-foreach ($requiredInstalledFile in @('MicBridgeAPO.dll','MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
-    if ($receiptNames -notcontains $requiredInstalledFile) { throw "Active receipt does not cover required installed file: $requiredInstalledFile" }
-}
-$blockingUpgradeClasses = @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup')
-$reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingUpgradeClasses })
-$clsidFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'COM CLSID' })
-$apoFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'AudioEngine APO' })
-$expectedInstalledDll = Join-Path $installDir 'MicBridgeAPO.dll'
-if ($clsidFinding.Count -ne 1 -or $clsidFinding[0].Classification -ne 'MicBridgeCandidate' -or
-    -not [string]::Equals([IO.Path]::GetFullPath([string]$clsidFinding[0].ServerPath),[IO.Path]::GetFullPath($expectedInstalledDll),[StringComparison]::OrdinalIgnoreCase) -or
-    $apoFinding.Count -ne 1 -or $apoFinding[0].Classification -ne 'MicBridgeCandidate' -or
-    $reviewItems.Count -gt 0) {
-    $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
-    throw "Current-install receipt does not match a clean MicBridge registration state, or ambiguous/foreign state exists. Upgrade blocked without cleanup. $reviewSummary"
-}
-Write-UpgradeLog 'INFO' "Current installer receipt verified. TransactionId='$($activeReceiptCheck.TransactionId)'; Version='$($activeReceiptCheck.ProductVersion)'."
-Write-UpgradeLog 'INFO' 'Upgrade gate accepted only receipt-backed installed files and MicBridge CLSID registration; legacy backups remain preserved and unused.'
 
+if ($receiptFiles.Count -gt 0) {
+    # A receipt is the discriminator for a managed install. Never downgrade an
+    # invalid, stale, or tampered receipt into the partial-baseline clean path.
+    if (-not $baselinePresent) {
+        throw 'An install transaction receipt exists without its bound baseline; upgrade is blocked for manual review.'
+    }
+    $existingBackup = Get-Content -LiteralPath $backupFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($existingBackup.PSObject.Properties.Name -notcontains 'ComRegistrationSnapshotVersion' -or [int]$existingBackup.ComRegistrationSnapshotVersion -ne 1) {
+        throw 'A receipt exists but its bound baseline schema is incomplete; upgrade is blocked.'
+    }
+    if ([string]$existingBackup.DeviceId -ne [string]$dev.Id) {
+        throw 'The receipt-bound baseline belongs to another capture endpoint; upgrade is blocked.'
+    }
+    if ($existingBackup.PSObject.Properties.Name -notcontains 'PrevFxAssociation') {
+        throw 'The receipt-bound baseline is missing required endpoint association state; upgrade is blocked.'
+    }
+
+    $receiptModule = Join-Path $PSScriptRoot 'tools\\MicBridge.InstallTransactionReceipt.psm1'
+    if (-not (Test-Path -LiteralPath $receiptModule -PathType Leaf)) { throw 'Install receipt verifier is missing; upgrade is blocked.' }
+    Import-Module -Name $receiptModule -Force -ErrorAction Stop
+    $activeReceipt = $receiptFiles[0]
+    $activeReceiptCheck = Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles
+    if (-not $activeReceiptCheck.ReceiptIntegrityVerified -or -not $activeReceiptCheck.MachineBound -or
+        -not $activeReceiptCheck.InstalledFilesVerified -or
+        $activeReceiptCheck.SignerThumbprint -ne $trustedReleaseThumbprint -or
+        -not [string]::Equals([string]$activeReceiptCheck.BaselineEvidenceSha256,(Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash,[StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([IO.Path]::GetFullPath($activeReceiptCheck.InstallRoot),[IO.Path]::GetFullPath($installDir),[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The active install receipt is invalid, belongs to another install root, or was not created by the pinned release signer. Upgrade blocked.'
+    }
+    $receiptNames = @($activeReceiptCheck.InstalledFiles | ForEach-Object { [string]$_.RelativePath })
+    foreach ($requiredInstalledFile in @('MicBridgeAPO.dll','MicBridgeUI.ps1','MicBridgeUI.bat','uninstall.ps1','uninstall.bat')) {
+        if ($receiptNames -notcontains $requiredInstalledFile) { throw "Active receipt does not cover required installed file: $requiredInstalledFile" }
+    }
+    $blockingUpgradeClasses = @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup')
+    $reviewItems = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingUpgradeClasses })
+    $clsidFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'COM CLSID' })
+    $apoFinding = @($legacyAudit.Findings | Where-Object { $_.Kind -eq 'Registration' -and $_.Name -eq 'AudioEngine APO' })
+    $expectedInstalledDll = Join-Path $installDir 'MicBridgeAPO.dll'
+    if ($clsidFinding.Count -ne 1 -or $clsidFinding[0].Classification -ne 'MicBridgeCandidate' -or
+        -not [string]::Equals([IO.Path]::GetFullPath([string]$clsidFinding[0].ServerPath),[IO.Path]::GetFullPath($expectedInstalledDll),[StringComparison]::OrdinalIgnoreCase) -or
+        $apoFinding.Count -ne 1 -or $apoFinding[0].Classification -ne 'MicBridgeCandidate' -or
+        $reviewItems.Count -gt 0) {
+        $reviewSummary = ($reviewItems | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
+        throw "Current-install receipt does not match a clean MicBridge registration state, or ambiguous/foreign state exists. Upgrade blocked without cleanup. $reviewSummary"
+    }
+    $backup = $existingBackup
+    $isManagedUpgrade = $true
+    Write-UpgradeLog 'INFO' "Current installer receipt verified. TransactionId='$($activeReceiptCheck.TransactionId)'; Version='$($activeReceiptCheck.ProductVersion)'."
+    Write-UpgradeLog 'INFO' 'Upgrade gate accepted only receipt-backed installed files and MicBridge CLSID registration; legacy backups remain preserved and unused.'
 } else {
-    Write-InstallLog 'INFO' 'No MicBridge v2 baseline exists; proceeding as a clean install after the independent legacy clean-state gate.'
+    # A baseline without any receipt can be an interrupted pre-transaction
+    # attempt (the v0.1.8 failure mode). It is not a managed upgrade. Accept it
+    # only when no transaction snapshot or live MicBridge state exists.
+    $orphanTransactions = @(Get-ChildItem -LiteralPath $dataDir -Directory -Filter 'transactions-v2-*' -ErrorAction Stop)
+    if ($orphanTransactions.Count -gt 0) {
+        throw 'A baseline without a valid install receipt is accompanied by transaction state. Preserve it for recovery; clean install is blocked.'
+    }
+    $blockingPartialClasses = @('Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath','ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved','InvalidOrInsufficient','MissingPermanentBackup','MicBridgeCandidate','MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate')
+    $partialReview = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingPartialClasses })
+    if ($partialReview.Count -gt 0) {
+        $partialSummary = ($partialReview | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
+        throw "Baseline-only state cannot be classified as an incomplete pre-transaction attempt because live or ambiguous MicBridge state exists. Preserve all evidence. $partialSummary"
+    }
+    $partialFxSnapshot = Get-RegistryValueSnapshot "$capSub\\$($dev.Id)\\FxProperties" $fxValue
+    $partialCompositeSnapshot = Get-RegistryValueSnapshot "$capSub\\$($dev.Id)\\FxProperties" $fxCompositeValue
+    $partialFxReferencesProduct = $false
+    if ($partialFxSnapshot.Exists -and [string]$partialFxSnapshot.Value -ieq $clsid) { $partialFxReferencesProduct = $true }
+    if ($partialCompositeSnapshot.Exists -and @($partialCompositeSnapshot.Value | ForEach-Object { [string]$_ }) -contains $clsid) { $partialFxReferencesProduct = $true }
+    if ($partialFxReferencesProduct) {
+        throw 'Endpoint FX properties still reference MicBridge but no valid install receipt exists; refusing to treat this as a clean partial baseline.'
+    }
+    if ($baselinePresent) {
+        $partialBaselineDetected = $true
+        Write-UpgradeLog 'WARN' 'Baseline exists without any install receipt, transaction directory, or live MicBridge state. Classified as an incomplete pre-transaction baseline; it will be preserved before a fresh baseline is captured.'
+    } else {
+        Write-InstallLog 'INFO' 'No MicBridge baseline or install receipt exists; proceeding as a clean install after the independent live-state audit.'
+    }
 }
 
 # ---- 2) نقطة استعادة (قد تفشل، لا بأس)
@@ -482,6 +524,17 @@ catch { Write-Warning "لم تُنشأ نقطة استعادة: $($_.Exception.M
 
 # ---- 3) النسخ الاحتياطي، بما فيه الصلاحيات الأصلية SDDL. لا نكتب فوق نسخة قديمة حتى لا نفقد الأصل.
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+if ($partialBaselineDetected) {
+    $partialBaselineHash = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
+    $partialArchivePath = Join-Path $dataDir ("install-baseline-v2.incomplete-" + $partialBaselineHash.Substring(0,12) + "-" + [guid]::NewGuid().ToString('N') + ".json")
+    [IO.File]::Copy($backupFile,$partialArchivePath,$false)
+    $partialArchiveHash = (Get-FileHash -LiteralPath $partialArchivePath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if (-not $partialArchiveHash.Equals($partialBaselineHash,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Incomplete baseline evidence copy failed SHA-256 verification; original baseline was retained and installation stopped.'
+    }
+    Remove-Item -LiteralPath $backupFile -Force -ErrorAction Stop
+    Write-UpgradeLog 'INFO' "Preserved incomplete baseline evidence at '$partialArchivePath'; SHA256=$partialArchiveHash."
+}
 if (-not (Test-Path $backupFile)) {
     $fxExists = Test-Path "$capRoot\$($dev.Id)\FxProperties"
     $prevFx = $null
@@ -602,7 +655,9 @@ try { $controlNewSha256 = [BitConverter]::ToString($sha256Provider.ComputeHash($
 $iniOriginalSha256 = if (Test-Path -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -PathType Leaf) { (Get-FileHash -LiteralPath (Join-Path $dataDir 'MicBridge.ini') -Algorithm SHA256).Hash } else { $null }
 $controlOriginalSha256 = if (Test-Path -LiteralPath $controlPath -PathType Leaf) { (Get-FileHash -LiteralPath $controlPath -Algorithm SHA256).Hash } else { $null }
 $dataDirSddl = (Get-Acl -LiteralPath $dataDir).Sddl
+$installTransactionId = [guid]::NewGuid()
 $transactionState = [pscustomobject]@{
+    TransactionId = $installTransactionId.ToString('D')
     DeviceId = $dev.Id
     FxEffect = (Get-RegistryValueSnapshot $fxNowSub $fxValue)
     FxAssociation = (Get-RegistryValueSnapshot $fxNowSub $fxAssociationValue)
@@ -644,9 +699,10 @@ Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
 $rollbackJournalPath = Join-Path $transactionDir 'rollback-recovery.json'
 $rollbackDeviceId = [guid]$dev.Id
 $rollbackStepIds = @('RestoreEndpointFxValues','RestoreEndpointAcl','RestorePreviousInstallState')
-$rollbackJournal = New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds
-$transactionState.TransactionId = [string]$rollbackJournal.TransactionId
-Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10
+$rollbackJournal = New-MBRecoveryJournal -Path $rollbackJournalPath -Operation InstallRollback -DeviceId $rollbackDeviceId -StepIds $rollbackStepIds -TransactionId $installTransactionId
+if (-not [string]::Equals([string]$rollbackJournal.TransactionId,$transactionState.TransactionId,[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Durable rollback journal transaction identity does not match the pre-persisted transaction snapshot.'
+}
 
 
 # ---- 4) الملفات
