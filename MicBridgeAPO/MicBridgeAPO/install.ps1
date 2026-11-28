@@ -504,8 +504,8 @@ if ($receiptFiles.Count -gt 0) {
         $partialSummary = ($partialReview | ForEach-Object { "$($_.Kind):$($_.Name) [$($_.Classification)]" }) -join '; '
         throw "Baseline-only state cannot be classified as an incomplete pre-transaction attempt because live or ambiguous MicBridge state exists. Preserve all evidence. $partialSummary"
     }
-    $partialFxSnapshot = Get-RegistryValueSnapshot "$capSub\\$($dev.Id)\\FxProperties" $fxValue
-    $partialCompositeSnapshot = Get-RegistryValueSnapshot "$capSub\\$($dev.Id)\\FxProperties" $fxCompositeValue
+    $partialFxSnapshot = Get-RegistryValueSnapshot "$capSub\$($dev.Id)\FxProperties" $fxValue
+    $partialCompositeSnapshot = Get-RegistryValueSnapshot "$capSub\$($dev.Id)\FxProperties" $fxCompositeValue
     $partialFxReferencesProduct = $false
     if ($partialFxSnapshot.Exists -and [string]$partialFxSnapshot.Value -ieq $clsid) { $partialFxReferencesProduct = $true }
     if ($partialCompositeSnapshot.Exists -and @($partialCompositeSnapshot.Value | ForEach-Object { [string]$_ }) -contains $clsid) { $partialFxReferencesProduct = $true }
