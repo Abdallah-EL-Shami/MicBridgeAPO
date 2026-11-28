@@ -267,7 +267,37 @@ jobs:
             if ($scriptFiles.Count -eq 0) { throw 'No PowerShell scripts were found for Authenticode signing.' }
             foreach ($scriptFile in $scriptFiles) {
               try {
-                $signedScript = Set-AuthenticodeSignature -FilePath $scriptFile.FullName -Certificate $cert -HashAlgorithm SHA256 -ErrorAction Stop
+                if ($scriptFile.Name -eq 'MicBridgeUI.ps1') {
+                  # The UI launcher runs Windows PowerShell 5.1. Sign this entrypoint
+                  # with the same engine that will verify and execute it on Windows.
+                  $legacySignerPath = Join-Path $env:RUNNER_TEMP 'Sign-MicBridgeUI-Authenticode.ps1'
+                  $legacySigner = @'
+param([string]$FilePath,[string]$Thumbprint)
+$ErrorActionPreference = 'Stop'
+$signingCert = Get-Item -LiteralPath ("Cert:\CurrentUser\My\" + $Thumbprint)
+$signResult = Set-AuthenticodeSignature -FilePath $FilePath -Certificate $signingCert -HashAlgorithm SHA256 -ErrorAction Stop
+$verifyResult = Get-AuthenticodeSignature -FilePath $FilePath
+if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+    $verifyResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+    $verifyResult.SignerCertificate.Thumbprint -ne $Thumbprint) {
+  throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
+}
+Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $Thumbprint"
+'@
+                  try {
+                    [IO.File]::WriteAllText($legacySignerPath,$legacySigner,[Text.UTF8Encoding]::new($false))
+                    $windowsPowerShell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+                    & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File $legacySignerPath -FilePath $scriptFile.FullName -Thumbprint $thumb
+                    if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 signing process exited with code $LASTEXITCODE." }
+                    $signedScript = Get-AuthenticodeSignature -FilePath $scriptFile.FullName
+                  }
+                  finally {
+                    if (Test-Path -LiteralPath $legacySignerPath) { Remove-Item -LiteralPath $legacySignerPath -Force }
+                  }
+                }
+                else {
+                  $signedScript = Set-AuthenticodeSignature -FilePath $scriptFile.FullName -Certificate $cert -HashAlgorithm SHA256 -ErrorAction Stop
+                }
               } catch {
                 Write-Host ("AUTHENTICODE SIGNING EXCEPTION: file={0}; type={1}; message={2}" -f $scriptFile.Name,$_.Exception.GetType().FullName,$_.Exception.Message)
                 throw
