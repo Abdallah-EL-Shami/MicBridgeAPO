@@ -1,6 +1,6 @@
 name: signed-release
-# Release signing is isolated from normal branch development: only version-tag pushes trigger it.
-# Manual dispatch remains available for controlled recovery, with the same tag and branch checks.
+# Automatic signing is restricted to version tags; ordinary branch pushes never trigger this workflow.
+# Manual dispatch is retained for controlled recovery.
 on:
   push:
     tags:
