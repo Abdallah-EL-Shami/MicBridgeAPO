@@ -21,6 +21,20 @@ try {
     $snapshot = Get-MBEndpointRegistrySnapshot -RegistryPath $registryPath -ValueNames $names
     if (-not $snapshot.KeyExists -or -not (Test-MBEndpointRegistrySnapshot $snapshot)) { throw 'FAIL: initial endpoint snapshot did not verify' }
 
+    # Exercise the exact-match recovery path with a JSON-round-tripped snapshot
+    # containing a one-element REG_MULTI_SZ and a missing string property.
+    $productionNames = @($names + 'PreviouslyMissing')
+    $productionSnapshot = Get-MBEndpointRegistrySnapshot -RegistryPath $registryPath -ValueNames $productionNames
+    $productionJson = ConvertTo-Json -InputObject $productionSnapshot -Depth 10
+    $productionRoundTrip = $productionJson | ConvertFrom-Json
+    if (-not (Test-MBEndpointRegistrySnapshot $productionRoundTrip)) { throw 'FAIL: JSON-round-tripped production-shaped endpoint snapshot did not verify' }
+    $noopJournal = Join-Path $root 'endpoint-noop-recovery.json'
+    New-MBRecoveryJournal -Path $noopJournal -Operation InstallRollback -DeviceId ([guid]::NewGuid()) -StepIds @('RestoreEndpointValues') | Out-Null
+    $noopDevice = (Read-MBRecoveryJournal -Path $noopJournal).DeviceId
+    Invoke-MBRecoveryStep -Path $noopJournal -StepId 'RestoreEndpointValues' -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$noopDevice) -ExpectedStepIds @('RestoreEndpointValues') -Action { throw 'Exact-match endpoint recovery must not request registry write access' } -Verify { Test-MBEndpointRegistrySnapshot $productionRoundTrip }
+    $noopResult = Read-MBRecoveryJournal -Path $noopJournal -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$noopDevice) -ExpectedStepIds @('RestoreEndpointValues')
+    if ($noopResult.Steps[0].State -ne 'Completed' -or $noopResult.Steps[0].Attempts -ne 0) { throw 'FAIL: exact-match endpoint recovery did not complete as a zero-attempt no-op' }
+
     Set-ItemProperty -LiteralPath $providerPath -Name $names[0] -Value 'changed' -Type String
     Remove-ItemProperty -LiteralPath $providerPath -Name $names[1]
     Set-ItemProperty -LiteralPath $providerPath -Name 'UnrelatedValue' -Value 'preserve-me' -Type String
@@ -85,7 +99,7 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreEndpointValues' -ExpectedOp
     $resumed = Read-MBRecoveryJournal -Path $journal -ExpectedOperation InstallRollback -ExpectedDeviceId ([guid]$device) -ExpectedStepIds @('RestoreEndpointValues')
     if ($resumed.Steps[0].State -ne 'Completed' -or $resumed.Steps[0].Attempts -ne 1) { throw 'FAIL: fresh-process recovery repeated the registry action or did not complete' }
 
-    Write-Host 'PASS: endpoint Fx registry snapshot, exact value/type restore, missing-value removal, unrelated-value preservation, absent-key cleanup, and process-crash resume'
+    Write-Host 'PASS: endpoint Fx registry snapshot, JSON round-trip, exact-match zero-write recovery, exact value/type restore, missing-value removal, unrelated-value preservation, absent-key cleanup, and process-crash resume'
 } finally {
     Remove-Item -LiteralPath $providerPath -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path 'Registry::HKEY_CURRENT_USER' $leaf) -Recurse -Force -ErrorAction SilentlyContinue
