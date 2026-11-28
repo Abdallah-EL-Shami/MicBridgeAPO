@@ -284,17 +284,17 @@ jobs:
                   # with the same engine that will verify and execute it on Windows.
                   $legacySignerPath = Join-Path $env:RUNNER_TEMP 'Sign-MicBridgeUI-Authenticode.ps1'
                   $legacySigner = @'
-param([string]$FilePath,[string]$Thumbprint)
-$ErrorActionPreference = 'Stop'
-$signingCert = Get-Item -LiteralPath ("Cert:\CurrentUser\My\" + $Thumbprint)
-$signResult = Set-AuthenticodeSignature -FilePath $FilePath -Certificate $signingCert -HashAlgorithm SHA256 -ErrorAction Stop
-$verifyResult = Get-AuthenticodeSignature -FilePath $FilePath
-if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+          param([string]$FilePath,[string]$Thumbprint)
+          $ErrorActionPreference = 'Stop'
+          $signingCert = Get-Item -LiteralPath ("Cert:\CurrentUser\My\" + $Thumbprint)
+          $signResult = Set-AuthenticodeSignature -FilePath $FilePath -Certificate $signingCert -HashAlgorithm SHA256 -ErrorAction Stop
+          $verifyResult = Get-AuthenticodeSignature -FilePath $FilePath
+          if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
     $verifyResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
     $verifyResult.SignerCertificate.Thumbprint -ne $Thumbprint) {
   throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
-}
-Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $Thumbprint"
+          }
+          Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $Thumbprint"
 '@
                   try {
                     [IO.File]::WriteAllText($legacySignerPath,$legacySigner,[Text.UTF8Encoding]::new($false))
