@@ -127,9 +127,9 @@ jobs:
           }
           if ($uiVersion -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw "Invalid package version: $uiVersion" }
           $uiScriptPath = Join-Path $package 'MicBridgeUI.ps1'
-          # PowerShell Authenticode can hash UTF-8/no-BOM non-ASCII text differently
-          # across Windows system code pages. Decode the repository's UTF-8 strictly,
-          # then normalize the distributable script to UTF-16LE with BOM before signing.
+          # Decode repository UTF-8 strictly, then normalize the distributable script
+          # to UTF-16LE with BOM before Authenticode signing. This avoids locale-dependent
+          # interpretation of non-ASCII (including Arabic) script content.
           $sourceBytes = [IO.File]::ReadAllBytes($uiScriptPath)
           $strictUtf8 = [Text.UTF8Encoding]::new($false,$true)
           $uiScript = $strictUtf8.GetString($sourceBytes)
@@ -393,7 +393,7 @@ Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $Thumbprint"
           }
           $normalizedText = [IO.File]::ReadAllText($uiScriptPath,[Text.Encoding]::Unicode)
           if ($normalizedText -cne $uiScript) { throw 'MicBridgeUI.ps1 text changed during UTF-16LE normalization.' }
-          Write-Host 'MICBRIDGEUI ENCODING NORMALIZED: UTF-16LE BOM; strict UTF-8 source decode; text round-trip verified.'
+          Write-Host 'MICBRIDGEUI ENCODING NORMALIZED: UTF-16LE BOM; strict UTF-8 decode and text round-trip verified.'
           # The installer imports this module from $PSScriptRoot\tools.
           # Keep the same relative layout in the staged package.
           $toolsPackage = Join-Path $package 'tools'
