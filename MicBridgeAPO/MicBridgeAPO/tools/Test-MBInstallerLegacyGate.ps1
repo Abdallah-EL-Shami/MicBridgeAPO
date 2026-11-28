@@ -50,7 +50,19 @@ foreach ($required in @(
     '$compositeBackupFile = Join-Path $dataDir ''install-composite-baseline-v2.json''',
     'install-com-registration-baseline-v2',
     'Test-MBInstallTransactionReceipt -ReceiptPath $activeReceipt.FullName -VerifyInstalledFiles',
-    'No current-installer receipt exists',
+    "`$receiptFiles = @()",
+    "`$receiptFiles = @(Get-ChildItem -LiteralPath `$dataDir -File -Filter 'install-transaction-*.receipt'",
+    "`$baselinePresent = Test-Path -LiteralPath `$backupFile",
+    "`$isManagedUpgrade = `$false",
+    'The receipt-bound baseline belongs to another capture endpoint',
+    'A baseline without a valid install receipt is accompanied by transaction state.',
+    'Endpoint FX properties still reference MicBridge',
+    'Baseline exists without any install receipt, transaction directory, or live MicBridge state.',
+    'install-baseline-v2.incomplete-',
+    '`$partialArchiveHash.Equals(`$partialBaselineHash',
+    "`$rollbackJournal = New-MBRecoveryJournal -Path `$rollbackJournalPath -Operation InstallRollback -DeviceId `$rollbackDeviceId -StepIds `$rollbackStepIds -TransactionId `$installTransactionId",
+    "TransactionId = `$installTransactionId.ToString('D')",
+    'Durable rollback journal transaction identity does not match the pre-persisted transaction snapshot.'
     'BaselineEvidenceSha256',
     "-Filter 'transactions-v2-*'",
     'transactions-v2-'
@@ -61,6 +73,29 @@ if ($source -notmatch '(?s)Test-MBLegacyInstallationState[^\r\n]*-ExpectedDevice
     throw 'FAIL: managed upgrade audit must ignore legacy backup content while checking current live state.'
 }
 
+# Transaction identity must exist in the snapshot before its first durable write,
+# and the recovery journal must receive exactly the same GUID.
+$stateInit = $source.IndexOf('$installTransactionId = [guid]::NewGuid()',[StringComparison]::Ordinal)
+$stateWrite = $source.IndexOf('Write-JsonAtomic -Value $transactionState -Path $transactionStateFile -Depth 10',[StringComparison]::Ordinal)
+$journalCreate = $source.IndexOf('$rollbackJournal = New-MBRecoveryJournal',[StringComparison]::Ordinal)
+if ($stateInit -lt 0 -or $stateWrite -lt $stateInit -or $journalCreate -lt $stateWrite -or
+    -not $source.Substring($stateInit,$stateWrite-$stateInit).Contains("TransactionId = `$installTransactionId.ToString('D')") -or
+    -not $source.Substring($journalCreate,[Math]::Min(900,$source.Length-$journalCreate)).Contains('-TransactionId $installTransactionId') -or
+    $source.Contains('$transactionState.TransactionId = [string]$rollbackJournal.TransactionId')) {
+    throw 'FAIL: transaction snapshot and rollback journal do not share a pre-persisted transaction GUID.'
+}
+
+# Partial baselines are preserved byte-for-byte before the canonical path is
+# replaced, and only after the copy hash is verified.
+$archiveCopy = $source.IndexOf('[IO.File]::Copy($backupFile,$partialArchivePath,$false)',[StringComparison]::Ordinal)
+$archiveVerify = $source.IndexOf('$partialArchiveHash.Equals($partialBaselineHash',[StringComparison]::Ordinal)
+$archiveMove = $source.IndexOf('Remove-Item -LiteralPath $backupFile -Force -ErrorAction Stop',[StringComparison]::Ordinal)
+if ($archiveCopy -lt 0 -or $archiveVerify -le $archiveCopy -or $archiveMove -le $archiveVerify) {
+    throw 'FAIL: incomplete baseline is not preserved and hash-verified before canonical baseline replacement.'
+}
+if ($source.IndexOf('$orphanTransactions = @(Get-ChildItem',[StringComparison]::Ordinal) -lt $source.IndexOf('if ($receiptFiles.Count -gt 0)',[StringComparison]::Ordinal)) {
+    throw 'FAIL: receipt-free transaction inventory must be checked before accepting a partial baseline.'
+}
 $auditCalls = @([regex]::Matches($source,'\$legacyAudit\s*=\s*Test-MBLegacyInstallationState')).Count
 $checkpoint = $source.IndexOf("Checkpoint-Computer -Description 'قبل MicBridge APO'",[StringComparison]::Ordinal)
 $lastAudit = $source.LastIndexOf('$legacyAudit = Test-MBLegacyInstallationState',[StringComparison]::Ordinal)
@@ -80,4 +115,4 @@ if (-not $workflow.Contains('MicBridge.InstallPackageFileLease.psm1')) { throw '
 if (-not $workflow.Contains('Test-MBInstallerLegacyGate.ps1') -or -not $workflow.Contains("Copy-Item 'build/Release/MicBridgeAPO.dll'")) {
     throw 'FAIL: CI must run this gate test and stage the built APO DLL.'
 }
-Write-Host 'PASS: clean install preserves and ignores legacy recovery files; live/ambiguous state blocks; upgrades require a receipt-backed v2 baseline; legacy transaction folders are not replayed.'
+Write-Host 'PASS: clean install preserves legacy recovery files; valid receipts alone authorize managed upgrades; receipt-free partial baselines require clean live state and are archived with hash verification; transaction snapshot and rollback journal share one pre-persisted GUID.'
