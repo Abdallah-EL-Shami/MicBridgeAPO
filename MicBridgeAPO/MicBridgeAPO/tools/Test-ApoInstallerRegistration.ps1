@@ -77,7 +77,7 @@ Assert-Contains $fullExecutor 'Restore-MBComRegistrySnapshot' 'Full executor res
 Assert-Contains $fullExecutor 'Restore-MBDllSnapshot' 'Full executor restores the previous DLL by hash'
 Assert-Contains $fullExecutor 'Restore-MBInstallSupportFiles' 'Full executor restores the four fixed support files'
 Assert-Contains $fullExecutor 'Restore-MBInstallMetadataSnapshot' 'Full executor restores configuration, shortcut and ProgramData ACL metadata'
-Assert-Contains $installer 'current MicBridge baseline is missing required endpoint association state' 'Installer refuses incomplete current v2 baseline data'
+Assert-Contains $installer 'receipt-bound baseline is missing required endpoint association state' 'Installer refuses incomplete receipt-bound baseline association data'
 Assert-NotContains $installer 'existingAssociation = [(]Get-ItemProperty' 'Installer does not infer historical association from current registry state'
 
 Assert-Contains $installer 'PKEY_CompositeFX_EndpointEffectClsid' 'Installer uses the Windows 10 composite endpoint-effect property'
