@@ -101,8 +101,16 @@ function Restore-MBEndpointRegistrySnapshot {
         }
     }
 
+    # Recovery may already have restored the exact snapshot before the journal
+    # was marked complete (for example, after a process interruption). In that
+    # case do not request write access or recreate/open the protected key.
+    if (Test-MBEndpointRegistrySnapshot -Snapshot $Snapshot) { return $true }
+
     if ($Snapshot.KeyExists) {
-        $key = $location.Hive.CreateSubKey($location.SubKey)
+        # Open an existing key for value writes. CreateSubKey is only appropriate
+        # when the original snapshot says the key existed but it is now absent.
+        $key = $location.Hive.OpenSubKey($location.SubKey,$true)
+        if (-not $key) { $key = $location.Hive.CreateSubKey($location.SubKey) }
         if (-not $key) { throw "Could not create or open endpoint registry key: $($location.Path)" }
         try {
             foreach ($entry in $Snapshot.Values) {
