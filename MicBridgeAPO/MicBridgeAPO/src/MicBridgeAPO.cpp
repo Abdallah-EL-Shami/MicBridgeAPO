@@ -983,14 +983,31 @@ public:
         return static_cast<ULONG>(refs);
     }
     STDMETHOD(CreateInstance)(IUnknown* outer, REFIID iid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        *ppv = nullptr;
-        if (outer) {
-            Log("ClassFactory::CreateInstance rejected aggregation");
-            return CLASS_E_NOAGGREGATION;
-        }
         wchar_t iidText[40] = {};
         StringFromGUID2(iid, iidText, ARRAYSIZE(iidText));
+        PVOID stackFrames[8] = {};
+        const USHORT frameCount = RtlCaptureStackBackTrace(
+            1, ARRAYSIZE(stackFrames), stackFrames, nullptr);
+        Log("ClassFactory::CreateInstance entry outer=%p aggregation=%d iid=%ls ppv=%p stackFrames=%u",
+            outer, outer != nullptr, iidText, ppv, (unsigned)frameCount);
+        for (USHORT i = 0; i < frameCount; ++i) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            wchar_t modulePath[MAX_PATH] = L"<unmapped>";
+            if (VirtualQuery(stackFrames[i], &mbi, sizeof(mbi)) == sizeof(mbi) && mbi.AllocationBase) {
+                GetModuleFileNameW((HMODULE)mbi.AllocationBase, modulePath, ARRAYSIZE(modulePath));
+            }
+            Log("ClassFactory::CreateInstance caller-frame[%u]=%p module=%ls",
+                (unsigned)i, stackFrames[i], modulePath);
+        }
+        if (!ppv) {
+            Log("ClassFactory::CreateInstance rejected: null ppv");
+            return E_POINTER;
+        }
+        *ppv = nullptr;
+        if (outer) {
+            Log("ClassFactory::CreateInstance rejected aggregation outer=%p iid=%ls", outer, iidText);
+            return CLASS_E_NOAGGREGATION;
+        }
         Log("ClassFactory::CreateInstance requested iid=%ls", iidText);
         MicBridgeAPO* o = new (std::nothrow) MicBridgeAPO();
         if (!o) {
