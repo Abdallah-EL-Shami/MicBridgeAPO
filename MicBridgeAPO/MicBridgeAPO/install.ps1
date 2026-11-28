@@ -222,6 +222,9 @@ try {
     Import-Module -Name $legacyAuditModule -Force -ErrorAction Stop
     $legacyAudit = Test-MBLegacyInstallationState -InstallDirectory $installDir -DataDirectory $dataDir -RegistryRoot 'HKLM:\' -IgnoreLegacyRecoveryBackups
     Write-EarlyInstallLog 'INFO' "Read-only legacy audit outcome='$($legacyAudit.Outcome)'; findings=$(@($legacyAudit.Findings).Count)."
+    # Product-looking live state is deferred until device discovery: a valid receipt may
+    # authorize the managed-upgrade path, while receipt-free product state is blocked
+    # by the later partial-baseline gate. Unknown/foreign state remains blocked here.
     # Recovery evidence from the retired installer is preserved and ignored:
     # it is neither restored nor used as the new install baseline. Only live
     # registrations, old binaries/support files, unknown install files, foreign
@@ -229,8 +232,7 @@ try {
     $blockingLegacyClasses = @(
         'Ambiguous','Unreadable','MissingOrUnresolvedServer','InvalidServerPath',
         'ForeignOrSharedServer','UnclassifiedFile','ReparsePointPreserved',
-        'InvalidOrInsufficient','MissingPermanentBackup','MicBridgeCandidate',
-        'MicBridgeBinaryCandidate','MicBridgeSupportFileCandidate'
+        'InvalidOrInsufficient','MissingPermanentBackup'
     )
     $blockingLegacy = @($legacyAudit.Findings | Where-Object { $_.Classification -in $blockingLegacyClasses })
     if (-not $legacyAudit.IsReadOnly -or $legacyAudit.CleanupAllowed -ne $false -or
