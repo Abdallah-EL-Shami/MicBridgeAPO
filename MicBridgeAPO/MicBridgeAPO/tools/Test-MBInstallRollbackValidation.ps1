@@ -264,11 +264,17 @@ Invoke-MBRecoveryStep -Path $Journal -StepId 'RestoreCom' -ExpectedOperation Ins
     if (-not $preflight.IsValid -or -not $preflight.ReplaySafe) {
         throw "FAIL: valid durable transaction preflight rejected: $($preflight.Errors -join '; ')"
     }
+    if (-not (Get-Command New-MBRecoveryJournal -ErrorAction SilentlyContinue)) {
+        throw 'FAIL: recovery journal command disappeared after valid transaction preflight'
+    }
     $state.TransactionId = [guid]::NewGuid().ToString('D')
     [IO.File]::WriteAllText((Join-Path $tx 'state.json'),(ConvertTo-Json -InputObject $state -Depth 20),(New-Object Text.UTF8Encoding($false)))
     $mismatchedPreflight = Test-MBInstallRollbackTransaction -JournalPath $preflightJournalPath -StatePath (Join-Path $tx 'state.json') -TransactionDirectory $tx -DataDirectory $data -ExpectedDeviceId $device -ExpectedStepIds $preflightSteps
     if ($mismatchedPreflight.IsValid -or -not ($mismatchedPreflight.Errors -match 'transaction identities do not match')) {
         throw 'FAIL: preflight accepted a state snapshot from a different transaction'
+    }
+    if (-not (Get-Command New-MBRecoveryJournal -ErrorAction SilentlyContinue)) {
+        throw 'FAIL: recovery journal command disappeared after rejected transaction preflight'
     }
 
     Write-Host 'PASS: rollback snapshot identity, path confinement, file hashes, transaction-bound COM exports, mock registry verification, and real HKCU export verification and fresh-process COM crash recovery'
