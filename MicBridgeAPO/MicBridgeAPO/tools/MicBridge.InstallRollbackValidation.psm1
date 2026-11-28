@@ -379,7 +379,7 @@ function Test-MBInstallRollbackTransaction {
         if (-not (Test-Path -LiteralPath $journalModule -PathType Leaf)) {
             throw 'Recovery journal module is missing.'
         }
-        Import-Module -Name $journalModule -Force -ErrorAction Stop
+        Import-Module -Name $journalModule -Force -Global -ErrorAction Stop
 
         $expectedJournal = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory 'rollback-recovery.json'))
         $expectedState = [IO.Path]::GetFullPath((Join-Path $TransactionDirectory 'state.json'))
