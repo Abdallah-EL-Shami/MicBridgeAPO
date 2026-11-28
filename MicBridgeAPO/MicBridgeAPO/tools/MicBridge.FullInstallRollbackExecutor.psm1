@@ -40,7 +40,7 @@ function Test-MBFullRollbackNoReparse {
 
 function Get-MBFullRollbackEndpointSnapshot {
     param([Parameter(Mandatory)][object]$State,[Parameter(Mandatory)][ValidateSet('HKLM','HKCU')][string]$RegistryHive)
-    $device=[guid]::Parse([string]$State.DeviceId).ToString('D')
+    $device='{' + ([guid]::Parse([string]$State.DeviceId).ToString('D')) + '}'
     $captureRoot='SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
     $fxPath="$captureRoot\$device\FxProperties"
     return [pscustomobject]@{
@@ -133,7 +133,7 @@ function Invoke-MBInstallFullRollback {
         }
         $device=[guid]$state.DeviceId
         $endpointSnapshot=Get-MBFullRollbackEndpointSnapshot -State $state -RegistryHive $RegistryHive
-        $captureSub="SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\$($device.ToString('D'))"
+        $captureSub="SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{$($device.ToString('D'))}"
         $fxSub="$captureSub\FxProperties"
         $dllArgs=Get-MBFullRollbackDllArguments -State $state -DataDirectory $data -InstallDirectory $install
 
