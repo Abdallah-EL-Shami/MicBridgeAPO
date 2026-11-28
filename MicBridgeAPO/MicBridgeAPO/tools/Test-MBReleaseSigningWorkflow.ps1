@@ -51,7 +51,9 @@ if ($release -notmatch 'AUTHENTICODE NEGATIVE CONTROL PASSED' -or
 if ($release -notmatch 'WINDOWS POWERSHELL 5[.]1 UI SIGNATURE DIGEST AND PINNED SIGNER VERIFIED' -or
     $release -notmatch 'WindowsPowerShell/v1[.]0/powershell[.]exe' -or
     $release -notmatch '\$scriptFile[.]Name -eq ''MicBridgeUI[.]ps1''' -or
-    $release -notmatch '\$verifyResult[.]SignerCertificate[.]Thumbprint -ne \$Thumbprint' -or
+    $release -notmatch '\$signature[.]SignerCertificate[.]Thumbprint -ne \$Thumbprint' -or
+    $release -notmatch '& \$isAcceptable \$signResult' -or
+    $release -notmatch '& \$isAcceptable \$verifyResult' -or
     $release -notmatch 'MicBridgeUI[.]ps1') {
     throw 'MicBridgeUI.ps1 must be signed and digest-verified by Windows PowerShell 5.1 with the pinned signer.'
 }
