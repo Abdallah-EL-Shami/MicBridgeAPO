@@ -34,7 +34,10 @@ Assert-Contains $uninstaller 'return \(\[bool\]\$Backup\.CreatedFx -and \[string
 Assert-NotContains $uninstaller 'Remove-Item\s+-LiteralPath\s+\$fxPath\s+-Recurse' 'Uninstaller never recursively deletes FxProperties and unrelated driver values'
 
 Assert-Contains $installer 'DllSource\s+`"\$DllSource`"' 'Elevated installer relaunch preserves the selected DLL source path'
-Assert-Contains $installer 'Refuse to reuse a backup created for a different capture endpoint' 'Installer documents the backup/device identity guard'
+Assert-Contains $installer 'A baseline file alone is not proof of a completed install' 'Installer does not treat a baseline file alone as proof of a managed installation'
+Assert-Contains $installer '\$receiptFiles\s*=\s*@\(\)' 'Installer inventories install transaction receipts independently of baseline files'
+Assert-Contains $installer '\$receiptFiles\.Count\s+-gt\s+0' 'Only an existing transaction receipt can enter the managed-upgrade path'
+Assert-Contains $installer 'Baseline exists without any install receipt, transaction directory, or live MicBridge state' 'Installer classifies a receipt-free baseline only after clean-state checks'
 Assert-Contains $installer '\[string\]\$existingBackup\.DeviceId\s+-ne\s+\[string\]\$dev\.Id' 'Installer refuses a backup belonging to another endpoint'
 Assert-Contains $installer 'قد تكون بعض تغييرات Registry قد نُفذت' 'Installer warns that a failed run may have made partial changes'
 Assert-NotContains $installer 'شغّل uninstall\.bat للتراجع' 'Installer does not recommend broad uninstall as automatic partial rollback'
