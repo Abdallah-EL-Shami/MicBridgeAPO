@@ -26,46 +26,75 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
+          function Write-Stage {
+            param([Parameter(Mandatory = $true)][string]$Message)
+            Write-Host ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff K'), $Message)
+          }
+
+          $total = [Diagnostics.Stopwatch]::StartNew()
           $work = Join-Path $env:RUNNER_TEMP 'MicBridgeAPO-UI-Authenticode-Test'
           $myStore = 'Cert:\CurrentUser\My'
           $rootStore = 'Cert:\CurrentUser\Root'
           $cert = $null
           $thumb = $null
-          New-Item -ItemType Directory -Force -Path $work | Out-Null
 
           try {
-            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MicBridgeAPO Ephemeral UI Authenticode Test' -CertStoreLocation $myStore -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
-            if ($null -eq $cert -or -not $cert.HasPrivateKey) { throw 'Could not create the temporary code-signing certificate.' }
-            $thumb = $cert.Thumbprint
+            Write-Stage 'Preparing isolated temporary work directory.'
+            New-Item -ItemType Directory -Force -Path $work | Out-Null
+            Write-Stage 'Temporary work directory is ready.'
 
+            Write-Stage 'Starting New-SelfSignedCertificate (RSA 2048, SHA256).'
+            $certificateTimer = [Diagnostics.Stopwatch]::StartNew()
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MicBridgeAPO Ephemeral UI Authenticode Test' -CertStoreLocation $myStore -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2) -ErrorAction Stop
+            $certificateTimer.Stop()
+            Write-Stage ("New-SelfSignedCertificate returned after {0:n2}s." -f $certificateTimer.Elapsed.TotalSeconds)
+
+            if ($null -eq $cert) { throw 'New-SelfSignedCertificate returned no certificate.' }
+            Write-Stage 'Checking that the temporary certificate has a private key.'
+            if (-not $cert.HasPrivateKey) { throw 'Could not create the temporary code-signing certificate with a private key.' }
+            $thumb = $cert.Thumbprint
+            Write-Stage ("Temporary certificate created: {0}" -f $thumb)
+
+            Write-Stage 'Exporting the public certificate.'
             $publicCertPath = Join-Path $work 'ui-test-signing.cer'
             Export-Certificate -Cert $cert -FilePath $publicCertPath -Force | Out-Null
+            Write-Stage 'Importing the public certificate into the ephemeral runner CurrentUser Root store.'
             Import-Certificate -FilePath $publicCertPath -CertStoreLocation $rootStore | Out-Null
 
+            Write-Stage 'Creating the PowerShell UI test script.'
             $scriptPath = Join-Path $work 'MicBridgeUI.ps1'
             [IO.File]::WriteAllText($scriptPath, "Write-Output 'MicBridgeUI Authenticode test'`r`n", [Text.UTF8Encoding]::new($false))
 
+            Write-Stage 'Signing the UI test script with SHA256.'
             $signResult = Set-AuthenticodeSignature -FilePath $scriptPath -Certificate $cert -HashAlgorithm SHA256
+            Write-Stage ("Signing command returned: {0}" -f $signResult.Status)
+
+            Write-Stage 'Verifying the Authenticode signature and signer thumbprint.'
             $verifyResult = Get-AuthenticodeSignature -FilePath $scriptPath
             if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
                 $verifyResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+                $null -eq $verifyResult.SignerCertificate -or
                 $verifyResult.SignerCertificate.Thumbprint -ne $thumb) {
               throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
             }
-            Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $thumb"
+            Write-Stage ("WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: {0}" -f $thumb)
 
+            Write-Stage 'Creating a one-byte-modified copy of the signed script.'
             $tamperedPath = Join-Path $work 'MicBridgeUI-tampered.ps1'
             $bytes = [IO.File]::ReadAllBytes($scriptPath)
             if ($bytes.Length -lt 2) { throw 'Signed UI test script is unexpectedly too short.' }
             $bytes[0] = $bytes[0] -bxor 1
             [IO.File]::WriteAllBytes($tamperedPath, $bytes)
+
+            Write-Stage 'Verifying that Authenticode rejects the modified script.'
             $tamperedResult = Get-AuthenticodeSignature -FilePath $tamperedPath
             if ($tamperedResult.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
               throw "Modified UI script was not rejected: status=$($tamperedResult.Status); message=$($tamperedResult.StatusMessage)"
             }
-            Write-Host 'UI AUTHENTICODE TAMPER REJECTION PASSED.'
+            Write-Stage 'UI AUTHENTICODE TAMPER REJECTION PASSED.'
           }
           finally {
+            Write-Stage 'Cleaning up temporary certificate stores and files.'
             if ($thumb) {
               $myCertPath = Join-Path $myStore $thumb
               $rootCertPath = Join-Path $rootStore $thumb
@@ -73,4 +102,6 @@ jobs:
               if (Test-Path -LiteralPath $myCertPath) { Remove-Item -LiteralPath $myCertPath -Force -ErrorAction SilentlyContinue }
             }
             if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+            $total.Stop()
+            Write-Stage ("Test script finished cleanup. Elapsed: {0:n2}s." -f $total.Elapsed.TotalSeconds)
           }
