@@ -1,8 +1,6 @@
 name: signed-release
+# Deliberately manual: tag pushes must not launch signing without an explicit operator action.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 permissions:
   contents: read
