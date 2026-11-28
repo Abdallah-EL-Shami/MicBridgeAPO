@@ -966,6 +966,8 @@ private:
     // ------------------------------------------------------------ الحالة
     std::mutex m_statusMutex;
     std::atomic<long> m_ref{1};
+    IUnknown* m_outer = nullptr;
+    NonDelegatingUnknown m_nonDelegatingUnknown;
     bool m_initialized = false;
     bool m_locked = false;
     Config m_cfg{};
