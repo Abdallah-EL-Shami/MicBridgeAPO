@@ -59,10 +59,10 @@ foreach ($required in @(
     'Endpoint FX properties still reference MicBridge',
     'Baseline exists without any install receipt, transaction directory, or live MicBridge state.',
     'install-baseline-v2.incomplete-',
-    '`$partialArchiveHash.Equals(`$partialBaselineHash',
+    '$partialArchiveHash.Equals($partialBaselineHash',
     "`$rollbackJournal = New-MBRecoveryJournal -Path `$rollbackJournalPath -Operation InstallRollback -DeviceId `$rollbackDeviceId -StepIds `$rollbackStepIds -TransactionId `$installTransactionId",
     "TransactionId = `$installTransactionId.ToString('D')",
-    'Durable rollback journal transaction identity does not match the pre-persisted transaction snapshot.'
+    'Durable rollback journal transaction identity does not match the pre-persisted transaction snapshot.',
     'BaselineEvidenceSha256',
     "-Filter 'transactions-v2-*'",
     'transactions-v2-'
