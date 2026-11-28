@@ -292,7 +292,7 @@ jobs:
             throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
           }
           Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE DIGEST AND PINNED SIGNER VERIFIED: $Thumbprint"
-          '@@
+          '@
                   try {
                     [IO.File]::WriteAllText($legacySignerPath,$legacySigner,[Text.UTF8Encoding]::new($false))
                     $windowsPowerShell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
