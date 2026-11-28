@@ -330,7 +330,7 @@ function Restore-Sddl([string]$sub, [string]$sddl) {
 }
 
 function Get-RegistryValueSnapshot([string]$sub, [string]$name) {
-    $key = $hklm.OpenSubKey($sub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [Microsoft.Win32.RegistryRights]::ReadKey)
+    $key = $hklm.OpenSubKey($sub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [System.Security.AccessControl.RegistryRights]::ReadKey)
     if (-not $key) { return [pscustomobject]@{ KeyExists=$false; Exists=$false; Kind='String'; Value=$null } }
     try {
         if ($key.GetValueNames() -notcontains $name) { return [pscustomobject]@{ KeyExists=$true; Exists=$false; Kind='String'; Value=$null } }
@@ -392,7 +392,18 @@ foreach ($k in Get-ChildItem $capRoot) {
         $found += [pscustomobject]@{ Id = $k.PSChildName; Names = (($names | Select-Object -First 3 | ForEach-Object Value) -join ' | ') }
     }
 }
-if ($found.Count -eq 0) { throw "لم أجد مايكًا نشطًا يحتوي الاسم '$DeviceName'. تأكد أنه موصول ومفعّل في Recording." }
+if ($found.Count -eq 0) {
+    $deviceNotFoundMessage = "لم يتم العثور على ميكروفون نشط يطابق الاسم '$DeviceName'."
+    Write-InstallLog 'WARN' "Device discovery stopped before installation changes. RequestedDevice='$DeviceName'."
+    Write-Host ""
+    Write-Host "لم يتم العثور على الميكروفون المطلوب." -ForegroundColor Yellow
+    Write-Host "اسم الميكروفون: $DeviceName"
+    Write-Host "يرجى توصيل الميكروفون، ثم التأكد من ظهوره وتمكينه ضمن Settings > System > Sound > Input (Recording)."
+    Write-Host "بعد ذلك أعد تشغيل المثبّت."
+    Write-Host "لم تبدأ تغييرات التثبيت؛ أُوقف الفحص قبل إنشاء معاملة التثبيت أو تعديل إعدادات Registry."
+    Write-Host "سجل التشخيص: $installLog" -ForegroundColor Yellow
+    return
+}
 if ($found.Count -gt 1) { $found | Format-Table | Out-String | Write-Host; throw "أكثر من جهاز يطابق الاسم. اكتب اسمًا أدق عبر -DeviceName" }
 $dev = $found[0]
 
@@ -511,7 +522,7 @@ if (-not (Test-Path $backupFile)) {
 # Preserve the composite EFX list separately from the immutable first-install backup.
 # This value is REG_MULTI_SZ on Windows 10 1803+ and allows coexisting endpoint APOs.
 if (-not (Test-Path -LiteralPath $compositeBackupFile)) {
-    $fxKey = $hklm.OpenSubKey($fxSub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [Microsoft.Win32.RegistryRights]::ReadKey)
+    $fxKey = $hklm.OpenSubKey($fxSub, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree, [System.Security.AccessControl.RegistryRights]::ReadKey)
     $compositeExists = $false; $compositeKind = 'MultiString'; $compositeValue = @()
     if ($fxKey) {
         try {
