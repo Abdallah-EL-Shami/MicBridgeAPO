@@ -25,9 +25,6 @@ foreach ($required in @(
     'Test-MBLegacyInstallationState',
     '-IgnoreLegacyRecoveryBackups',
     '$blockingLegacyClasses',
-    "'MicBridgeCandidate'",
-    "'MicBridgeBinaryCandidate'",
-    "'MicBridgeSupportFileCandidate'",
     "'ForeignOrSharedServer'",
     "'UnclassifiedFile'",
     "'ReparsePointPreserved'",
@@ -35,6 +32,12 @@ foreach ($required in @(
     'No installation was attempted.'
 )) {
     if (-not $gate.Contains($required)) { throw "FAIL: clean-install gate is missing required invariant: $required" }
+}
+if ($gate.Contains("'MicBridgeCandidate'") -or $gate.Contains("'MicBridgeBinaryCandidate'") -or $gate.Contains("'MicBridgeSupportFileCandidate'")) {
+    throw 'FAIL: the pre-device audit must defer product-looking state to the receipt-aware upgrade/partial-baseline classifier.'
+}
+foreach ($required in @("'MicBridgeCandidate'","'MicBridgeBinaryCandidate'","'MicBridgeSupportFileCandidate'")) {
+    if (-not $source.Contains($required)) { throw "FAIL: receipt-free partial-baseline classification must block live product state: $required" }
 }
 if ($gate.Contains("'MicBridgeRecoveryEvidence'")) { throw 'FAIL: legacy recovery evidence must not be included in the clean-install blocking classifications.' }
 if ($gate -match '(?i)\b(Remove-Item|Remove-ItemProperty|Set-ItemProperty|New-ItemProperty|reg\.exe\s+(delete|add))\b') {
