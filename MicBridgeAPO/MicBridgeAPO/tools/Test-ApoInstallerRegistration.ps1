@@ -49,6 +49,7 @@ Assert-Contains $installer 'Installation failed:' 'Installer logs detailed failu
 Assert-Contains $installer 'dll-backups' 'Installer preserves the previous DLL before replacement'
 Assert-Contains $installer '\$transactionState\.DllBackupPath\s*=\s*\$dllBackupPath' 'Installer durably records the previous DLL backup path'
 Assert-Contains $installer '\$transactionState\.DllBackupSha256\s*=\s*\$dllBackupHash' 'Installer durably records the previous DLL backup hash'
+Assert-Contains $installer '(?s)\$transactionState\s*=\s*\[pscustomobject\]@\{.{0,5000}?DllBackupPath\s*=\s*\$null.{0,500}?DllBackupSha256\s*=\s*\$null' 'Installer initializes both DLL backup fields before assigning them'
 Assert-Contains $installer '\$transactionState\.DllReplacementStarted\s*=\s*\$true' 'Installer durably marks the DLL replacement boundary before mutation'
 Assert-Contains $rollbackModule 'Test-MBPathWithinDirectory.{0,200}BackupPath' 'Rollback rejects DLL backups outside its dedicated directory'
 Assert-Contains $rollbackModule 'Test-MBNoReparsePath.{0,200}BackupPath' 'Rollback rejects DLL backups traversing reparse points'
