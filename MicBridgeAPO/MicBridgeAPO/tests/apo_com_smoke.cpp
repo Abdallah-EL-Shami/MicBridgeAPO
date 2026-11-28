@@ -11,6 +11,35 @@ static const CLSID CLSID_MicBridgeAPO =
 
 using DllGetClassObjectFn = HRESULT (STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*);
 
+// Minimal controlling unknown used to exercise COM aggregation. The outer
+// exposes IUnknown itself and delegates all other interfaces to the inner.
+class TestOuter final : public IUnknown {
+public:
+    IUnknown* inner = nullptr;
+    ULONG refs = 1;
+
+    STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = nullptr;
+        if (iid == IID_IUnknown) {
+            *ppv = static_cast<IUnknown*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return inner ? inner->QueryInterface(iid, ppv) : E_NOINTERFACE;
+    }
+    STDMETHOD_(ULONG, AddRef)() override { return ++refs; }
+    STDMETHOD_(ULONG, Release)() override {
+        const ULONG remaining = --refs;
+        if (remaining == 0 && inner) {
+            IUnknown* owned = inner;
+            inner = nullptr;
+            owned->Release();
+        }
+        return remaining;
+    }
+};
+
 #define CHECK_HR(expr) do { HRESULT _hr=(expr); if (FAILED(_hr)) { std::printf("FAIL line %d: %s -> 0x%08X\\n", __LINE__, #expr, (unsigned)_hr); return 1; } } while (0)
 #define CHECK_TRUE(expr) do { if (!(expr)) { std::printf("FAIL line %d: %s\\n", __LINE__, #expr); return 1; } } while (0)
 
@@ -77,6 +106,38 @@ int wmain(int argc, wchar_t** argv) {
     config->Release();
     rt->Release();
     apo->Release();
+
+    // Aggregation is accepted only when the factory is asked for the inner
+    // IUnknown. All public APO interfaces must share the outer identity.
+    TestOuter outer;
+    IAudioProcessingObject* invalidAggregated = nullptr;
+    HRESULT invalidAggregation = factory->CreateInstance(
+        &outer, __uuidof(IAudioProcessingObject),
+        reinterpret_cast<void**>(&invalidAggregated));
+    CHECK_TRUE(invalidAggregation == CLASS_E_NOAGGREGATION);
+    CHECK_TRUE(invalidAggregated == nullptr);
+
+    IUnknown* innerUnknown = nullptr;
+    CHECK_HR(factory->CreateInstance(&outer, IID_IUnknown,
+                                     reinterpret_cast<void**>(&innerUnknown)));
+    CHECK_TRUE(innerUnknown != nullptr);
+    outer.inner = innerUnknown;
+    CHECK_TRUE(canUnload() == S_FALSE);
+
+    IAudioProcessingObject* aggregatedApo = nullptr;
+    CHECK_HR(outer.QueryInterface(__uuidof(IAudioProcessingObject),
+                                  reinterpret_cast<void**>(&aggregatedApo)));
+    IUnknown* aggregatedIdentity = nullptr;
+    CHECK_HR(aggregatedApo->QueryInterface(IID_IUnknown,
+                                           reinterpret_cast<void**>(&aggregatedIdentity)));
+    CHECK_TRUE(aggregatedIdentity == static_cast<IUnknown*>(&outer));
+    aggregatedIdentity->Release();
+    CHECK_HR(aggregatedApo->Initialize(0, nullptr));
+    aggregatedApo->Release();
+    CHECK_TRUE(outer.refs == 1);
+    outer.Release();
+    CHECK_TRUE(outer.inner == nullptr);
+    CHECK_TRUE(canUnload() == S_FALSE);
 
     // A fresh object must reject a malformed initialization header.
     IAudioProcessingObject* invalidApo = nullptr;
