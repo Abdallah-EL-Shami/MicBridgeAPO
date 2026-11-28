@@ -285,7 +285,7 @@ jobs:
             if ($signature.Status -eq [Management.Automation.SignatureStatus]::Valid) { return $true }
             return (
               $signature.Status -eq [Management.Automation.SignatureStatus]::UnknownError -and
-              [string]$signature.StatusMessage -eq 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.'
+              [string]$signature.StatusMessage -match '^A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider\.?$'
             )
           }
           if (-not (& $isAcceptable $signResult) -or -not (& $isAcceptable $verifyResult)) {
@@ -328,7 +328,7 @@ jobs:
                 if ($signature.Status -eq [Management.Automation.SignatureStatus]::Valid) { return $true }
                 return (
                   $signature.Status -eq [Management.Automation.SignatureStatus]::UnknownError -and
-                  [string]$signature.StatusMessage -eq 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.'
+                  [string]$signature.StatusMessage -match '^A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider\.?$'
                 )
               }
               if (-not (& $isAcceptedAuthenticodeResult $signedScript) -or
