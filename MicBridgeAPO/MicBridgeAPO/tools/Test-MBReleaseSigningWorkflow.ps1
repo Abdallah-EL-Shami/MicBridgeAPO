@@ -11,9 +11,12 @@ $release = Get-Content -LiteralPath $releasePath -Raw
 $build = Get-Content -LiteralPath $buildPath -Raw
 
 $requiredReleasePatterns = [ordered]@{
-    'version-tag push trigger' = '(?m)^on:\s*\r?\n\s*push:\s*\r?\n\s*tags:\s*\r?\n\s*-\s*''v\*''\s*\r?\n\s*workflow_dispatch:\s*
+    'version-tag push trigger' = '(?m)^on:\s*\r?\n\s*push:\s*\r?\n\s*tags:\s*\r?\n\s*-\s*''v\*''\s*\r?\n\s*workflow_dispatch:\s*$'
     'manual dispatch trigger' = '(?m)^\s*workflow_dispatch:\s*$'
     'tag-only job guard' = "github\.ref_type\s*==\s*'tag'.*startsWith\(github\.ref,\s*'refs/tags/v'\)"
+    'release tag semantic validation' = 'GITHUB_REF_NAME.*v\d+\.\d+\.\d+'
+    'approved branch ancestry validation' = 'merge-base --is-ancestor.*refs/remotes/origin/release/practical-stability'
+    'full history checkout for ancestry validation' = '(?s)actions/checkout@v4\s+with:\s+fetch-depth:\s+0'
     'protected signing environment' = '(?m)^\s*environment:\s*$[\r\n]+\s*name:\s*release-signing\s*$'
     'PFX Base64 environment secret' = 'MB_RELEASE_SIGNING_PFX_BASE64:\s*\$\{\{\s*secrets\.MB_RELEASE_SIGNING_PFX_BASE64\s*\}\}'
     'PFX password environment secret' = 'MB_RELEASE_SIGNING_PFX_PASSWORD:\s*\$\{\{\s*secrets\.MB_RELEASE_SIGNING_PFX_PASSWORD\s*\}\}'
@@ -31,7 +34,7 @@ $requiredReleasePatterns = [ordered]@{
 foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
     if ($release -notmatch $entry.Value) { throw "Release signing workflow is missing invariant: $($entry.Key)" }
 }
-if ($release -match '(?im)^\s*push\s*:') { throw 'Release signing workflow must remain manual-only; push triggers are prohibited.' }
+if ($release -match '(?im)^\s*push\s*:\s*\r?\n\s*branches\s*:') { throw 'Release signing workflow must never trigger on branch pushes.' }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
 if ($release -notmatch 'Import-Certificate -FilePath \$publicCertPath -CertStoreLocation ''Cert:\\CurrentUser\\Root''' -or
