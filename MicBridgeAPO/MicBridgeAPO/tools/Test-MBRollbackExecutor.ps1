@@ -86,7 +86,8 @@ try {
     $shortcutNewHash=(Get-FileHash $shortcutPackageFixture -Algorithm SHA256).Hash
 
     $captureSub="SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{$($device.ToString('D'))}"
-    if($captureSub -notmatch '\\Capture\\\{[0-9a-fA-F-]{36}\}
+    if($captureSub -notmatch '\\Capture\\\{[0-9a-fA-F-]{36}\}$') { throw 'FAIL: endpoint Capture path must include the device GUID braces' }
+    $fxSub="$captureSub\FxProperties"
     $captureKey=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($captureSub)
     $fxKey=$captureKey.CreateSubKey('FxProperties')
     $fxKey.SetValue('{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7','{11111111-1111-1111-1111-111111111111}',[Microsoft.Win32.RegistryValueKind]::String)
