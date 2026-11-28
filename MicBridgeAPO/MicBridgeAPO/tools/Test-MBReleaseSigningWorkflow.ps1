@@ -40,7 +40,7 @@ if ($release -notmatch 'WINDOWS POWERSHELL 5[.]1 UI SIGNATURE VERIFIED' -or
     $release -notmatch 'WindowsPowerShell/v1[.]0/powershell[.]exe' -or
     $release -notmatch '\$scriptFile[.]Name -eq ''MicBridgeUI[.]ps1''' -or
     $release -notmatch 'SignatureStatus]::Valid' -or
-    $release -notmatch 'SignerCertificate[.]Thumbprint -ne \$thumb') {
+    $release -notmatch '\$verifyResult[.]SignerCertificate[.]Thumbprint -ne \$Thumbprint') {
     throw 'MicBridgeUI.ps1 must be signed and verified by Windows PowerShell 5.1 with the pinned signer.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
