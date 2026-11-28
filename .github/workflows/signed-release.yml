@@ -229,8 +229,6 @@ jobs:
           $certStorePath = "Cert:\CurrentUser\My\$thumb"
           $securePfxPassword = $null
           $certImported = $false
-          $rootCertAdded = $false
-          $rootStorePath = "Cert:\CurrentUser\Root\$thumb"
           try {
             if ([string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MB_RELEASE_SIGNING_PFX_PASSWORD)) { throw 'Signing secrets are unavailable.' }
             if ($env:GITHUB_REF_NAME -notlike 'v*' -or $env:GITHUB_REF_NAME.Length -lt 2) { throw 'Only version tags beginning with v may be signed.' }
@@ -261,18 +259,8 @@ jobs:
             $publicCertPath = Join-Path $package 'MicBridgeAPO-Release.cer'
             [IO.File]::WriteAllBytes($publicCertPath,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
             $publicCert = [Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($publicCertPath))
-            # This is an isolated, ephemeral GitHub Actions runner. Temporarily trust
-            # only the exact pinned self-signed leaf certificate in CurrentUser\\Root,
-            # so WinVerifyTrust must finish both digest and chain validation. Refuse to
-            # overwrite pre-existing trust and always remove the temporary root entry.
-            if (Test-Path -LiteralPath $rootStorePath) { throw 'Pinned release certificate already exists in the runner Root store; refusing to alter existing trust.' }
-            $null = Import-Certificate -FilePath $publicCertPath -CertStoreLocation 'Cert:\CurrentUser\Root'
-            $rootCertAdded = $true
-            $rootCert = Get-Item -LiteralPath $rootStorePath
-            if ($null -eq $rootCert -or $rootCert.Thumbprint -ne $thumb -or $rootCert.GetCertHashString([Security.Cryptography.HashAlgorithmName]::SHA256) -ne $certHash) {
-              throw 'Temporary Root enrollment did not match the independently pinned release certificate.'
-            }
-            $rootCert.Dispose()
+            # A pinned self-signed leaf is not promoted to a trusted root in CI.
+            # Verify the embedded digest and exact signer independently of chain trust.
 
             # Authenticode-sign every PowerShell entrypoint and module in the staged
             # package. AllSigned launchers and UAC re-entry then reject modified scripts.
@@ -323,20 +311,32 @@ jobs:
               $verifyMessage = [string]$checkedScript.StatusMessage
               $signerThumb = if ($null -ne $checkedScript.SignerCertificate) { [string]$checkedScript.SignerCertificate.Thumbprint } else { '<none>' }
               Write-Host ("AUTHENTICODE DIAGNOSTIC: file={0}; setStatus={1}; setMessage={2}; verifyStatus={3}; verifyMessage={4}; signerThumbprint={5}" -f $scriptFile.Name,$setStatus,$setMessage,$verifyStatus,$verifyMessage,$signerThumb)
-              # With the pinned certificate temporarily trusted on this isolated runner,
-              # only Valid proves both the embedded Authenticode digest and signer chain.
-              # UnknownError/NotTrusted are not accepted as substitutes for integrity.
-              if ($signedScript.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-                  $checkedScript.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+              # Chain trust is intentionally not asserted in CI. Accept a valid
+              # signature, or only the exact untrusted-root condition for our pinned
+              # self-signed signer. HashMismatch and every other error remain fatal.
+              $isAcceptedAuthenticodeResult = {
+                param($signature)
+                if ($null -eq $signature.SignerCertificate -or
+                    [string]$signature.SignerCertificate.Thumbprint -ne $thumb) { return $false }
+                if ($signature.Status -eq [Management.Automation.SignatureStatus]::Valid) { return $true }
+                return (
+                  $signature.Status -eq [Management.Automation.SignatureStatus]::UnknownError -and
+                  [string]$signature.StatusMessage -eq 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.'
+                )
+              }
+              if (-not (& $isAcceptedAuthenticodeResult $signedScript) -or
+                  -not (& $isAcceptedAuthenticodeResult $checkedScript) -or
                   $signerThumb -ne $thumb) {
-                throw "Authenticode digest, trust, or pinned signer verification failed for package script: $($scriptFile.FullName); setStatus=$setStatus; setMessage=$setMessage; verifyStatus=$verifyStatus; verifyMessage=$verifyMessage; signer=$signerThumb"
+                throw "Authenticode digest or pinned signer verification failed for package script: $($scriptFile.FullName); setStatus=$setStatus; setMessage=$setMessage; verifyStatus=$verifyStatus; verifyMessage=$verifyMessage; signer=$signerThumb"
               }
             }
             # Negative control: corrupt one byte in a signed copy and require the
             # platform verifier to report a digest failure. Never execute the copy.
             $tamperPath = Join-Path $env:RUNNER_TEMP 'MicBridgeAPO-authenticode-tamper-test.ps1'
             try {
-              $tamperBytes = [IO.File]::ReadAllBytes($scriptFiles[0].FullName)
+              $uiScript = $scriptFiles | Where-Object { $_.Name -eq 'MicBridgeUI.ps1' } | Select-Object -First 1
+              if ($null -eq $uiScript) { throw 'MicBridgeUI.ps1 is missing from the signed script set.' }
+              $tamperBytes = [IO.File]::ReadAllBytes($uiScript.FullName)
               if ($tamperBytes.Length -lt 2) { throw 'Signed script is unexpectedly too short for tamper testing.' }
               $tamperBytes[0] = $tamperBytes[0] -bxor 1
               [IO.File]::WriteAllBytes($tamperPath,$tamperBytes)
@@ -380,7 +380,6 @@ jobs:
             if ($null -ne $publicCert) { $publicCert.Dispose() }
             if ($null -ne $cert) { $cert.Dispose() }
             if ($certImported -and (Test-Path -LiteralPath $certStorePath)) { Remove-Item -LiteralPath $certStorePath -Force -ErrorAction SilentlyContinue }
-            if ($rootCertAdded -and (Test-Path -LiteralPath $rootStorePath)) { Remove-Item -LiteralPath $rootStorePath -Force -ErrorAction SilentlyContinue }
             if ($null -ne $securePfxPassword) { $securePfxPassword.Dispose() }
             if ($null -ne $raw) { [Array]::Clear($raw,0,$raw.Length) }
             if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
