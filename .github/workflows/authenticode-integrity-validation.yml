@@ -5,7 +5,6 @@ on:
       - release/practical-stability
     paths:
       - '.github/workflows/authenticode-integrity-validation.yml'
-      - '.github/workflows/signed-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -16,17 +15,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
+  validate-ui-authenticode:
+    name: Validate MicBridgeUI signing with Windows PowerShell 5.1
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - name: Validate trusted Authenticode digest and tamper rejection
-        shell: pwsh
+      - name: Sign, verify and reject a modified PowerShell UI script
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
-          $work = Join-Path $env:RUNNER_TEMP 'MicBridgeAPO-Authenticode-Test'
+          $work = Join-Path $env:RUNNER_TEMP 'MicBridgeAPO-UI-Authenticode-Test'
           $myStore = 'Cert:\CurrentUser\My'
           $rootStore = 'Cert:\CurrentUser\Root'
           $cert = $null
@@ -34,36 +34,36 @@ jobs:
           New-Item -ItemType Directory -Force -Path $work | Out-Null
 
           try {
-            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MicBridgeAPO Ephemeral Authenticode Test' -CertStoreLocation $myStore -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
-            if ($null -eq $cert -or -not $cert.HasPrivateKey) { throw 'Could not create an ephemeral code-signing certificate with a private key.' }
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MicBridgeAPO Ephemeral UI Authenticode Test' -CertStoreLocation $myStore -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
+            if ($null -eq $cert -or -not $cert.HasPrivateKey) { throw 'Could not create the temporary code-signing certificate.' }
             $thumb = $cert.Thumbprint
 
-            $publicCertPath = Join-Path $work 'test-signing.cer'
+            $publicCertPath = Join-Path $work 'ui-test-signing.cer'
             Export-Certificate -Cert $cert -FilePath $publicCertPath -Force | Out-Null
             Import-Certificate -FilePath $publicCertPath -CertStoreLocation $rootStore | Out-Null
 
-            $scriptPath = Join-Path $work 'signed-test.ps1'
-            [IO.File]::WriteAllText($scriptPath, "Write-Output 'Authenticode test'
-", [Text.UTF8Encoding]::new($false))
+            $scriptPath = Join-Path $work 'MicBridgeUI.ps1'
+            [IO.File]::WriteAllText($scriptPath, "Write-Output 'MicBridgeUI Authenticode test'`r`n", [Text.UTF8Encoding]::new($false))
+
             $signResult = Set-AuthenticodeSignature -FilePath $scriptPath -Certificate $cert -HashAlgorithm SHA256
             $verifyResult = Get-AuthenticodeSignature -FilePath $scriptPath
             if ($signResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
                 $verifyResult.Status -ne [Management.Automation.SignatureStatus]::Valid -or
                 $verifyResult.SignerCertificate.Thumbprint -ne $thumb) {
-              throw "Valid-signature control failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
+              throw "Windows PowerShell 5.1 UI signing failed: sign=$($signResult.Status); verify=$($verifyResult.Status); message=$($verifyResult.StatusMessage)"
             }
-            Write-Host 'VALID SIGNATURE CONTROL PASSED.'
+            Write-Host "WINDOWS POWERSHELL 5.1 UI SIGNATURE VERIFIED: $thumb"
 
-            $tamperedPath = Join-Path $work 'tampered-test.ps1'
+            $tamperedPath = Join-Path $work 'MicBridgeUI-tampered.ps1'
             $bytes = [IO.File]::ReadAllBytes($scriptPath)
-            if ($bytes.Length -lt 2) { throw 'Signed test script is unexpectedly too short.' }
+            if ($bytes.Length -lt 2) { throw 'Signed UI test script is unexpectedly too short.' }
             $bytes[0] = $bytes[0] -bxor 1
             [IO.File]::WriteAllBytes($tamperedPath, $bytes)
             $tamperedResult = Get-AuthenticodeSignature -FilePath $tamperedPath
             if ($tamperedResult.Status -ne [Management.Automation.SignatureStatus]::HashMismatch) {
-              throw "Tamper rejection control failed: expected HashMismatch, got $($tamperedResult.Status); message=$($tamperedResult.StatusMessage)"
+              throw "Modified UI script was not rejected: status=$($tamperedResult.Status); message=$($tamperedResult.StatusMessage)"
             }
-            Write-Host 'TAMPER REJECTION CONTROL PASSED: modified signed content returned HashMismatch.'
+            Write-Host 'UI AUTHENTICODE TAMPER REJECTION PASSED.'
           }
           finally {
             if ($thumb) {
