@@ -209,9 +209,17 @@ function Test-MBLegacyInstallationState {
                     $classification='PreserveDataFile'
                 }
                 $hash=$null
-                if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                $isOperationalLock=($directory.Name -eq 'DataDirectory' -and
+                    $item.FullName.Equals((Join-Path $dataFull 'operation.operation.lock'),[StringComparison]::OrdinalIgnoreCase))
+                if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $classification='ReparsePointPreserved'
+                } elseif($isOperationalLock) {
+                    # The installer holds this exact file with FileShare.None while
+                    # the audit runs. Record its presence without opening or hashing it.
+                    $classification='OperationalLockMetadata'
+                } else {
                     $hash=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
-                } else { $classification='ReparsePointPreserved' }
+                }
                 $findings.Add([pscustomobject]@{Kind='File';Name=$item.Name;Classification=$classification;Path=$item.FullName;ServerPath=$null;Sha256=$hash})
             }
         }
