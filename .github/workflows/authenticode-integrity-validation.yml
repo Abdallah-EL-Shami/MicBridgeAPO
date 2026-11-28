@@ -45,8 +45,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path $work | Out-Null
 
             Write-Stage 'Creating an ephemeral RSA key using .NET CertificateRequest (no New-SelfSignedCertificate provider call).'
-            $rsa = [System.Security.Cryptography.RSA]::Create()
-            $rsa.KeySize = 2048
+            $rsa = [System.Security.Cryptography.RSACryptoServiceProvider]::new(2048)
             $subject = [System.Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridgeAPO Ephemeral UI Authenticode Test')
             $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
               $subject,
