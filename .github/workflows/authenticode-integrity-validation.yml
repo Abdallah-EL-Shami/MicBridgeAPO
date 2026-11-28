@@ -33,33 +33,59 @@ jobs:
 
           $total = [Diagnostics.Stopwatch]::StartNew()
           $work = Join-Path $env:RUNNER_TEMP 'MicBridgeAPO-UI-Authenticode-Test'
-          $myStore = 'Cert:\CurrentUser\My'
-          $rootStore = 'Cert:\CurrentUser\Root'
+          $myStore = $null
+          $rootStore = $null
+          $rsa = $null
           $cert = $null
+          $publicCert = $null
           $thumb = $null
 
           try {
             Write-Stage 'Preparing isolated temporary work directory.'
             New-Item -ItemType Directory -Force -Path $work | Out-Null
-            Write-Stage 'Temporary work directory is ready.'
 
-            Write-Stage 'Starting New-SelfSignedCertificate (RSA 2048, SHA256).'
-            $certificateTimer = [Diagnostics.Stopwatch]::StartNew()
-            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MicBridgeAPO Ephemeral UI Authenticode Test' -CertStoreLocation $myStore -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2) -ErrorAction Stop
-            $certificateTimer.Stop()
-            Write-Stage ("New-SelfSignedCertificate returned after {0:n2}s." -f $certificateTimer.Elapsed.TotalSeconds)
+            Write-Stage 'Creating an ephemeral RSA key using .NET CertificateRequest (no New-SelfSignedCertificate provider call).'
+            $rsa = [System.Security.Cryptography.RSA]::Create()
+            $rsa.KeySize = 2048
+            $subject = [System.Security.Cryptography.X509Certificates.X500DistinguishedName]::new('CN=MicBridgeAPO Ephemeral UI Authenticode Test')
+            $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+              $subject,
+              $rsa,
+              [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+              [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )
+            $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $false)
+            )
+            $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
+                $false
+              )
+            )
+            $ekuOids = [System.Security.Cryptography.OidCollection]::new()
+            [void]$ekuOids.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+            $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($ekuOids, $false)
+            )
 
-            if ($null -eq $cert) { throw 'New-SelfSignedCertificate returned no certificate.' }
-            Write-Stage 'Checking that the temporary certificate has a private key.'
-            if (-not $cert.HasPrivateKey) { throw 'Could not create the temporary code-signing certificate with a private key.' }
+            $cert = $request.CreateSelfSigned((Get-Date).AddMinutes(-5), (Get-Date).AddDays(2))
+            if ($null -eq $cert -or -not $cert.HasPrivateKey) {
+              throw 'The .NET CertificateRequest did not produce a certificate with a private key.'
+            }
             $thumb = $cert.Thumbprint
-            Write-Stage ("Temporary certificate created: {0}" -f $thumb)
+            Write-Stage ("Ephemeral code-signing certificate created: {0}" -f $thumb)
 
-            Write-Stage 'Exporting the public certificate.'
-            $publicCertPath = Join-Path $work 'ui-test-signing.cer'
-            Export-Certificate -Cert $cert -FilePath $publicCertPath -Force | Out-Null
-            Write-Stage 'Importing the public certificate into the ephemeral runner CurrentUser Root store.'
-            Import-Certificate -FilePath $publicCertPath -CertStoreLocation $rootStore | Out-Null
+            Write-Stage 'Adding the private-key certificate to CurrentUser My.'
+            $myStore = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            $myStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $myStore.Add($cert)
+
+            Write-Stage 'Adding only the public certificate to the ephemeral CurrentUser Root store.'
+            $publicCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $rootStore.Add($publicCert)
 
             Write-Stage 'Creating the PowerShell UI test script.'
             $scriptPath = Join-Path $work 'MicBridgeUI.ps1'
@@ -95,12 +121,19 @@ jobs:
           }
           finally {
             Write-Stage 'Cleaning up temporary certificate stores and files.'
-            if ($thumb) {
-              $myCertPath = Join-Path $myStore $thumb
-              $rootCertPath = Join-Path $rootStore $thumb
-              if (Test-Path -LiteralPath $rootCertPath) { Remove-Item -LiteralPath $rootCertPath -Force -ErrorAction SilentlyContinue }
-              if (Test-Path -LiteralPath $myCertPath) { Remove-Item -LiteralPath $myCertPath -Force -ErrorAction SilentlyContinue }
+            if ($thumb -and $null -ne $rootStore) {
+              $matches = $rootStore.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $thumb, $false)
+              foreach ($item in $matches) { $rootStore.Remove($item); $item.Dispose() }
             }
+            if ($thumb -and $null -ne $myStore) {
+              $matches = $myStore.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $thumb, $false)
+              foreach ($item in $matches) { $myStore.Remove($item); $item.Dispose() }
+            }
+            if ($null -ne $rootStore) { $rootStore.Close(); $rootStore.Dispose() }
+            if ($null -ne $myStore) { $myStore.Close(); $myStore.Dispose() }
+            if ($null -ne $publicCert) { $publicCert.Dispose() }
+            if ($null -ne $cert) { $cert.Dispose() }
+            if ($null -ne $rsa) { $rsa.Dispose() }
             if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
             $total.Stop()
             Write-Stage ("Test script finished cleanup. Elapsed: {0:n2}s." -f $total.Elapsed.TotalSeconds)
