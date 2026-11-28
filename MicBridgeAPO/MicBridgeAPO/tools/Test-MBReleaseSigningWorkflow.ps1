@@ -34,17 +34,26 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 if ($release -match '(?im)^\s*push\s*:\s*\r?\n\s*branches\s*:') { throw 'Release signing workflow must never trigger on branch pushes.' }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
-if ($release -notmatch 'Import-Certificate -FilePath \$publicCertPath -CertStoreLocation ''Cert:\\CurrentUser\\Root''' -or
-    $release -notmatch '\$rootCertAdded\s*=\s*\$true' -or
-    $release -notmatch 'if \(\$rootCertAdded -and \(Test-Path -LiteralPath \$rootStorePath\)\) \{ Remove-Item') {
-    throw 'Release signing workflow must temporarily enroll only the pinned release certificate on its isolated runner and remove it during cleanup.'
+if ($release -match '(?i)Cert:\\\\CurrentUser\\\\Root|Import-Certificate|rootCertAdded|rootStorePath') {
+    throw 'Release signing workflow must not promote the self-signed leaf certificate into a trusted Root store.'
 }
-if ($release -notmatch 'WINDOWS POWERSHELL 5[.]1 UI SIGNATURE VERIFIED' -or
+if ($release -notmatch 'terminated in a root certificate which is not trusted by the trust provider' -or
+    $release -notmatch 'SignatureStatus]::UnknownError' -or
+    $release -notmatch 'SignatureStatus]::Valid' -or
+    $release -notmatch 'Authenticode digest or pinned signer verification failed') {
+    throw 'Release signing workflow must accept only Valid or the exact untrusted-root status for the pinned signer, while rejecting digest mismatches.'
+}
+if ($release -notmatch 'AUTHENTICODE NEGATIVE CONTROL PASSED' -or
+    $release -notmatch 'ReadAllBytes\(\$uiScript[.]FullName\)' -or
+    $release -notmatch 'SignatureStatus]::HashMismatch') {
+    throw 'Release signing workflow must prove MicBridgeUI.ps1 content tampering is rejected.'
+}
+if ($release -notmatch 'WINDOWS POWERSHELL 5[.]1 UI SIGNATURE DIGEST AND PINNED SIGNER VERIFIED' -or
     $release -notmatch 'WindowsPowerShell/v1[.]0/powershell[.]exe' -or
     $release -notmatch '\$scriptFile[.]Name -eq ''MicBridgeUI[.]ps1''' -or
-    $release -notmatch 'SignatureStatus]::Valid' -or
-    $release -notmatch '\$verifyResult[.]SignerCertificate[.]Thumbprint -ne \$Thumbprint') {
-    throw 'MicBridgeUI.ps1 must be signed and verified by Windows PowerShell 5.1 with the pinned signer.'
+    $release -notmatch '\$verifyResult[.]SignerCertificate[.]Thumbprint -ne \$Thumbprint' -or
+    $release -notmatch 'MicBridgeUI[.]ps1') {
+    throw 'MicBridgeUI.ps1 must be signed and digest-verified by Windows PowerShell 5.1 with the pinned signer.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
 foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
