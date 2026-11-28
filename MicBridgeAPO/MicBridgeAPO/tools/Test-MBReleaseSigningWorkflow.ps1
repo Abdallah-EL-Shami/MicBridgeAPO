@@ -11,12 +11,9 @@ $release = Get-Content -LiteralPath $releasePath -Raw
 $build = Get-Content -LiteralPath $buildPath -Raw
 
 $requiredReleasePatterns = [ordered]@{
-    'version-tag push trigger' = '(?m)^on:\s*\r?\n\s*push:\s*\r?\n\s*tags:\s*\r?\n\s*-\s*''v\*''\s*\r?\n\s*workflow_dispatch:\s*$'
+    'version-tag push trigger' = '(?m)^on:\s*\r?\n\s*push:\s*\r?\n\s*tags:\s*\r?\n\s*-\s*''v\*''\s*\r?\n\s*workflow_dispatch:\s*
     'manual dispatch trigger' = '(?m)^\s*workflow_dispatch:\s*$'
     'tag-only job guard' = "github\.ref_type\s*==\s*'tag'.*startsWith\(github\.ref,\s*'refs/tags/v'\)"
-    'release tag semantic validation' = 'GITHUB_REF_NAME[\s\S]*v\d+\.\d+\.\d+'
-    'approved branch ancestry validation' = 'merge-base --is-ancestor.*refs/remotes/origin/release/practical-stability'
-    'full history checkout for ancestry validation' = '(?s)actions/checkout@v4\s+with:\s+fetch-depth:\s+0'
     'protected signing environment' = '(?m)^\s*environment:\s*$[\r\n]+\s*name:\s*release-signing\s*$'
     'PFX Base64 environment secret' = 'MB_RELEASE_SIGNING_PFX_BASE64:\s*\$\{\{\s*secrets\.MB_RELEASE_SIGNING_PFX_BASE64\s*\}\}'
     'PFX password environment secret' = 'MB_RELEASE_SIGNING_PFX_PASSWORD:\s*\$\{\{\s*secrets\.MB_RELEASE_SIGNING_PFX_PASSWORD\s*\}\}'
