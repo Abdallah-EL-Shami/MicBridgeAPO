@@ -31,21 +31,17 @@ foreach ($entry in $requiredReleasePatterns.GetEnumerator()) {
 }
 if ($release -match '(?im)^\s*pull_request\s*:') { throw 'Release signing workflow must never subscribe to pull_request.' }
 if ($release -match '(?i)upload-artifact[\s\S]{0,500}\.pfx') { throw 'Private PFX material must never be uploaded as an artifact.' }
-if ($release -match '(?i)X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
-    throw 'Release signing workflow must not mutate CurrentUser Root or TrustedPublisher trust stores.'
+if ($release -notmatch "Import-Certificate -FilePath \$publicCertPath -CertStoreLocation 'Cert:\\CurrentUser\\Root'" -or
+    $release -notmatch '\$rootCertAdded\s*=\s*\$true' -or
+    $release -notmatch 'if \(\$rootCertAdded -and \(Test-Path -LiteralPath \$rootStorePath\)\) \{ Remove-Item') {
+    throw 'Release signing workflow must temporarily enroll only the pinned release certificate on its isolated runner and remove it during cleanup.'
 }
-if ($release -notmatch 'SignatureStatus]::NotTrusted' -or
-    $release -notmatch 'SignatureStatus]::UnknownError' -or
-    $release -notmatch 'A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider[.]' -or
-    $release -notmatch '\$signerThumb\s*-ne\s*\$thumb') {
-    throw 'Release signing workflow must accept only the exact pinned self-signed-root Authenticode result, not arbitrary UnknownError statuses.'
-}
-if ($release -notmatch 'AUTHENTICODE SIGNATURE RESULT ACCEPTED ONLY AS PINNED SIGNER WITH UNTRUSTED ROOT' -or
-    $release -notmatch 'SignerCertificate[.]Thumbprint\s*-eq\s*\$thumb') {
-    throw 'Release signing workflow must distinguish cryptographic signer pinning from certificate trust and constrain UnknownError to the pinned signer.'
-}
-if ($release -match 'X509Store|StoreLocation]::CurrentUser\\(Root|TrustedPublisher)|\.Add\(\$publicCert\)|\.Remove\(\$publicCert\)') {
-    throw 'Release signing workflow must not add the certificate to a Windows trust store.'
+if ($release -notmatch 'WINDOWS POWERSHELL 5[.]1 UI SIGNATURE VERIFIED' -or
+    $release -notmatch 'WindowsPowerShell/v1[.]0/powershell[.]exe' -or
+    $release -notmatch "\$scriptFile[.]Name -eq 'MicBridgeUI[.]ps1'" -or
+    $release -notmatch 'SignatureStatus]::Valid' -or
+    $release -notmatch 'SignerCertificate[.]Thumbprint -ne \$thumb') {
+    throw 'MicBridgeUI.ps1 must be signed and verified by Windows PowerShell 5.1 with the pinned signer.'
 }
 if ($release -notmatch 'MicBridge\.InstallTransactionReceipt\.psm1') { throw 'Signed release package must stage the machine-bound transaction receipt module.' }
 foreach ($testName in @('Test-MBInstallTransactionReceipt[.]ps1','Test-MBInstallerProvenanceGate[.]ps1')) {
