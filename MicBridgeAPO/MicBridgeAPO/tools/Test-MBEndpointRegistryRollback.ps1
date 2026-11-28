@@ -28,6 +28,8 @@ try {
     $productionJson = ConvertTo-Json -InputObject $productionSnapshot -Depth 10
     $productionRoundTrip = $productionJson | ConvertFrom-Json
     if (-not (Test-MBEndpointRegistrySnapshot $productionRoundTrip)) { throw 'FAIL: JSON-round-tripped production-shaped endpoint snapshot did not verify' }
+    Restore-MBEndpointRegistrySnapshot -Snapshot $productionRoundTrip | Out-Null
+    if (-not (Test-MBEndpointRegistrySnapshot $productionRoundTrip)) { throw 'FAIL: direct exact-match restore changed or failed to preserve the endpoint snapshot' }
     $noopJournal = Join-Path $root 'endpoint-noop-recovery.json'
     New-MBRecoveryJournal -Path $noopJournal -Operation InstallRollback -DeviceId ([guid]::NewGuid()) -StepIds @('RestoreEndpointValues') | Out-Null
     $noopDevice = (Read-MBRecoveryJournal -Path $noopJournal).DeviceId
