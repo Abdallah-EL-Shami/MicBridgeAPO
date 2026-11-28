@@ -25,7 +25,7 @@ function Read-Status {
     return $h
 }
 function Get-Enabled {
-    try { return -not ((Get-Content $ctrlFile -Raw) -match 'Enabled\\s*=\\s*0') } catch { return $true }
+    try { return -not ((Get-Content $ctrlFile -Raw) -match 'Enabled\s*=\s*0') } catch { return $true }
 }
 function Set-Enabled([int]$v) { [IO.File]::WriteAllText($ctrlFile, "[Control]`r`nEnabled=$v`r`n") }
 function Num($h, $k) { try { return [double]::Parse($h[$k], $inv) } catch { return 0 } }
