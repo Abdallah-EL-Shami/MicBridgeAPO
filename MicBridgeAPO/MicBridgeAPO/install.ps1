@@ -529,12 +529,13 @@ New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 if ($partialBaselineDetected) {
     $partialBaselineHash = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
     $partialArchivePath = Join-Path $dataDir ("install-baseline-v2.incomplete-" + $partialBaselineHash.Substring(0,12) + "-" + [guid]::NewGuid().ToString('N') + ".json")
-    [IO.File]::Copy($backupFile,$partialArchivePath,$false)
+    # Same-directory rename preserves the original bytes, timestamps, and ACL;
+    # verify the archived file after the atomic move before creating a new baseline.
+    [IO.File]::Move($backupFile,$partialArchivePath)
     $partialArchiveHash = (Get-FileHash -LiteralPath $partialArchivePath -Algorithm SHA256 -ErrorAction Stop).Hash
     if (-not $partialArchiveHash.Equals($partialBaselineHash,[StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Incomplete baseline evidence copy failed SHA-256 verification; original baseline was retained and installation stopped.'
+        throw 'Incomplete baseline evidence archive failed SHA-256 verification; the archived file was retained and installation stopped.'
     }
-    Remove-Item -LiteralPath $backupFile -Force -ErrorAction Stop
     Write-UpgradeLog 'INFO' "Preserved incomplete baseline evidence at '$partialArchivePath'; SHA256=$partialArchiveHash."
 }
 if (-not (Test-Path $backupFile)) {
