@@ -390,38 +390,72 @@ class MicBridgeAPO : public IAudioProcessingObject,
                      public IAudioProcessingObjectRT,
                      public IAudioProcessingObjectConfiguration,
                      public IAudioSystemEffects {
+    class NonDelegatingUnknown final : public IUnknown {
+    public:
+        explicit NonDelegatingUnknown(MicBridgeAPO* owner) : m_owner(owner) {}
+        STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+            return m_owner->NonDelegatingQueryInterface(iid, ppv);
+        }
+        STDMETHOD_(ULONG, AddRef)() override { return m_owner->NonDelegatingAddRef(); }
+        STDMETHOD_(ULONG, Release)() override { return m_owner->NonDelegatingRelease(); }
+    private:
+        MicBridgeAPO* m_owner;
+    };
+
 public:
-    MicBridgeAPO() { ++g_objects; }
+    explicit MicBridgeAPO(IUnknown* outer = nullptr)
+        : m_outer(outer), m_nonDelegatingUnknown(this) { ++g_objects; }
     virtual ~MicBridgeAPO() { StopBridge(); --g_objects; }
 
-    // IUnknown
+    // Public interface IUnknown delegates identity and lifetime to the outer
+    // object when aggregated. The inner unknown remains non-delegating.
     STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+        if (m_outer) return m_outer->QueryInterface(iid, ppv);
+        return NonDelegatingQueryInterface(iid, ppv);
+    }
+    STDMETHOD_(ULONG, AddRef)() override {
+        return m_outer ? m_outer->AddRef() : NonDelegatingAddRef();
+    }
+    STDMETHOD_(ULONG, Release)() override {
+        return m_outer ? m_outer->Release() : NonDelegatingRelease();
+    }
+
+private:
+    friend class Factory;
+
+    HRESULT NonDelegatingQueryInterface(REFIID iid, void** ppv) {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
-        HRESULT hr = E_NOINTERFACE;
-        if (iid == __uuidof(IUnknown) || iid == __uuidof(IAudioProcessingObject))
+        if (iid == __uuidof(IUnknown)) {
+            *ppv = static_cast<IUnknown*>(&m_nonDelegatingUnknown);
+            NonDelegatingAddRef();
+        } else if (iid == __uuidof(IAudioProcessingObject)) {
             *ppv = static_cast<IAudioProcessingObject*>(this);
-        else if (iid == __uuidof(IAudioProcessingObjectRT))
-            *ppv = static_cast<IAudioProcessingObjectRT*>(this);
-        else if (iid == __uuidof(IAudioProcessingObjectConfiguration))
-            *ppv = static_cast<IAudioProcessingObjectConfiguration*>(this);
-        else if (iid == __uuidof(IAudioSystemEffects))
-            *ppv = static_cast<IAudioSystemEffects*>(this);
-        if (*ppv) {
             AddRef();
-            hr = S_OK;
+        } else if (iid == __uuidof(IAudioProcessingObjectRT)) {
+            *ppv = static_cast<IAudioProcessingObjectRT*>(this);
+            AddRef();
+        } else if (iid == __uuidof(IAudioProcessingObjectConfiguration)) {
+            *ppv = static_cast<IAudioProcessingObjectConfiguration*>(this);
+            AddRef();
+        } else if (iid == __uuidof(IAudioSystemEffects)) {
+            *ppv = static_cast<IAudioSystemEffects*>(this);
+            AddRef();
         }
         wchar_t iidText[40] = {};
         StringFromGUID2(iid, iidText, ARRAYSIZE(iidText));
-        Log("MicBridgeAPO::QueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
+        const HRESULT hr = *ppv ? S_OK : E_NOINTERFACE;
+        Log("MicBridgeAPO::NonDelegatingQueryInterface iid=%ls hr=0x%08X", iidText, (unsigned)hr);
         return hr;
     }
-    STDMETHOD_(ULONG, AddRef)() override { return (ULONG)++m_ref; }
-    STDMETHOD_(ULONG, Release)() override {
-        long r = --m_ref;
-        if (r == 0) delete this;
-        return (ULONG)r;
+    ULONG NonDelegatingAddRef() { return (ULONG)++m_ref; }
+    ULONG NonDelegatingRelease() {
+        const long refs = --m_ref;
+        if (refs == 0) delete this;
+        return (ULONG)refs;
     }
+
+public:
 
     // IAudioProcessingObject (كانت في الفئة الأساسية، ننفذها بأنفسنا)
     STDMETHOD(Reset)() override {
@@ -1004,19 +1038,19 @@ public:
             return E_POINTER;
         }
         *ppv = nullptr;
-        if (outer) {
-            Log("ClassFactory::CreateInstance rejected aggregation outer=%p iid=%ls", outer, iidText);
+        if (outer && iid != __uuidof(IUnknown)) {
+            Log("ClassFactory::CreateInstance rejected invalid aggregated IID=%ls", iidText);
             return CLASS_E_NOAGGREGATION;
         }
-        Log("ClassFactory::CreateInstance requested iid=%ls", iidText);
-        MicBridgeAPO* o = new (std::nothrow) MicBridgeAPO();
+        Log("ClassFactory::CreateInstance requested iid=%ls aggregation=%d", iidText, outer != nullptr);
+        MicBridgeAPO* o = new (std::nothrow) MicBridgeAPO(outer);
         if (!o) {
             Log("ClassFactory::CreateInstance allocation failed: E_OUTOFMEMORY");
             return E_OUTOFMEMORY;
         }
-        HRESULT hr = o->QueryInterface(iid, ppv);
-        Log("ClassFactory::CreateInstance QI hr=0x%08X", (unsigned)hr);
-        o->Release();
+        HRESULT hr = o->NonDelegatingQueryInterface(iid, ppv);
+        Log("ClassFactory::CreateInstance nondelegating QI hr=0x%08X", (unsigned)hr);
+        o->NonDelegatingRelease();
         return hr;
     }
     STDMETHOD(LockServer)(BOOL lock) override {
